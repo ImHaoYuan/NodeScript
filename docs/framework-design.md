@@ -679,7 +679,7 @@ FrameSource (SPI)
 
 
 ### 9.7 OCR（P1）与插件（P2）
-- `OcrProvider` SPI：P1 内置 MLKit 插件基准实现（可下载模型）；插件以独立 `:plugin:*` 模块 + 清单注册，native addon 走 `:node-runtime-build` 交叉编译管线（arm64 `.node`）。
+- `OcrProvider` SPI：**不内置 OCR 实现（2026-09-26 拍板）**——MLKit 插件基准实现（可下载模型）不做；`OcrProvider` 只保留可替换接缝（§2/§6），有需要的脚本自带外部方案。插件以独立 `:plugin:*` 模块 + 清单注册，native addon 走 `:node-runtime-build` 交叉编译管线（arm64 `.node`）。
 - 插件加载: P2，plugin.json 声明 require 钩子/资源/权限；市场脚本不可加载任意插件（白名单）。**沙箱已裁（§18 第 1 项）** —— 这条白名单是能力面的，不再有"引到 QuickJS 子集"的去处。
 
 ---
@@ -917,7 +917,7 @@ const offF = auto.npm.onFinished(f => f.success ? done() : fail(f.detail)); // �
 - `auto.device` / `auto.app` / `auto.shell` / `auto.rootAutomator`
 - `auto.clipboard` / `auto.notification` / `auto.sensors` / `auto.media`
 - `auto.datastore` / `auto.settings`  / `auto.zip`
-- `auto.ocr`（P1）/ `auto.plugins`（P2）/ `auto.workManager`（定时/Intent 任务）
+- ~~`auto.ocr`（P1）~~ **不内置（2026-09-26 拍板，见 §9.7）** / `auto.plugins`（P2）/ `auto.workManager`（定时/Intent 任务）
 - `auto.power`（脚本电源：`power_manager` 桥面的 `acquire`/`release`/`status`，§8.7）
 - `auto.npm`（包管理与依赖生态，§10：install/ci/list/audit/offlineGap/importOfflineBundle/requestApprove——审批人机分离；事件面 `onProgress`/`onApproval`/`onWarning`/`onFinished` 四方法，wire 走 `events`/`approvals` 两个拉取口而非推送，§10.7）
 - Node 内建：`fs/path/http/os/process` 等**完整可用**（除 `child_process` 显式报 `ERR_NOT_IMPLEMENTED`）；`@autojs/*` npm 包 SDK（`@autojs/opencv` 对齐 Pro）。
@@ -1181,7 +1181,7 @@ offQe();
 - `libopencv.so` 全图像管线的 P1 算子已全落（剩桥面消费方）；**找色已落地**（2026-09-25，§9.2：单色 + 逐分量容差 + 可选区域 + 首个命中，四层同改，`x=-1` 哨兵与“扫过 0 像素”两条口径），模板匹配 + `decode`/`release` 亦已随 §9.2 落地，**灰度、裁剪、缩放、旋转与特征已落计算核**（2026-09-25：`imgnative_gray` 产出新帧 + 28 例；`imgnative_crop` 尺寸会变的产出 + 复用区域判据 + 真拷贝 + 46 例；`imgnative_resize` 目标尺寸入参 + 固定 LINEAR + 配额 + 45 例；`imgnative_rotate` 逆时针角度 + expand 包络画布 + 帧中心 + 45 例；`imgnative_feature` ORB+ratio+几何一致性只回坐标 + 32 例 host 断言；五者桥面刻意未开——脚本侧没有消费方，P1 native 面收官）；MediaProjection 会话式截屏/录屏仍待（换 producer 即插）。
 - `ui` 原生 XML UI 宿主 + `ui_web` WebView JS 桥 + 悬浮窗。
 - datastore SQLite、settings、sensors、notification、app Intent、zip、power_manager（**已落地**，见 §8.7；clipboard 亦已落地 §12.2 第五条独立缝，sensors 亦已落地 §12.2 第六条独立缝，images 桥面与 native 实现均已落地 §12.2 第七条独立缝 —— `libopencv.so`（OpenCV 4.14 静态链接，`node-runtime-build/scripts/build-opencv.sh` + `.github/workflows/image-native.yml`）+ `NativeImageAnalyzer`/`JniOps`（`:platform:system`）+ `PlatformWiring.of` 三件套齐全，so 缺位时桥回 `ERR_NOT_IMPLEMENTED`）。
-- OCR (MLKit 插件基准实现) + `OcrProvider`。
+- ~~OCR (MLKit 插件基准实现)~~ **不内置（2026-09-26 拍板，见 §9.7）** + `OcrProvider`（只保留接缝）。
 - 插件框架骨架 + 打包合并插件资产。
 - npm P1（§10.11）：spawn 桥 polyfill + **lifecycle 脚本真实执行**（§18 第 7 项口径：不做出厂卡口、安装时让用户自己选，不是"批准后才跑"的审批流）+ npm 终端 + 在线/OSV 离线审计 + node-shim 红测。（原「QuickJS 白名单库独立 vendored」随第 1 项沙箱裁掉。）
 
