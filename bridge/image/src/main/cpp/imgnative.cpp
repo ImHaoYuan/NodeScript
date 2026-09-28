@@ -1,7 +1,7 @@
 // bridge/image —— libopencv.so 的 C++ 面（docs/framework-design.md §9.2）
 //
 // 职责边界（与 :domain 的 ImageAnalyzer SPI 逐条对齐）：
-//   - 只做十一件事：decode 一帧（**顺带把帧归一成 4 通道 BGRA**）、
+//   - 只做十件事：decode 一帧（**顺带把帧归一成 4 通道 BGRA**）、
 //     ingest 一屏已在内存的 RGBA 像素（§18-8(b) 截屏帧进同一帧表）、管帧表、
 //     按阈值做模板匹配、按容差找色、取灰度信息面（**产出新帧**）、
 //     按区域取子图（**产出新帧**）、按尺寸缩放（**产出新帧**）、
@@ -56,7 +56,7 @@ constexpr int IMG_ERR_INVALID_PARAM = 4;
 /** `color` 未命中的 x 哨兵（0,0 是合法首像素坐标，不能拿它当"没有"）。 */
 constexpr int32_t IMG_MISS = -1;
 
-// 调用方必须已持 g_mu（九个入口的帧表段都在锁内）。
+// 调用方必须已持 g_mu（十个入口的帧表段都在锁内）。
 cv::Mat* find_locked(int64_t ref) {
     auto it = g_frames.find(ref);
     return it == g_frames.end() ? nullptr : &it->second;

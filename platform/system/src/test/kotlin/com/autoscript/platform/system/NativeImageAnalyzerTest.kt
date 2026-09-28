@@ -1,6 +1,7 @@
 package com.autoscript.platform.system
 
 import com.autoscript.domain.automation.ColorHit
+import com.autoscript.domain.automation.FeatureHit
 import com.autoscript.domain.automation.ImageAnalyzer
 import com.autoscript.domain.automation.ImageMatch
 import com.autoscript.domain.bridge.HandleRef
@@ -102,6 +103,65 @@ class NativeImageAnalyzerTest {
             status[0] = ingestStatus
             if (ingestStatus != 0) return null
             return ingestResult ?: Triple(nextNativeRef++, width, height)
+        }
+
+        var transformStatus = 0
+        var transformResult: Triple<Long, Int, Int>? = null
+        data class TransformCall(
+            val frame: Long,
+            val region: IntArray? = null,
+            val width: Int = 0,
+            val height: Int = 0,
+            val degrees: Double = 0.0,
+        )
+
+        val transformCalls = mutableListOf<TransformCall>()
+
+        override fun gray(nativeFrame: Long, status: IntArray): Triple<Long, Int, Int>? {
+            transformCalls += TransformCall(nativeFrame)
+            status[0] = transformStatus
+            if (transformStatus != 0) return null
+            return transformResult ?: Triple(nextNativeRef++, 640, 480)
+        }
+
+        override fun crop(nativeFrame: Long, region: IntArray, status: IntArray): Triple<Long, Int, Int>? {
+            transformCalls += TransformCall(nativeFrame, region = region)
+            status[0] = transformStatus
+            if (transformStatus != 0) return null
+            return transformResult ?: Triple(nextNativeRef++, 320, 240)
+        }
+
+        override fun resize(
+            nativeFrame: Long,
+            width: Int,
+            height: Int,
+            status: IntArray,
+        ): Triple<Long, Int, Int>? {
+            transformCalls += TransformCall(nativeFrame, width = width, height = height)
+            status[0] = transformStatus
+            if (transformStatus != 0) return null
+            return transformResult ?: Triple(nextNativeRef++, width, height)
+        }
+
+        override fun rotate(
+            nativeFrame: Long,
+            degrees: Double,
+            status: IntArray,
+        ): Triple<Long, Int, Int>? {
+            transformCalls += TransformCall(nativeFrame, degrees = degrees)
+            status[0] = transformStatus
+            if (transformStatus != 0) return null
+            return transformResult ?: Triple(nextNativeRef++, 480, 640)
+        }
+
+        var featureResult: FeatureHit? = null
+        var featureStatus = 0
+        val featureCalls = mutableListOf<Pair<Long, Long>>()
+
+        override fun feature(scene: Long, template: Long, status: IntArray): FeatureHit? {
+            featureCalls += scene to template
+            status[0] = featureStatus
+            return if (featureStatus == 0) featureResult else null
         }
     }
 

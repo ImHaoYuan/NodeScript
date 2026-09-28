@@ -7,8 +7,8 @@
 #   2) ABI/平台：ELF 机器为 AArch64、类型 ET_DYN（PIE/.so）；
 #   3) NEEDED 白名单：只许 libc/libdl/libm/liblog/libc++_shared（装载面已知）——
 #      **不许 libopencv_*.so**（静态链接的全部意义：不把 opencv 共享库推给装载面）；
-#   4) JNI 符号面：五个 `Java_com_autoscript_platform_system_JniOps_*`
-#      （decode/match/release/color）逐个在场。
+#   4) JNI 符号面：十个 `Java_com_autoscript_platform_system_JniOps_*`
+#      （decode/ingest/match/release/color/gray/crop/resize/rotate/feature）逐个在场。
 set -euo pipefail
 
 READELF="${1:?缺 llvm-readelf 路径}"
@@ -62,10 +62,11 @@ echo "[OK] $(basename "$SO"): NEEDED = ${needed[*]}"
 # `UnsatisfiedLinkError` 现形。本机已吃过一次近失：手边那份产物早于 findColor
 # 提交 87 分钟、`colorNative` **0 个**，而它照样是合法 AArch64 ELF、LOAD 对齐、
 # NEEDED 干净 —— 那三条门禁一条都不会红。"手边的产物是新的"这种判断不能靠
-# 目录列表，得靠符号逐个在场。
+# 目录列表，得靠符号逐个在场。P1 五算子（2026-09-29）后符号面 = 十个：
+# gray/crop/resize/rotate/feature 随 images_jni.cc 与 JniOps 类体同批增长。
 #
-# 五处名字的来源（改必须同批）：`bridge/image/src/main/cpp/images_jni.cc` 的五个
-# JNIEXPORT ↔ `:platform:system` 的顶层 `JniOps` 类五个 external fun
+# 十处名字的来源（改必须同批）：`bridge/image/src/main/cpp/images_jni.cc` 的十个
+# JNIEXPORT ↔ `:platform:system` 的顶层 `JniOps` 类十个 external fun
 # （包名 com.autoscript.platform.system + **声明类 JniOps** —— 缺省 JNI 改编按声明类
 # 找符号，不是按注释里的类名；`bridge/js/test/jni-names.test.cjs` 本机先钉）。
 [ -x "$NM" ] || fail "缺 llvm-nm: $NM（第 4 条断言需要它；第三个参数之外再传一个）"
@@ -76,7 +77,7 @@ echo "[OK] $(basename "$SO"): NEEDED = ${needed[*]}"
 # 调度就红，且红得没有道理。用 bash 的 `case` 做子串匹配，不引管道也不挑 grep。
 nm_syms="$("$NM" -D --defined-only "$SO")"
 missing=()
-for sym in decodeNative ingestNative matchNative releaseNative colorNative; do
+for sym in decodeNative ingestNative matchNative releaseNative colorNative grayNative cropNative resizeNative rotateNative featureNative; do
     full="Java_com_autoscript_platform_system_JniOps_${sym}"
     case "$nm_syms" in
         *"$full"*) ;;
@@ -87,5 +88,5 @@ if [ "${#missing[@]}" -gt 0 ]; then
     printf '%s\n' "${missing[@]}" | sed 's/^/  缺符号: /' >&2
     fail "$SO 的 JNI 符号面不全（Kotlin external fun 与 images_jni.cc 对不上：dlopen 后 UnsatisfiedLinkError）"
 fi
-echo "[OK] $(basename "$SO"): JNI 五个符号逐个在场（decode/ingest/match/release/color）"
+echo "[OK] $(basename "$SO"): JNI 十个符号逐个在场（decode/ingest/match/release/color/gray/crop/resize/rotate/feature）"
 echo "[OK] 门禁通过：16KB LOAD 对齐 / AArch64+DYN / NEEDED 白名单（OpenCV 已静态链入）/ JNI 符号面"

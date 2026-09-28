@@ -1,6 +1,7 @@
 package com.autoscript.platform.capabilities
 
 import com.autoscript.domain.automation.ColorHit
+import com.autoscript.domain.automation.FeatureHit
 import com.autoscript.domain.automation.ImageAnalyzer
 import com.autoscript.domain.automation.ImageFrame
 import com.autoscript.domain.automation.ImageMatch
@@ -204,7 +205,7 @@ class CapabilityNamespacesTest {
 
         val unknown = assertInstanceOf(
             BridgeResponse.Err::class.java,
-            handler.handle(BridgeRequest(11, "images", "toGrayscale", "{}", 5_000)),
+            handler.handle(BridgeRequest(11, "images", "captureScreen", "{}", 5_000)),
         )
         assertEquals(ErrorCode.ERR_NOT_IMPLEMENTED.code, unknown.errorCode, "未开桥面的操作不猜")
         assertEquals(11L, unknown.id)
@@ -233,5 +234,18 @@ class CapabilityNamespacesTest {
             tolerance: Int,
             region: List<Int>?,
         ): ColorHit? = null
+
+        override suspend fun toGrayscale(frame: HandleRef): ImageFrame = ImageFrame(HandleRef(1, 1), 1080, 2400)
+
+        override suspend fun crop(frame: HandleRef, region: List<Int>): ImageFrame =
+            ImageFrame(HandleRef(1, 1), 1080, 2400)
+
+        override suspend fun resize(frame: HandleRef, width: Int, height: Int): ImageFrame =
+            ImageFrame(HandleRef(1, 1), 1080, 2400)
+
+        override suspend fun rotate(frame: HandleRef, degrees: Double): ImageFrame =
+            ImageFrame(HandleRef(1, 1), 1080, 2400)
+
+        override suspend fun findFeature(scene: HandleRef, template: HandleRef): FeatureHit? = null
     }
 }

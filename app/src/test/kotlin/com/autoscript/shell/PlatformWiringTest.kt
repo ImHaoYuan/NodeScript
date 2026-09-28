@@ -4,6 +4,7 @@ import com.autoscript.appservice.scheduler.core.InMemoryIntentLog
 import com.autoscript.appservice.scheduler.core.SchedulerProvider
 import com.autoscript.appservice.scheduler.core.TriggerHandle
 import com.autoscript.domain.automation.ColorHit
+import com.autoscript.domain.automation.FeatureHit
 import com.autoscript.domain.automation.ImageAnalyzer
 import com.autoscript.domain.automation.ImageFrame
 import com.autoscript.domain.automation.ImageMatch
@@ -132,6 +133,11 @@ class PlatformWiringTest {
         val released = mutableListOf<HandleRef>()
         private var nextRefId = 1L
         private val live = mutableSetOf<Long>()
+        private fun requireLive(h: HandleRef) {
+            if (h.generation != 1L || h.refId !in live) {
+                throw AutojsException(ErrorCode.ERR_STALE_HANDLE, "帧 ${h.refId} 不在场")
+            }
+        }
         override suspend fun decode(path: String): ImageFrame {
             failWith?.let { throw it }
             decoded += path
@@ -174,6 +180,40 @@ class PlatformWiringTest {
         ): ColorHit? {
             colorCalls += color
             return colorHit
+        }
+
+        override suspend fun toGrayscale(frame: HandleRef): ImageFrame {
+            requireLive(frame)
+            val id = nextRefId++
+            live += id
+            return ImageFrame(HandleRef(id, 1), 640, 480)
+        }
+
+        override suspend fun crop(frame: HandleRef, region: List<Int>): ImageFrame {
+            requireLive(frame)
+            val id = nextRefId++
+            live += id
+            return ImageFrame(HandleRef(id, 1), 640, 480)
+        }
+
+        override suspend fun resize(frame: HandleRef, width: Int, height: Int): ImageFrame {
+            requireLive(frame)
+            val id = nextRefId++
+            live += id
+            return ImageFrame(HandleRef(id, 1), width, height)
+        }
+
+        override suspend fun rotate(frame: HandleRef, degrees: Double): ImageFrame {
+            requireLive(frame)
+            val id = nextRefId++
+            live += id
+            return ImageFrame(HandleRef(id, 1), 640, 480)
+        }
+
+        override suspend fun findFeature(scene: HandleRef, template: HandleRef): FeatureHit? {
+            requireLive(scene)
+            requireLive(template)
+            return null
         }
     }
 

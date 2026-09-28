@@ -14,7 +14,12 @@
  * 5. 错误不折叠：ERR_FILE_NOT_FOUND / ERR_IO 原码透传（不是参数错）；
  * 6. 帧句柄纪律：未知/跨代/放过的帧再放 → ERR_STALE_HANDLE（放掉即从在场面表移除，
  *    与 ScreenshotSource.recycle 同口径）、匹配用已释放的帧 → ERR_STALE_HANDLE；
- * 7. 别名不猜：toGrayscale/crop/pixel/captureScreen/rotate → ERR_NOT_IMPLEMENTED。
+ * 7. 别名不猜：pixel/captureScreen → ERR_NOT_IMPLEMENTED（五算子 2026-09-29 开通，
+ *    只剩没开桥面的两个不猜）。
+ * 8. P1 图像桥消费方五算子（§9.2 末推演兑现）：toGrayscale/crop/resize/rotate 发
+ *    `{source}` → `{ref,width,height}`（与 decode 同形，宽高随产出帧真值）、
+ *    findFeature 发 `{scene,template}` → `{x,y,confidence}` 或裸 null；产出帧与
+ *    decode 帧同一张表（recycle 打 images/release、放掉后再变换 STALE）。
  */
 const assert = require('node:assert/strict')
 const { test } = require('node:test')
@@ -61,7 +66,9 @@ function installMockImages() {
     return err('ERR_NOT_IMPLEMENTED', `未知 screen 方法: ${method}`)
   }
   installMockImages.colors = []
-  installMockImages.reset = () => { nextRefId = 1; live.clear(); sizes.clear(); seen.length = 0; installMockImages.matches.length = 0; installMockImages.colors.length = 0; mock.miss = false; mock.fail = null }
+  installMockImages.transforms = []
+  installMockImages.features = []
+  installMockImages.reset = () => { nextRefId = 1; live.clear(); sizes.clear(); seen.length = 0; installMockImages.matches.length = 0; installMockImages.colors.length = 0; installMockImages.transforms.length = 0; installMockImages.features.length = 0; mock.miss = false; mock.fail = null }
   auto.install((ns, method, payloadJson, reqId) => {
     if (ns === 'screen') return handleScreen(method, payloadJson ? JSON.parse(payloadJson) : null, reqId)
     if (ns !== 'images') return undefined
@@ -126,6 +133,69 @@ function installMockImages() {
         installMockImages.colors.push({ haystack, color: p.color, tolerance: p.tolerance, region: p.region ?? null })
         if (mock.miss) return ok('null')
         return ok(JSON.stringify({ x: 120, y: 340, r: 18, g: 52, b: 86, a: 255 }))
+      }
+      case 'toGrayscale': {
+        const source = rawOf(p?.source)
+        if (!source) return err('ERR_INVALID_PARAM', '缺 source 字段')
+        if (!alive(source)) return err('ERR_STALE_HANDLE', 'images toGrayscale 的帧句柄已释放')
+        if (mock.fail) return err(mock.fail.code, mock.fail.detail)
+        const dim = sizes.get(source.refId)
+        const ref = issue(dim.width, dim.height)
+        installMockImages.transforms.push({ source })
+        return ok(JSON.stringify({ ref, width: dim.width, height: dim.height }))
+      }
+      case 'crop': {
+        const source = rawOf(p?.source)
+        const region = p?.region
+        if (!source || !Array.isArray(region) || region.length !== 4
+          || region.some((c) => !Number.isInteger(c))) {
+          return err('ERR_INVALID_PARAM', 'crop 缺 source 或 region 非四整数')
+        }
+        if (!alive(source)) return err('ERR_STALE_HANDLE', 'images crop 的帧句柄已释放')
+        if (mock.fail) return err(mock.fail.code, mock.fail.detail)
+        const ref = issue(region[2], region[3])
+        installMockImages.transforms.push({ source, region })
+        return ok(JSON.stringify({ ref, width: region[2], height: region[3] }))
+      }
+      case 'resize': {
+        const source = rawOf(p?.source)
+        const w = p?.width
+        const h = p?.height
+        // 整数域：非整数/非正/超配额一律参数错（1.5 不悄悄截断，与 Kotlin requiredLong 同口径）
+        if (!source || !Number.isInteger(w) || !Number.isInteger(h)
+          || w <= 0 || h <= 0 || w > 16384 || h > 16384) {
+          return err('ERR_INVALID_PARAM', 'resize 缺 source 或尺寸非 (0,16384] 整数')
+        }
+        if (!alive(source)) return err('ERR_STALE_HANDLE', 'images resize 的帧句柄已释放')
+        if (mock.fail) return err(mock.fail.code, mock.fail.detail)
+        const ref = issue(w, h)
+        installMockImages.transforms.push({ source, width: w, height: h })
+        return ok(JSON.stringify({ ref, width: w, height: h }))
+      }
+      case 'rotate': {
+        const source = rawOf(p?.source)
+        const degrees = p?.degrees
+        if (!source || typeof degrees !== 'number' || !Number.isFinite(degrees)) {
+          return err('ERR_INVALID_PARAM', 'rotate 缺 source 或 degrees 非有限数字')
+        }
+        if (!alive(source)) return err('ERR_STALE_HANDLE', 'images rotate 的帧句柄已释放')
+        if (mock.fail) return err(mock.fail.code, mock.fail.detail)
+        const dim = sizes.get(source.refId)
+        const ref = issue(dim.width, dim.height)
+        installMockImages.transforms.push({ source, degrees })
+        return ok(JSON.stringify({ ref, width: dim.width, height: dim.height }))
+      }
+      case 'findFeature': {
+        const scene = rawOf(p?.scene)
+        const template = rawOf(p?.template)
+        if (!scene || !template) return err('ERR_INVALID_PARAM', '缺 scene/template')
+        if (!alive(scene) || !alive(template)) {
+          return err('ERR_STALE_HANDLE', 'images findFeature 的帧句柄已释放')
+        }
+        if (mock.fail) return err(mock.fail.code, mock.fail.detail)
+        installMockImages.features.push({ scene, template })
+        if (mock.miss) return ok('null')
+        return ok(JSON.stringify({ x: 345, y: 678, confidence: 0.63 }))
       }
       case 'release': {
         const ref = refOf(p)
@@ -348,8 +418,105 @@ test('findColor 用已释放的帧 ERR_STALE_HANDLE', async () => {
 test('未开桥面的图像操作如实 ERR_NOT_IMPLEMENTED', async () => {
   installMockImages()
   installMockImages.reset()
-  for (const m of ['toGrayscale', 'crop', 'pixel', 'captureScreen', 'rotate']) {
+  for (const m of ['pixel', 'captureScreen']) {
     await assert.rejects(() => auto.bridge.invoke('images', m, {}), (e) => e.code === 'ERR_NOT_IMPLEMENTED',
-      `${m} 归 §9.2 native 面（P1），接口期不猜`)
+      `${m} 两侧都没开（§12.3.2 第 7 条），接口期不猜`)
   }
+})
+
+// ── P1 图像桥消费方五算子（2026-09-29 开通，与 Kotlin ImagesNamespaceHandlerTest 对偶）─
+
+test('toGrayscale 发 {source} 回产出帧（同一号段，recycle 打 images/release）', async () => {
+  installMockImages()
+  installMockImages.reset()
+  const frame = await auto.images.decode('/sdcard/shot.png')   // refId 1
+  const gray = await auto.images.toGrayscale(frame)
+  const sent = seenPayloads().at(-1)
+  assert.deepEqual(sent.p, { source: { refId: 1, generation: 1 } }, '只发 source 一个键')
+  assert.deepEqual(installMockImages.transforms.at(-1), { source: { refId: 1, generation: 1 } })
+  assert.deepEqual(gray.ref, { refId: 2, generation: 1 }, '产出帧与 decode 同一号段')
+  assert.equal(gray.width, 1080)
+  assert.equal(gray.height, 2400)
+  await gray.recycle()
+  assert.equal(seenPayloads().at(-1).method, 'release', '产出帧的 recycle 走 images/release（同一条释放路）')
+  assert.deepEqual(seenPayloads().at(-1).p, { ref: { refId: 2, generation: 1 } })
+})
+
+test('crop region 必填：wire 原样 + 宽高随区域 w/h', async () => {
+  installMockImages()
+  installMockImages.reset()
+  const frame = await auto.images.decode('/sdcard/shot.png')
+  await auto.images.crop(frame, [10, 20, 30, 40])
+  const sent = seenPayloads().at(-1)
+  assert.deepEqual(sent.p, { source: { refId: 1, generation: 1 }, region: [10, 20, 30, 40] })
+  assert.deepEqual(installMockImages.transforms.at(-1), { source: { refId: 1, generation: 1 }, region: [10, 20, 30, 40] })
+  const result = await auto.images.crop(frame, [10, 20, 30, 40])
+  assert.equal(result.width, 30, '宽高随产出帧（区域 w/h），不猜原帧尺寸')
+  assert.equal(result.height, 40)
+})
+
+test('resize 域校验：非正/超配额/非整数抛 ERR_INVALID_PARAM 且一次不发', async () => {
+  installMockImages()
+  installMockImages.reset()
+  const frame = await auto.images.decode('/sdcard/shot.png')
+  const bad = [
+    () => auto.images.resize(frame, 0, 10),
+    () => auto.images.resize(frame, 10, -5),
+    () => auto.images.resize(frame, 16385, 10),
+    () => auto.images.resize(frame, 1.5, 10),
+  ]
+  for (const call of bad) {
+    await assert.rejects(() => call(), (e) => e.code === 'ERR_INVALID_PARAM')
+  }
+  assert.equal(installMockImages.transforms.length, 0, '域错一次变换都不发')
+  const ok = await auto.images.resize(frame, 270, 1200)
+  assert.equal(ok.width, 270)
+  assert.equal(ok.height, 1200)
+  assert.deepEqual(seenPayloads().at(-1).p, { source: { refId: 1, generation: 1 }, width: 270, height: 1200 })
+})
+
+test('rotate 非有限角度参数错；角度原样到 wire', async () => {
+  installMockImages()
+  installMockImages.reset()
+  const frame = await auto.images.decode('/sdcard/shot.png')
+  for (const deg of [NaN, Infinity, -Infinity]) {
+    await assert.rejects(() => auto.images.rotate(frame, deg), (e) => e.code === 'ERR_INVALID_PARAM',
+      `非有限角度先拒：${deg}`)
+  }
+  assert.equal(installMockImages.transforms.length, 0, '非有限角度一次不发')
+  await auto.images.rotate(frame, -90)
+  assert.deepEqual(seenPayloads().at(-1).p, { source: { refId: 1, generation: 1 }, degrees: -90 })
+})
+
+test('findFeature 发 {scene,template} 回模板中心；未命中是答案', async () => {
+  installMockImages()
+  installMockImages.reset()
+  const scene = await auto.images.decode('/sdcard/scene.png')     // 1
+  const templ = await auto.images.decode('/sdcard/templ.png')     // 2
+  const hit = await auto.images.findFeature(scene, templ)
+  assert.deepEqual(hit, { x: 345, y: 678, confidence: 0.63 })
+  const sent = seenPayloads().at(-1)
+  assert.deepEqual(sent.p, {
+    scene: { refId: 1, generation: 1 },
+    template: { refId: 2, generation: 1 },
+  })
+  assert.deepEqual(installMockImages.features.at(-1), { scene: { refId: 1, generation: 1 }, template: { refId: 2, generation: 1 } })
+
+  mock.miss = true
+  const none = await auto.images.findFeature(scene, templ)
+  assert.equal(none, null, '未匹配是答案，不编 ERR_NOT_FOUND')
+  mock.miss = false
+})
+
+test('产出帧与源帧同一条表——放掉的产出帧再变换 STALE', async () => {
+  installMockImages()
+  installMockImages.reset()
+  const frame = await auto.images.decode('/sdcard/shot.png')      // 1
+  const gray = await auto.images.toGrayscale(frame)               // 2
+  await gray.recycle()
+  await assert.rejects(() => auto.images.toGrayscale(gray), (e) => e.code === 'ERR_STALE_HANDLE',
+    '放掉的产出帧离场，与 decode 帧同一条判据')
+  // 源帧不受影响，照常可变换
+  await auto.images.toGrayscale(frame)
+  assert.equal(installMockImages.transforms.length, 2, '第二次变换真发到了宿主')
 })
