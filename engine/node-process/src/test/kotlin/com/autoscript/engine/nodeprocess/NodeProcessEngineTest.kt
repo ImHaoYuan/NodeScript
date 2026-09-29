@@ -201,23 +201,30 @@ class NodeProcessEngineTest {
     }
 
     @Test
-    fun `dist 注入按 bootstrap 在位与否降级——配置了但没落位不注入`() {
+    fun `dist 注入按 bootstrap 在位与否降级——配置了但没落位不注入（含 addon 成对）`() {
         writeScript()
-        // 有 bootstrap.js → 注入
+        val addon = dir.resolve("addon.node"); Files.write(addon, ByteArray(0))
+        // 有 bootstrap.js → 注入（addon+dist 成对：都就位才都注入）
         val withBoot = dir.resolve("dist-ok"); Files.createDirectories(withBoot)
         Files.write(withBoot.resolve("bootstrap.js"), "x".toByteArray())
         val l1 = FakeLauncher()
-        runBlocking { engine(l1, bridgeDist = withBoot).execute(request()) }
+        runBlocking { engine(l1, addon = addon, bridgeDist = withBoot).execute(request()) }
         assertEquals(withBoot.toString(), l1.lastEnv!![NodeProcessEngine.ENV_BRIDGE_DIST])
+        assertEquals(addon.toString(), l1.lastEnv!![NodeProcessEngine.ENV_BRIDGE_ADDON])
 
-        // 目录在但缺 bootstrap.js（半量部署/坏资产）→ 不注入（main.cpp 据 env 缺失打 stderr，
-        // 而不是拿坏路径去 require）
+        // 目录在但缺 bootstrap.js（半量部署/坏资产）→ 不注入 dist **也不注入 addon**
+        // （否则 main.cpp 会因"addon 在 dist 缺" exit 5 杀整轮 —— dist 与 addon 绑定，
+        // 见 NodeEngineConfig KDoc / main.cpp kExitDist=5）
         val noBoot = dir.resolve("dist-empty"); Files.createDirectories(noBoot)
         val l2 = FakeLauncher()
-        runBlocking { engine(l2, bridgeDist = noBoot).execute(request()) }
+        runBlocking { engine(l2, addon = addon, bridgeDist = noBoot).execute(request()) }
         assertFalse(
             NodeProcessEngine.ENV_BRIDGE_DIST in l2.lastEnv!!,
-            "缺 bootstrap.js = 降级不注入（选填件不杀执行，见 NodeEngineConfig KDoc）",
+            "缺 bootstrap.js = dist 不注入（半量部署不拿坏路径喂宿主）",
+        )
+        assertFalse(
+            NodeProcessEngine.ENV_BRIDGE_ADDON in l2.lastEnv!!,
+            "缺 dist = addon 也不注入（成对：不把“addon 在 dist 缺”的 exit 5 形态交给 main.cpp）",
         )
     }
 
