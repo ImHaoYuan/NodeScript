@@ -207,7 +207,11 @@ say "16KB/ELF/平台/ABI 门禁（含 libc++_shared：libnode 的传递依赖，
 # API 约束只影响链入的库集合（libc.a 等），libc++_shared.so 本体不分 API —— 取无前缀件。
 LIBCXX_SHARED="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/${TARGET_TUPLE%%$ANDROID_API}/libc++_shared.so"
 [ -f "$LIBCXX_SHARED" ] || die "libc++_shared.so 不在 NDK sysroot: $LIBCXX_SHARED"
-bash "$SCRIPT_DIR/check-alignment.sh" "$TOOLCHAIN/bin/llvm-objdump" "$OUT" "$LIBCXX_SHARED"
+# 收敛进 $OUT：§8 基表与下游 artifact 都从 $OUT 取件（门禁只读不断言落位，
+# 此处不拷则基表 `sha256sum` 缺件、node-slice.yml 上传空集 —— 2026-09-30 CI 实测红）。
+cp -f "$LIBCXX_SHARED" "$OUT/libc++_shared.so"
+"$STRIP" --strip-unneeded "$OUT/libc++_shared.so" || true
+bash "$SCRIPT_DIR/check-alignment.sh" "$TOOLCHAIN/bin/llvm-objdump" "$OUT" "$OUT/libc++_shared.so"
 
 # ── 8) 产物基表（对照 Node SHASUMS256 语义，供发布审计）──────────────────
 # 三件套同基表（libc++_shared 与 libnode 同 16KB 口径、同为装载闭包成员 —— 真机实测
