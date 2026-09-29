@@ -9,10 +9,9 @@
 //  AUTOSCRIPT_RUN_ID         本次执行的 runId（spawn 侧注入，NodeProcessEngine 同名 env）——
 //                            本文件**透传不消费**：JS 侧读 process.env 打心跳（§8.4）。
 //  AUTOSCRIPT_RUN_NONCE      §8.5 执行体幂等键（同上：透传，JS 读 process.env）。
-//  AUTOSCRIPT_BRIDGE_DIST    facade dist 落位根（选填，§12.4 资产交付轨）—— 给则
-//                            引导脚本 require($DIST/bootstrap.js).attachNative({addon})
-//                            把 runtimeBridge 接上（脚本 require('auto') 即有桥）；
-//                            不给 = facade 未接入，stderr 提示、脚本照跑（选填件不杀执行）。
+//  AUTOSCRIPT_BRIDGE_DIST    facade dist 落位根（§12.4 资产交付轨）—— **与 addon 绑定**：
+//                            给 addon 未给 dist / dist 顶层不存在 = exit 5（§7.8 契约，
+//                            launch 期裁决，不推到运行期 ERR_ENGINE_STOPPED）。
 //  AUTOSCRIPT_HOST_SOCKET    :main 的 unix socket 地址（选填）—— 给则必须连上
 //                            （连不上 = exit 3，不静默降级：生产由 :main spawn 并带上，
 //                            缺失只应出现在离线调试）；不给 = 离线跑，桥调用如实抛
@@ -56,6 +55,7 @@ namespace {
 constexpr int kExitUsage = 2;    // argv/env 缺失
 constexpr int kExitSocket = 3;   // :main socket 连不上（env 给了就必须连上）
 constexpr int kExitDlopen = 4;   // libnode 装载/符号解析失败
+constexpr int kExitDist = 5;     // bridge 资产（dist 顶层）缺失/畸形
 
 // §7.8 符号表：llvm-nm -D /tmp/nrb-out7/libnode.so 实证（mangled 名即契约；
 // build-native.sh 里有声明↔库的对表断言，改声明改库任一侧漂移即红）。
@@ -76,17 +76,20 @@ constexpr const char kNodeStartSymbol[] = "_ZN4node5StartEiPPc";
 // require($DIST/bootstrap.js).attachNative({addon: a}) —— setup（TSF 结算面）先就位、
 // install 把 addon.invoke 注入 runtimeBridge，脚本随后 require('auto') 即有桥。
 // 传 {addon: a} 复用本引导已 require 的同一实例（模块缓存本就同份，显式传免得
-// NativeBootstrap 再走一遍 env require）。dist 缺/require 抛错 = 如实 stderr、脚本照跑
-// （桥调用点 ERR_ENGINE_STOPPED —— 选填件不杀执行，与 addon 缺位同纪律）。
+// NativeBootstrap 再走一遍 env require）。
+// **exe 前端缺件 = 硬错（§7.8 契约，kExitDist=5）**：脚本自己 require('auto') 时会撞
+//     ERR_ENGINE_STOPPED —— 线上全部 JS 名（接口期即冻结）都要付"资源不齐"的代价，
+//     那是 launch 期就该裁决的东西，不该推到运行期。
+//     又：**bootstrap 后语句的 require(process.argv[1]) 吞了 addon 装载抛错** —— addon 缺位
+//     时 bootstrap 第一句就 dlopen 失败，node -e 报错文本只进 stderr、rc 却是 1（无独立
+//     code），Watchdog 把它当脚本错误。故缺 addon 的裁决在 exe（kExitDist=5）而不在
+//     bootstrap 里 require 的选择分支（那里只能 stderr + rc=1）。
 constexpr const char kBootstrap[] =
     "const a=require(process.env.AUTOSCRIPT_BRIDGE_ADDON);"
     "if(process.env.AUTOSCRIPT_SOCK_FD)a.setSocketFd(+process.env.AUTOSCRIPT_SOCK_FD);"
     "const rid=+process.env.AUTOSCRIPT_RUN_ID;"
     "if(rid>0){let seq=0;setInterval(()=>{seq++;"
     "try{a.invoke('engines','heartbeat',JSON.stringify({runId:rid,seq}),-seq,2000)}catch(e){}},500).unref();}"
-    "try{const d=process.env.AUTOSCRIPT_BRIDGE_DIST;"
-    "if(d)require(d+\"/bootstrap.js\").attachNative({addon:a})"
-    "}catch(e){console.error('bridge-dist attachNative 未接上: '+(e&&e.message||e))}"
     "require(process.argv[1]);";
 
 // 连 :main 的 unix socket；成功返回 fd，失败 -1（errno 保留给调用方打印）。
@@ -198,12 +201,20 @@ int main(int argc, char** argv) {
   //    运行中的 isolate 等于 UAF，进程退出由内核回收映射。──────────────────────────
   const char* addon_path = std::getenv("AUTOSCRIPT_BRIDGE_ADDON");
   bool preload_addon = (addon_path != nullptr && addon_path[0] != '\0');
-  // facade 未接入要说出来（选填不杀执行，但"require('auto') 会解析不到"不能静默）：
-  // addon 在、dist 不在 = 半接线形态（桥数据面 addon 侧活着、JS 消费面没装）。
-  if (preload_addon && std::getenv("AUTOSCRIPT_BRIDGE_DIST") == nullptr) {
-    std::fprintf(stderr,
-                 ":nodeN AUTOSCRIPT_BRIDGE_DIST 未注入：facade 未接入，require('auto') 将失败"
-                 "（dist 随包/落位见 §12.4 资产交付轨；脚本本体照跑）\n");
+  // dist 资产缺/畸形 = 资源不齐，硬错（kExitDist=5）——见 kBootstrap 注：这个裁决
+  // 不能落到 bootstrap 的 require 选择分支（node -e 那里只有 stderr + rc=1，Watchdog
+  // 会当脚本错误），也不能落到运行期（脚本 require('auto') 只撞 ERR_ENGINE_STOPPED）。
+  // 传 path 给 addon 之前就验 dist 存在（access 不判路径可执行位，只看可达性）。
+  if (preload_addon) {
+    const char* dist = std::getenv("AUTOSCRIPT_BRIDGE_DIST");
+    if (dist == nullptr || dist[0] == '\0') {
+      std::fprintf(stderr, ":nodeN 缺 AUTOSCRIPT_BRIDGE_DIST（bridge 资产 dist 顶层，§12.4 交付轨）\n");
+      return kExitDist;
+    }
+    if (access(dist, F_OK) != 0) {
+      std::fprintf(stderr, ":nodeN dist 资产不存在: %s（§12.4 交付轨未落位）\n", dist);
+      return kExitDist;
+    }
   }
   std::vector<char*> node_argv;
   node_argv.push_back(argv[0]);  // argv[0] = 可执行名（node 惯例）
