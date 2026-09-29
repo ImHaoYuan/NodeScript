@@ -45,10 +45,13 @@ data class NodeEngineConfig(
      */
     val hostSocketName: String? = null,
     /**
-     * `AUTOSCRIPT_BRIDGE_DIST`（§12.4 资产交付轨，选填）：facade dist 落位根
-     * （生产 = `ScriptPaths.autoModuleRoot(filesDir)`）。给则**仅当** `bootstrap.js` 在位
-     * 才注入 —— 与 addon 同一条选填纪律：配置了但资产没落位 = 降级为不注入，
-     * main.cpp 打 stderr 如实说「facade 未接入」，脚本本体照跑（不为锦上添花杀执行）。
+     * `AUTOSCRIPT_BRIDGE_DIST`（§12.4 资产交付轨）：facade dist 落位根
+     * （生产 = `ScriptPaths.autoModuleRoot(filesDir)`）。**与 addon 绑定**（§7.8 契约，
+     * main.cpp kExitDist=5）：给 addon 未给 dist / dist 顶层不存在 = 宿主 exit 5 ——
+     * "资源不齐"是 launch 期裁决，不推到运行期 ERR_ENGINE_STOPPED。
+     * 本进程侧**只注入确认落位的 dist**（bootstrap.js 在位），缺落位 = 不注入 dist 也不
+     * 注入 addon（两者绑定成对）—— 避免把坏路径喂给宿主（exit 5 是防"配置了没落位"，
+     * 不是防"路径不存在"，后者这里就拦掉）。
      * 缺省 null = 不注入（单测/桌面不经资产部署的路径）。
      */
     val bridgeDistPath: Path? = null,
@@ -148,17 +151,21 @@ class NodeProcessEngine(
         // addon 是**选填**特性（main.cpp 合同：缺它 = 不预载、脚本直跑、桥调用在调用点如实
         // ERR_ENGINE_STOPPED）—— 所以"配置了但文件还没落位"降级为不注入，绝不为可选件杀整轮执行；
         // 真正的缺件感由宿主二进制/libnode 两条**必填**预检承担（它们缺了 main.cpp 必然 exit 2/4）。
-        val addonEffective = config.addonPath?.takeIf { Files.isRegularFile(it) }
+        // **dist 与 addon 成对**（§7.8 kExitDist=5）：dist 配置了却没落位 = addon 也不注入
+        // （否则 main.cpp 会因"addon 在 dist 缺" exit 5 杀整轮）。pairedDist 在两边都就位时
+        // 才成立；它同时决定 addon 注入与 dist env 注入。
+        val pairedDist = config.addonPath
+            ?.takeIf { Files.isRegularFile(it) }
+            ?.let { config.bridgeDistPath?.takeIf { d -> Files.isRegularFile(d.resolve("bootstrap.js")) } }
+        val addonEffective = if (pairedDist != null) config.addonPath?.takeIf { Files.isRegularFile(it) } else null
 
         val runId = nodeEngineRunIds.getAndIncrement()
         val env = linkedMapOf<String, String>()
         config.libnodePath?.let { env[ENV_LIBNODE] = it.toString() }
         addonEffective?.let { env[ENV_BRIDGE_ADDON] = it.toString() }
         config.hostSocketName?.let { env[ENV_HOST_SOCKET] = it }
-        // facade dist 同 addon 的选填纪律：配置了但 bootstrap.js 没落位 = 不注入
-        // （main.cpp 由此得知"没 dist 可 attach"并打 stderr，而不是注入一个坏路径）。
-        config.bridgeDistPath?.takeIf { Files.isRegularFile(it.resolve("bootstrap.js")) }
-            ?.let { env[ENV_BRIDGE_DIST] = it.toString() }
+        // dist env 同 addon 一起注入（pairedDist 已确认 bootstrap.js 在位）。
+        pairedDist?.let { env[ENV_BRIDGE_DIST] = it.toString() }
         // 执行体身份（§8.5 幂等键 + §8.4 心跳打点）：runId/runNonce 随 env 下传，
         // JS 侧（bootstrap/脚本）读 process.env 即可 startHeartbeat(runId) —— 不再另造 argv 通道。
         env[ENV_RUN_ID] = runId.toString()

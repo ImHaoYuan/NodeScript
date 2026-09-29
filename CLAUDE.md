@@ -1,12 +1,14 @@
 # AutoScript
 
-内置 Node.js 的安卓自动化平台（对标 AutoJsPro v9）：每脚本一个 Node 进程、跨进程异步桥、能力三态门禁。架构设计见 `docs/framework-design.md`（§0–§19 全覆盖）。
+内置 Node.js 的安卓自动化平台（对标 AutoJsPro v9）：每脚本一个 Node 进程、跨进程异步桥、能力三态门禁。架构设计见 `docs/framework-design.md`（§0–§19 全覆盖，**契约的单一事实来源**）；「实现到哪了」看 `docs/design-status.md`，「为什么这么定 / 什么被改过」看 `docs/design-decisions.md`。
 
 ## 仓库地图
 
 | 路径 | 说明 | 设计章节 |
 |---|---|---|
-| `docs/framework-design.md` | 架构设计（契约的单一事实来源） | 全部 |
+| `docs/framework-design.md` | 架构设计（**契约的单一事实来源**）—— 只写「是什么」 | §0–§17 |
+| `docs/design-decisions.md` | 决策记录：已拍板项 + 被推翻/改过的口径（原口径不删） | 原 §18 已拍板两项 |
+| `docs/design-status.md` | 落地台账：接口期清单 + 流水（原 §19 的 9,584 字符流水外迁于此） | 原 §19 |
 | `.claude/skills/skill-designer/` | 项目级 skill：设计/创建技能 + 外科手术式改代码 + git 提交 | — |
 | `module-stubs` 之外的模块 | 各模块职责见下 | §6 |
 

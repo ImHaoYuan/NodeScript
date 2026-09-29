@@ -47,6 +47,7 @@ object NpmShellKit {
         registryVerifier: NpmRegistryVerifier? = NpmRegistryVerifier(),
         lockKey: LockSigner.KeyProvider? = null,
         snapshots: Boolean = true,
+        freeSpaceProbe: (Path) -> Long = defaultFreeSpaceProbe(filesDir),
     ): NamespaceHandler {
         // 项目根来自契约层（§9.6 单一事实来源）：与 script-repo/调度恢复/装配层同一个函数，
         // 拼错目录名不再可能（曾经这里与 AppShellKit 各写一份字面量）。
@@ -68,17 +69,20 @@ object NpmShellKit {
             bundleImporter = NpmOfflineBundleImporter,
             registryVerifier = registryVerifier,
         )
-        // 磁盘探针：项目目录在 install 前本来就不存在（stat 会炸），退到 filesDir ——
-        // 同分区同答案（§10.2 磁盘预检问的是分区余量，不是"项目目录在不在"）。
-        val probe: (Path) -> Long = { p ->
-            try {
-                java.nio.file.Files.getFileStore(p).usableSpace
-            } catch (e: java.io.IOException) {
-                java.nio.file.Files.getFileStore(filesDir).usableSpace
-            }
-        }
         return NpmBridgeHandler(
-            InstallCoordinator(services = services, executor = executor, freeSpaceProbe = probe),
+            InstallCoordinator(services = services, executor = executor, freeSpaceProbe = freeSpaceProbe),
         ).mount()
+    }
+
+    /** 缺省磁盘探针：项目目录在 install 前本来就不存在（stat 会炸），退到 filesDir ——
+     * 同分区同答案（§10.2 磁盘预检问的是分区余量，不是"项目目录在不在"）。可注入覆盖：
+     * 单测 @TempDir 落在 tmpfs 上（CI/沙箱 /tmp 常被占满），真探会让"重操作诚实
+     * ERR_NOT_IMPLEMENTED"的用例先撞 ERR_DISK_FULL —— 探针是环境敏感缝，测试固定值。 */
+    private fun defaultFreeSpaceProbe(filesDir: Path): (Path) -> Long = { p ->
+        try {
+            java.nio.file.Files.getFileStore(p).usableSpace
+        } catch (e: java.io.IOException) {
+            java.nio.file.Files.getFileStore(filesDir).usableSpace
+        }
     }
 }

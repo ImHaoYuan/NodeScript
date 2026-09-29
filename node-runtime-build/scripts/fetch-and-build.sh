@@ -146,6 +146,21 @@ export RANLIB="$TOOLCHAIN/bin/llvm-ranlib"
 export STRIP="$TOOLCHAIN/bin/llvm-strip"
 [ -x "$CC" ] && [ -x "$CXX" ] || die "NDK clang wrapper 缺失: $NDK_DIR"
 
+# ccache（CI 提速，可选开关）：USE_CCACHE 非空且 ccache 在 PATH 时，CC/CXX 包一层
+# ccache 前缀（`CC="ccache <clang>"` 形态；gyp/make 经 env 取 CC，空格分隔天然可分）。
+# 放在 `[ -x ]` 探针**之后**（探针验的是裸 wrapper 路径）；AR/RANLIB 不包（归档由缓存
+# 对象重链，本就快）；host toolset（CC_host=gcc，下方）不包（mksnapshot 等宿主工具
+# 量小，且换了它们的编译器指纹会污染命中口径）。Docker 发布轨不装 ccache → 条件恒假。
+# 跨轮命中前提：$WORK 布局稳定（ccache 默认按预处理内容哈希；CI 的 WORK_DIR 固定，
+# 见 node-slice.yml）—— 绝对路径一致即命中，无需 sloppiness。
+if [ -n "${USE_CCACHE:-}" ] && command -v ccache >/dev/null 2>&1; then
+    export CC="ccache $CC"
+    export CXX="ccache $CXX"
+    say "ccache 已接管 CC/CXX（dir=${CCACHE_DIR:-~/.ccache}）"
+elif [ -n "${USE_CCACHE:-}" ]; then
+    printf '\033[1;33m[WARN]\033[0m USE_CCACHE=1 但无 ccache，走无缓存构建\n' >&2
+fi
+
 # host toolset：gyp 对 toolsets:['host']（mksnapshot 等构建期 x86_64 宿主工具）从
 # CC_host→CC、CXX_host→CXX 回退解析（tools/gyp/.../make.py:2482-2485）。若缺 CC_host，
 # 会回退到上方 CC=NDK 交叉 clang → mksnapshot 编成 arm64-android ELF → 宿主执行 ENOEXEC
@@ -197,9 +212,24 @@ for so in "$OUT"/libnode.so*; do
 done
 
 # ── 7) 门禁 ──────────────────────────────────────────────────────────────
-say "16KB/ELF/平台/ABI 门禁 ..."
-bash "$SCRIPT_DIR/check-alignment.sh" "$TOOLCHAIN/bin/llvm-objdump" "$OUT"
+say "16KB/ELF/平台/ABI 门禁（含 libc++_shared：libnode 的传递依赖，须与它同 16KB 口径）..."
+# libc++_shared.so：libnode 的 DT_NEEDED（readelf 实证；bionic 的 RUNPATH 不作用于
+# 被依赖库的传递依赖，2026-09-29 真机实测 —— 它必须由装载面显式携带）。产线用 NDK
+# sysroot 的同 ABI 版本（与 app/build.gradle.kts 的 prepareEngineNativeLibs 同源），
+# 同门禁断言，保证 APK 里三件套的 16KB 口径一致。
+# NDK 的 sysroot ABI 目录不含 API 号（aarch64-linux-android/，不是 ${TARGET_TUPLE}/）：
+# 顶层 libc++_shared.so 是 r28c 的无前缀版本，30/…/35 子目录是带版本号的（给 crt 变体用）。
+# API 约束只影响链入的库集合（libc.a 等），libc++_shared.so 本体不分 API —— 取无前缀件。
+LIBCXX_SHARED="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/${TARGET_TUPLE%%$ANDROID_API}/libc++_shared.so"
+[ -f "$LIBCXX_SHARED" ] || die "libc++_shared.so 不在 NDK sysroot: $LIBCXX_SHARED"
+# 收敛进 $OUT：§8 基表与下游 artifact 都从 $OUT 取件（门禁只读不断言落位，
+# 此处不拷则基表 `sha256sum` 缺件、node-slice.yml 上传空集 —— 2026-09-30 CI 实测红）。
+cp -f "$LIBCXX_SHARED" "$OUT/libc++_shared.so"
+"$STRIP" --strip-unneeded "$OUT/libc++_shared.so" || true
+bash "$SCRIPT_DIR/check-alignment.sh" "$TOOLCHAIN/bin/llvm-objdump" "$OUT" "$OUT/libc++_shared.so"
 
 # ── 8) 产物基表（对照 Node SHASUMS256 语义，供发布审计）──────────────────
-(cd "$OUT" && sha256sum node libnode.so* config.gypi config.mk | tee SHASUMS256)
-say "完成。产物：$OUT/node + $OUT/libnode.so.*（垂直切片见设计 §844）"
+# 三件套同基表（libc++_shared 与 libnode 同 16KB 口径、同为装载闭包成员 —— 真机实测
+# 它是 libnode 的传递依赖，RUNPATH 不替它解析，2026-09-29）。基表件数从 4 → 5。
+(cd "$OUT" && sha256sum node libnode.so* libc++_shared.so config.gypi config.mk | tee SHASUMS256)
+say "完成。产物：$OUT/node + $OUT/libnode.so.* + $OUT/libc++_shared.so（垂直切片见设计 §844）"

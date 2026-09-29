@@ -61,6 +61,17 @@ ls out/          # node  libnode.so.137*  SHASUMS256  config.gypi  config.mk
 
 OpenCV 轨的升级同纪律但走它自己的门：改 `VERSIONS.env` 的 OpenCV/kleidicv 块 → `image-native.yml` 自动跑（改 `build-opencv.sh` 同触发）→ 看审计行的 kleidicv ON/OFF 与 NEEDED 白名单是否仍成立。
 
+## CI 缓存（两轨同纪律，2026-09-30）
+
+干净 runner 从零编太贵（Node 轨 2h09m 实测），故两条 yml 各挂两层 `actions/cache@v4`（合并写法，命中即用）：
+
+| 层 | 路径 | key | 说明 |
+|---|---|---|---|
+| 下载层 | `work/dl`（NDK zip 722MB + Node tarball） | `<轨>-dl-<VERSIONS.env 哈希>` | 版本一变即失效重下；**不给 `restore-keys`**（旧包是毒药，干净重下比复用+复验省事） |
+| 编译层 | `.ccache`（Node 轨 V8 / OpenCV 轨交叉编译+桥面编链）/ `.ccache-host`（host 门禁的 x86_64 静态库） | `<轨>-ccache-<VERSIONS.env 哈希>`（+ `restore-keys` 跨版本兜底，内容寻址不毒构建） | 脚本经 `USE_CCACHE=1` 接管：Node 轨 `CC/CXX="ccache <clang>"`（§4，AR/host toolset 不包）；OpenCV 轨 `CMAKE_*_COMPILER_LAUNCHER=ccache`（§3）+ 桥面编链包调用（§5）；host 门禁 `CC="ccache gcc"` + `OCV_HOST_BUILD` 覆写进 workspace |
+
+上限 10GB / 7 天不用即清，本仓两轨 dl 合计 < 1.2GB + ccache 2GB×3，安全边际大。Docker 发布轨不装 ccache → 开关恒假，无影响。首轮是填缓存轮（仍全量编），之后"只改打包步骤"类重跑即解包+重链接量级。
+
 ## OpenCV 轨（`libopencv.so`）
 
 ```bash

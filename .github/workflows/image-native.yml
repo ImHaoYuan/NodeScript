@@ -16,6 +16,13 @@ name: image-native
 # 产物不随 APK 走：装配侧 app/build.gradle.kts 的 prepareEngineNativeLibs 候选位
 # 含 node-runtime-build/out-opencv/libopencv.so，本 workflow 的 artifact 是给
 # 人下载核验的（16KB 对齐 + NEEDED 白名单在脚本尾部已断言）。
+#
+# 缓存三处（合并写法 actions/cache —— 与 node-slice.yml 同纪律）：
+#   host job：`~/.ccache` 挂 host gcc/g++ 的 ccache（OpenCV host 静态库 5–10 分钟档）；
+#   device job：`work/dl`（NDK zip，与 Node 轨同 key 结构、前缀不同防撞）与
+#   `.ccache`（device 侧 OpenCV 交叉编译 + 桥面两文件的 ccache，脚本 §3/§5 经
+#   USE_CCACHE 接管）。key 钉 VERSIONS.env 哈希（device 侧编译单元内容寻址，跨版本
+#   restore-keys 只占空间不毒构建；dl 层不给 restore-keys，旧包是毒药干净重下）。
 # 触发面（2026-09-25 修过一次"推了分支却没跑"）：
 # 初版写成 `push: branches:[main]` + `pull_request: paths:`，而 image-native 这类
 # 长生命周期分支既不在 main、又还没有 PR → **一步都不跑**（gh token 无该私仓权限，
@@ -56,10 +63,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 安装编译期依赖（cmake + ninja + g++ + git）
+      - name: 安装编译期依赖（cmake + ninja + g++ + git + ccache）
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cmake ninja-build g++ git
+          sudo apt-get install -y --no-install-recommends cmake ninja-build g++ git ccache
+
+      # host OpenCV 静态库 5–10 分钟档：g++ 经 ccache 包调用，BUILD_DIR 复用即命中。
+      # run-host-tests.sh 的 BUILD 缺省 /tmp/ocvhostbuild（$OCV_HOST_BUILD 可覆写）——
+      # 这里覆写进 workspace 才能被 actions/cache 存走；commit 对表由脚本内 pin 源 verdict。
+      - name: 缓存 host ccache（x86_64 OpenCV 静态库）
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.ccache-host
+          key: ocv-host-ccache-${{ hashFiles('node-runtime-build/VERSIONS.env') }}
+          restore-keys: ocv-host-ccache-
 
       - name: 拉取 OpenCV @ VERSIONS.env 的 commit pin
         run: |
@@ -74,8 +91,17 @@ jobs:
           git clone --filter=blob:none --no-checkout https://github.com/opencv/opencv.git /tmp/ocvpin
           git -C /tmp/ocvpin -c advice.detachedHead=false checkout "$OPENCV_COMMIT"
 
-      - name: 跑宿主机语义门禁（编译 + 断言）
-        run: bash bridge/image/test/cpp/run-host-tests.sh /tmp/ocvpin
+      - name: 跑宿主机语义门禁（编译 + 断言，ccache 开）
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache-host
+          CCACHE_MAXSIZE: 2G
+          OCV_HOST_BUILD: ${{ github.workspace }}/ocvhostbuild
+          CC: ccache gcc
+          CXX: ccache g++
+        run: |
+          ccache -z || true
+          bash bridge/image/test/cpp/run-host-tests.sh /tmp/ocvpin
+          ccache -s || true
 
   build-opencv:
     name: OpenCV 4.14.0 → libopencv.so（arm64-android26，kleidicv 审计）
@@ -89,12 +115,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 安装编译期依赖（cmake + ninja + unzip + git + python3）
+      - name: 安装编译期依赖（cmake + ninja + unzip + git + python3 + ccache）
         run: |
           # unzip 是 NDK 解包要用的：放在 NDK 步骤**之前**，不赌 runner 镜像预装
           # （赌输了要等 700MB 下载完才在 unzip 上炸，白等一次）。
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cmake ninja-build unzip git python3
+          sudo apt-get install -y --no-install-recommends cmake ninja-build unzip git python3 ccache
+
+      - name: 缓存下载层（NDK zip，与 Node 轨同文件、前缀不同防撞）
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/work/dl
+          key: ocv-dl-${{ hashFiles('node-runtime-build/VERSIONS.env') }}
+
+      - name: 缓存 ccache（device OpenCV 交叉编译 + 桥面编链）
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ocv-ccache-${{ hashFiles('node-runtime-build/VERSIONS.env') }}
+          restore-keys: ocv-ccache-
 
       - name: 安装 NDK r28c（dl.google.com zip + size/sha1 校验，同 Node 管线）
         run: |
@@ -131,14 +170,22 @@ jobs:
             || { echo "解包后无 aarch64-linux-android${API}-clang: $TOOLCHAIN"; exit 1; }
           echo "[OK] NDK 就位: $TOOLCHAIN"
 
-      - name: 编译 libopencv.so
+      - name: 编译 libopencv.so（ccache 开）
+        env:
+          USE_CCACHE: '1'
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+          CCACHE_MAXSIZE: 2G
         run: |
           # kleidicv 走 gitlab.arm.com 的 release 包：从下方日志的 `kleidicv 状态:`
           # 一行读 ON/OFF（判据是 configure 摘要的 Custom HAL，见脚本 3b 段；软降级不
           # fatal，结论也写进 SHASUMS256 审计行）。上面 tee 那份 log 也是 grep 的源。
+          # USE_CCACHE=1 让脚本 §3（cmake launcher）与 §5（桥面编链）经 ccache；
+          # ccache 不在则 WARN 走旧路。ccache -z/-s 同 node-slice 的本轮命中率口径。
+          ccache -z || true
           bash node-runtime-build/scripts/build-opencv.sh 2>&1 | tee /tmp/build-opencv.log
           grep -q '完成。产物' /tmp/build-opencv.log || { echo "构建日志无完成行"; exit 1; }
           grep 'kleidicv 状态:' /tmp/build-opencv.log
+          ccache -s || true
 
       - name: 产物审计（16KB LOAD + NEEDED 白名单 + 审计行）
         run: |

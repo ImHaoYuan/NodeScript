@@ -35,9 +35,23 @@ class RuntimeController(
      * （Application 域一个进程一个，替身进程各自隔离）。默认新建生产实例。
      */
     private val heartbeats: HeartbeatLedger = HeartbeatLedger(),
+    /**
+     * 墙钟缝（越界判定的时间来源）：生产用系统钟，测试给定时钟即可逐毫秒复现
+     * 「心跳失联 → 再等满窗口 → 才杀」的三段节奏，不必真等 1.5s + 5s。
+     */
+    private val clock: () -> Long = { System.currentTimeMillis() },
 ) {
     private val guard = Mutex()
     private val active = HashMap<Long, PoolHandle>()
+
+    /**
+     * 在途 run 的启动时刻（runId → 启动墙钟；仅 [EngineWatchdog] 的越界判定读它）。
+     *
+     * 为什么不放进 [PoolHandle]：那是池内身份（请求/槽位/收据/代次），启动时刻是
+     * **看门狗这一路**的记账，且 [watchAnchors] 的快照形态已经要带上它 —— 放这里
+     * 与在途表同生共死（[settleDone]/[killRun]/[killAll]/[forceStopAll] 都清在途表）。
+     */
+    private val startedAt = HashMap<Long, Long>()
 
     /** 启动结果（对偶 JS PoolAcquireOutcome：granted/timedOut/failed）。 */
     sealed interface StartOutcome {
@@ -59,6 +73,7 @@ class RuntimeController(
             is PoolAcquireOutcome.Granted -> {
                 val receipt = outcome.handle.receipt
                 active[receipt.runId] = outcome.handle
+                startedAt[receipt.runId] = clock()
                 StartOutcome.Started(receipt.runId, receipt.handle)
             }
             PoolAcquireOutcome.TimedOut -> StartOutcome.QueueTimeout
@@ -68,7 +83,10 @@ class RuntimeController(
 
     /** 优雅停止一次执行（四步 quiesce 由池/槽位驱动，TimedOut 已 kill 兜底）。 */
     suspend fun stop(runId: Long): StopOutcome {
-        val handle = guard.withLock { active.remove(runId) } ?: return StopOutcome.AlreadyGone
+        val handle = guard.withLock {
+            startedAt.remove(runId)
+            active.remove(runId)
+        } ?: return StopOutcome.AlreadyGone
         heartbeats.forget(runId)
         return when (val result = pool.release(handle)) {
             StopResult.Clean -> StopOutcome.StoppedClean
@@ -92,7 +110,10 @@ class RuntimeController(
      * @return null = 该 runId 不在途（已被 stop/killAll 收走），调用方不得视为成功 kill。
      */
     suspend fun killRun(runId: Long, cause: KillCause): KillCause? {
-        val handle = guard.withLock { active.remove(runId) } ?: return null
+        val handle = guard.withLock {
+            startedAt.remove(runId)
+            active.remove(runId)
+        } ?: return null
         heartbeats.forget(runId)
         val killed = handle.slot.engine.kill()
         // 强杀即终结：槽位 + 许可证必须成对归还（§8.2 记账）；
@@ -105,6 +126,7 @@ class RuntimeController(
     suspend fun killAll(reason: KillCause) = guard.withLock {
         val gone = active.keys.toList()
         active.clear()
+        startedAt.clear()
         gone.forEach { heartbeats.forget(it) }
         pool.killAll(reason)
     }
@@ -121,6 +143,7 @@ class RuntimeController(
     suspend fun forceStopAll(cause: KillCause) = guard.withLock {
         val gone = active.keys.toList()
         active.clear()
+        startedAt.clear()
         gone.forEach { heartbeats.forget(it) }
         pool.killAll(cause)
     }
@@ -172,7 +195,9 @@ class RuntimeController(
      * 执行体后两者不同。宿主不给 pid（实现未接线）时如实给 null：调用方按"无法度量"处理。
      */
     suspend fun watchAnchors(): List<WatchAnchor> = guard.withLock {
-        active.values.map { WatchAnchor(it.receipt.runId, it.receipt.pid) }
+        active.values.map {
+            WatchAnchor(it.receipt.runId, it.receipt.pid, startedAt[it.receipt.runId] ?: clock())
+        }
     }
 
     /** 在途 runId 快照（诊断/UI 用）。 */
@@ -293,8 +318,13 @@ class RuntimeController(
         EngineStatus.STOPPED, EngineStatus.CRASHED -> true
     }
 
-    /** 在途执行的看门狗锚点（[watchAnchors] 的元素）。 */
-    data class WatchAnchor(val runId: Long, val pid: Int?)
+    /**
+     * 在途执行的看门狗锚点（[watchAnchors] 的元素）。
+     *
+     * [startedAtMillis] 是**这次执行**的启动墙钟：看门狗靠它区分「还没到首跳」与
+     * 「打过点又断了」（见 [EngineWatchdog] 的启动宽限口径）。
+     */
+    data class WatchAnchor(val runId: Long, val pid: Int?, val startedAtMillis: Long)
 
     companion object {
         const val POLL_INTERVAL_MILLIS: Long = 200
@@ -302,7 +332,10 @@ class RuntimeController(
 
     /** 完成结算：release 槽位 + 归档在途表（与 stop/killAll 串行，经 guard）。 */
     private suspend fun settleDone(runId: Long): Completed {
-        val handle = guard.withLock { active.remove(runId) } ?: return Completed.UnknownRun
+        val handle = guard.withLock {
+            startedAt.remove(runId)
+            active.remove(runId)
+        } ?: return Completed.UnknownRun
         heartbeats.forget(runId)
         return when (pool.release(handle)) {
             StopResult.Clean -> Completed.StoppedClean
@@ -312,7 +345,10 @@ class RuntimeController(
 
     /** 强杀结算：只收走本 run 的槽位（release 走 quiesce+kill 兜底），不碰其他在途。 */
     private suspend fun settleKilled(runId: Long): Completed {
-        val handle = guard.withLock { active.remove(runId) } ?: return Completed.UnknownRun
+        val handle = guard.withLock {
+            startedAt.remove(runId)
+            active.remove(runId)
+        } ?: return Completed.UnknownRun
         heartbeats.forget(runId)
         pool.release(handle)
         return Completed.Killed

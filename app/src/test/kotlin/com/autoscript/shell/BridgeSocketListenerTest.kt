@@ -54,7 +54,16 @@ class BridgeSocketListenerTest {
 
         override fun accept(): AcceptedBridgeConnection? {
             while (!closed.get()) {
-                queue.poll(20, TimeUnit.MILLISECONDS)?.let { return it }
+                val conn = queue.poll(20, TimeUnit.MILLISECONDS) ?: continue
+                // 取到后复核 closed：close 恰好落在 poll 等待窗内时，这个连接是
+                // "关后入队"的 —— 服务端从未拥有它（生产面等价行为：LocalServerSocket
+                // .close 后 backlog 由内核拒，accept 根本拿不到），直接回 null，
+                // 不带出去再关。否则"停 accept"用例构成 20ms 轮询窗竞态：CI 负载高时
+                // accept 线程恰在 poll 中，late 入队即被取走、经实现侧 `if (!running)`
+                // 分支关掉，`late.closed` 翻 true 而红 —— 2026-09-30 CI 实测红一次。
+                // （实现侧那个分支是生产面 fd 安全网，不动；假件无 fd，丢弃即等价。）
+                if (closed.get()) return null
+                return conn
             }
             return null
         }

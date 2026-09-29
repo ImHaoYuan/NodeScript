@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # AutoScript 16KB/ELF/平台/ABI 门禁（docs/framework-design.md §16 硬门禁；Android 官方 page-sizes 指南）
-# 用法: check-alignment.sh <llvm-objdump路径> <产物目录>
-#  1) ELF 断言：每个 LOAD 段 align >= 2**14（0x4000，16KB），且至少解析到一个 LOAD 段
+# 用法: check-alignment.sh <llvm-objdump路径> <产物目录> [libc++_shared.so路径]
+#  （第三参给则对它跑同一条 16KB/同余断言 —— libnode 的传递依赖，2026-09-29 补）
+#  1) ELF 断言：每个 LOAD 段 align >= 2**14（0x4000，16KB），且至少解析到一个 LOAD 段；
+#     **并断言 p_offset ≡ p_vaddr (mod align)**（16KB 门的另一半：不满足时内核按 16KB
+#     基页映射会失败 —— 2026-09-29 补，见 build-native.sh 同款断言）
 #  2) 平台契约断言：config.gypi（configure 写的 JSON）variables.OS=android 且 node_shared=true
 #     —— configure 把 config.gypi（json.dumps）与 config.mk（BUILDTYPE/NODE_TARGET_TYPE）写在
 #        工作目录即源码根；CLI 参数（--dest-os/--shared）不回显进 config.mk，故契约以 JSON 键为准
@@ -19,6 +22,8 @@ EXPECTED_ABI="${EXPECTED_NODE_MODULE_VERSION:?VERSIONS.env 未定义 EXPECTED_NO
 
 OBJDUMP="${1:?缺 llvm-objdump 路径}"
 OUT="${2:?缺产物目录}"
+# libc++_shared.so：环境变量优先，第三位置参兜底（用法注释与此一致）。
+LIBCXX_SHARED="${LIBCXX_SHARED:-${3:-}}"
 
 fail() { printf '\033[1;31m[GATE FAIL]\033[0m %s\n' "$*" >&2; exit 1; }
 
@@ -38,8 +43,16 @@ for line in sys.stdin:
     m = re.search(r"align\s+2\*\*(\d+)", line)
     if not m:
         bad.append(("no-align", line.strip()))
-    elif int(m.group(1)) < 14:
-        bad.append((int(m.group(1)), line.strip()))
+        continue
+    align = int(m.group(1))
+    if align < 14:
+        bad.append((align, line.strip()))
+        continue
+    # p_offset ≡ p_vaddr (mod p_align)：llvm-objdump -p 的 LOAD 行形如
+    # LOAD off 0x0000000000000000 vaddr 0x0000000000000000 paddr 0x... align 2**14 ... filesz ... memsz ... flags r-x
+    mm = re.search(r"off\s+0x([0-9a-fA-F]+)\s+vaddr\s+0x([0-9a-fA-F]+)", line)
+    if mm and (int(mm.group(1), 16) - int(mm.group(2), 16)) % (1 << align) != 0:
+        bad.append(("off!=vaddr mod align", line.strip()))
 if not seen:
     print("   未解析到任何 LOAD 段（objdump 输出异常或非 ELF）", file=sys.stderr)
     sys.exit(1)
@@ -98,4 +111,36 @@ PY
     echo "[OK] libnode.so 未版本化命名（gyp --shared 惯例），config.gypi node_module_version=$abi_json 与期望一致"
 fi
 
-echo "[OK] 门禁通过：16KB LOAD 对齐 / OS=android+shared / libnode.so.$EXPECTED_ABI"
+# ── 4) libc++_shared.so 同门禁（libnode 的传递依赖，2026-09-29 补）────────────
+# 真机实测：bionic 的 RUNPATH($ORIGIN) 不作用于被依赖库的传递依赖 —— libnode 自己
+# NEEDED 的 libc++_shared 必须由装载面（宿主/APK）提供。若产线不产它而交给 NDK 手放，
+# 这里就是最后一道"它与 libnode 同 16KB 口径"的闸。
+if [ -n "${LIBCXX_SHARED:-}" ]; then
+    [ -f "$LIBCXX_SHARED" ] || fail "LIBCXX_SHARED=$LIBCXX_SHARED 不存在"
+    if ! "$OBJDUMP" -p "$LIBCXX_SHARED" | python3 -c '
+import sys, re
+seen = False
+bad = []
+for line in sys.stdin:
+    if not line.lstrip().startswith("LOAD"):
+        continue
+    seen = True
+    m = re.search(r"align\s+2\*\*(\d+)", line)
+    if not m or int(m.group(1)) < 14:
+        bad.append(line.strip())
+        continue
+    mm = re.search(r"off\s+0x([0-9a-fA-F]+)\s+vaddr\s+0x([0-9a-fA-F]+)", line)
+    if mm and (int(mm.group(1), 16) - int(mm.group(2), 16)) % (1 << int(m.group(1))) != 0:
+        bad.append("off!=vaddr mod align " + line.strip())
+if not seen:
+    print("   未解析到任何 LOAD 段", file=sys.stderr); sys.exit(1)
+if bad:
+    for b in bad: print("   ", b, file=sys.stderr)
+    sys.exit(1)
+' && true; then
+        fail "$LIBCXX_SHARED: 16KB/同余断言不过（与 libnode 同门禁）"
+    fi
+    echo "[OK] $(basename "$LIBCXX_SHARED"): 全部 LOAD 段 align >= 2**14 且 off≡vaddr"
+fi
+
+echo "[OK] 门禁通过：16KB LOAD 对齐（含 off≡vaddr）/ OS=android+shared / libnode.so.$EXPECTED_ABI"
