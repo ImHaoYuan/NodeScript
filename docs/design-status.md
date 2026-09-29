@@ -63,12 +63,12 @@ A2–A4（截图→找图/找色/模板）仍欠：`libopencv.so` 不在设备�
 
 | # | 量什么 | 契约锚 | 怎么量（adb 可脚本化） | 判据 |
 |---|---|---|---|---|
-| A1 | 桥往返（JS→:main→回） | §7.7 空 RPC p95 < 2ms | kBootstrap 心跳帧自带 reqId `-seq` + 时间戳：宿主侧记发出/回包两点（或 `adb shell` 跑 1000 次 invoke 取 p95） | p95 < 2ms；当前：**未计时**（9-29 只数了 6 帧，未打点） |
+| A1 | 桥往返（JS→:main→回） | §7.7 空 RPC p95 < 2ms | `auto.console.log` 200 次脚本侧打点（host 真处理） | **已测 9-30：p95=1ms**（console 整调用往返；见本文件流水 9-30 条） |
 | A2 | `captureScreen → findImage` 端到端 | §7.7 < 1s；一次截图两次匹配 < 700ms | 真机截屏（a11y 路径）→ `ingest` → `findImage` 两次，打点三段（截图 / ingest / 匹配×2） | 端到端 < 1s；当前：**待实测**（链路 9-26 已通，数字空） |
 | A3 | `findColor` 1080p | §7.7 < 10ms | 生产布局下落一张 1080p 真机截图，`findColor` 单人独立子图计时（`adb shell` 循环 100 次取中位） | < 10ms；当前：宿主 36 例只保语义，设备耗时空 |
 | A4 | `matchTemplate` 1080p | §7.7 < 40ms | 同 A3，模板用真机 UI 切片（非合成图） | < 40ms |
-| A5 | `Intl.*` zh/en 运行期 | §18 第 4 项跟进 | `node -e "console.log(new Intl.NumberFormat('zh-CN').format(1234567.89))"` + `DateTimeFormat('zh-CN')` 在真机 noden 跑 | 输出与桌面一致；当前：旗标改 + Actions 重编 success，运行期未验 |
-| A6 | 引擎进程 RSS | §15 80–160MB | `adb shell dumpsys meminfo <pkg>` 跑脚本时采样 | 落区间；当前：空 |
+| A5 | `Intl.*` zh/en 运行期 | §18 第 4 项跟进 | `node -e "console.log(new Intl.NumberFormat('zh-CN').format(1234567.89))"` + `DateTimeFormat('zh-CN')` 在真机 noden 跑 | **已测 9-30：该件无 `Intl`**（旧件，旗标 9-26 才进管线）；待本轮 node-slice 绿后取新件复测 |
+| A6 | 引擎进程 RSS | §15 80–160MB | 脚本存活窗内 `smaps_rollup` 采样 | **已测 9-30：Rss≈46.6MB/Pss≈44MB**，区间内偏下限（见本文件流水 9-30 条） |
 
 **B. 平台策略（现有云手机原理上测不到 —— 要 16KB 模拟器镜像或 Pixel 8+）**
 
@@ -83,7 +83,7 @@ A2–A4（截图→找图/找色/模板）仍欠：`libopencv.so` 不在设备�
 
 | # | 量什么 | 契约锚 | 说明 |
 |---|---|---|---|
-| C1 | `.node` 经 `process.dlopen` 路径的 `require` | §10.12 / §19 台账 9-29 | 9-29 只否了"第三方 `.node` 搭便车"（无 DT_NEEDED 仍 `cannot locate symbol`）；`require` 走 `process.dlopen` 时的搜索/报错细节未逐条验 |
+| C1 | `.node` 经 `process.dlopen` 路径的 `require` | §10.12 / §19 台账 9-29 | **已验 9-30**：`require` 路径同样 `ERR_DLOPEN_FAILED`（`cannot locate symbol "napi_add_env_cleanup_hook"`），§10.12 口径不变 |
 | C2 | `captureScreen → findImage` 实测数字回填 §7.7 | §7.7 / §9.2 | = A2 落地后的回填动作（数字进契约表 + 本表接口期行销账） |
 
 执行顺序建议：A（现有设备即刻可做）→ B（等设备）→ C1（可与 A 同批）→ C2（A2 的回填）。
