@@ -67,6 +67,13 @@ addon = NEEDED `libnode.so`（SONAME 命中）+ 静态 STL；两者产物 strip 
 （未 strip 时 addon 8.27MB）。断言已进 `build-native.sh`（宿主/addon 各一套 NEEDED 契约 +
 RUNPATH + 16KB align + `p_offset ≡ p_vaddr (mod align)`，四条负向校验均实测变红）。
 
+**顺带否掉一条外部推测**：曾被猜测「libnode 进了启动闭包后，第三方 `.node` 也能装载了，
+§10.12 的『不引入第三方 `.node`』理由因此变弱」。实测**不成立**：宿主自身 NEEDED libnode
+（libnode 确在启动闭包里）时，`dlopen` 一个**没有** `DT_NEEDED libnode.so` 的 `.node`
+仍然报 `cannot locate symbol "napi_add_env_cleanup_hook"`。解析的机制是**装载器按 SONAME
+找依赖**（addon 自己声明了 libnode.so 才命中），不是"全局作用域对后续 dlopen 生效"——
+第三方 `.node` 必须自己链 libnode 才有戏。§10.12 的口径不变。
+
 **仍未验**：16KB 页机（设备 4KB）、SELinux enforcing 上下文（设备 Permissive + root shell）、
 `nativeLibraryDir` 提取路径与 targetSdk36 的 app 数据区 exec 策略（真机红测只有 16KB 模拟器镜像
 或 Pixel 8+ 能给）、`.node` 的 `require` 在 `process.dlopen` 路径上的细节。
