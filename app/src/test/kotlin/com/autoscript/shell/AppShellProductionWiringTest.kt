@@ -53,7 +53,14 @@ class AppShellProductionWiringTest {
             // 归档同样走持久形态：重启后任务中心仍可按 IntentRun 追溯（§8.5 双寄存器都落盘）
             runArchive = FileRunArchive(archiveDir),
             heartbeatMillis = { 100L },
-            npmHandler = NpmShellKit.assembleHandler(filesDir = npmFiles, cacheDir = npmCache),
+            // 磁盘探针固定值（2GB）：@TempDir 在 tmpfs 上，CI/沙箱 /tmp 常被占满 ——
+            // 本测断言的是"无真引擎 → 重操作诚实 ERR_NOT_IMPLEMENTED"，不是磁盘预检；
+            // 探针是环境敏感缝，喂固定数让断言只测接线本身（NpmShellKit 缺省探针暴露为参数）。
+            npmHandler = NpmShellKit.assembleHandler(
+                filesDir = npmFiles,
+                cacheDir = npmCache,
+                freeSpaceProbe = { 2L * 1024 * 1024 * 1024 },
+            ),
         )
 
     @Test

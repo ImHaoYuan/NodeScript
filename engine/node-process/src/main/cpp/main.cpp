@@ -77,19 +77,23 @@ constexpr const char kNodeStartSymbol[] = "_ZN4node5StartEiPPc";
 // install 把 addon.invoke 注入 runtimeBridge，脚本随后 require('auto') 即有桥。
 // 传 {addon: a} 复用本引导已 require 的同一实例（模块缓存本就同份，显式传免得
 // NativeBootstrap 再走一遍 env require）。
-// **exe 前端缺件 = 硬错（§7.8 契约，kExitDist=5）**：脚本自己 require('auto') 时会撞
-//     ERR_ENGINE_STOPPED —— 线上全部 JS 名（接口期即冻结）都要付"资源不齐"的代价，
-//     那是 launch 期就该裁决的东西，不该推到运行期。
-//     又：**bootstrap 后语句的 require(process.argv[1]) 吞了 addon 装载抛错** —— addon 缺位
-//     时 bootstrap 第一句就 dlopen 失败，node -e 报错文本只进 stderr、rc 却是 1（无独立
-//     code），Watchdog 把它当脚本错误。故缺 addon 的裁决在 exe（kExitDist=5）而不在
-//     bootstrap 里 require 的选择分支（那里只能 stderr + rc=1）。
+// **两层裁决分工**（§7.8 契约）：
+//   · exe preflight（kExitDist=5）：addon 在位但 dist env 未给 / dist 顶层路径不存在 =
+//     launch 期硬错（资源不齐不该推到运行期 ERR_ENGINE_STOPPED）。这层只查"路径在不在"。
+//   · bootstrap try/catch（下方）：dist 路径在、但 bootstrap.js 内容损坏/attachNative 抛错 =
+//     运行期失败，stderr 点名（"attachNative 未接上"）、脚本照跑（选填件不杀执行，与
+//     addon 缺位同纪律）。这层查"内容能不能 attach"。
+// 故 kBootstrap 仍保留 require($DIST/bootstrap.js).attachNative({addon}) 的 try/catch ——
+// preflight 拦不住"路径在但内容坏"，那是这一层的事。
 constexpr const char kBootstrap[] =
     "const a=require(process.env.AUTOSCRIPT_BRIDGE_ADDON);"
     "if(process.env.AUTOSCRIPT_SOCK_FD)a.setSocketFd(+process.env.AUTOSCRIPT_SOCK_FD);"
     "const rid=+process.env.AUTOSCRIPT_RUN_ID;"
     "if(rid>0){let seq=0;setInterval(()=>{seq++;"
     "try{a.invoke('engines','heartbeat',JSON.stringify({runId:rid,seq}),-seq,2000)}catch(e){}},500).unref();}"
+    "try{const d=process.env.AUTOSCRIPT_BRIDGE_DIST;"
+    "if(d)require(d+\"/bootstrap.js\").attachNative({addon:a})"
+    "}catch(e){console.error('bridge-dist attachNative 未接上: '+(e&&e.message||e))}"
     "require(process.argv[1]);";
 
 // 连 :main 的 unix socket；成功返回 fd，失败 -1（errno 保留给调用方打印）。
