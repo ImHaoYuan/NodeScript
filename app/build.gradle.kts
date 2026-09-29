@@ -106,13 +106,19 @@ val prepareEngineNativeLibs = tasks.register("prepareEngineNativeLibs") {
     val addonSrc = rootProject.layout.projectDirectory
         .file("engine/node-process/build/native-local/bridge_native.node")
     // libnode 候选序（先命中先用）：显式 env → node-runtime-build 出口 → 本机验证位。
-    // 与 build-native.sh 的 LIBNODE 默认同源（本机验证配方）。
+    // 与 build-native.sh 的 LIBNODE 默认同源（本机验证配方）。第三候选（本机验证位）
+    // 是**上次会话的临时出口** —— 与 build-native.sh 的 LIBNODE 默认是同一处
+    // （/tmp/nrb-out7），留在表里纯为 dev 复现，不随产线。
     val libnodeCandidates = listOfNotNull(
         System.getenv("LIBNODE")?.let { File(it) },
         rootProject.layout.projectDirectory.file("node-runtime-build/out/libnode.so").asFile,
         File("/tmp/nrb-out7/libnode.so"),
     )
     // libc++_shared：libnode 的 NEEDED（readelf 实证），NDK sysroot 同款 ABI。
+    // libc++_shared：libnode 的 NEEDED（readelf 实证），NDK sysroot 同款 ABI ——
+    // 与本机 CLAUDE.md 的 NDK 路径同源（/root/ndk/android-ndk-r28c，r28c 与
+    // node-runtime-build/VERSIONS.env 同版本）。cxxShared 只在「noden+libnode 都
+    // 在位」的分支里用（有件才要校验它同口径），半套/全无分支不读它。
     val ndkHome = System.getenv("ANDROID_NDK_HOME") ?: "/root/ndk/android-ndk-r28c"
     val cxxShared = File(
         ndkHome,
@@ -123,6 +129,7 @@ val prepareEngineNativeLibs = tasks.register("prepareEngineNativeLibs") {
     // 与引擎三件套**同一条选填纪律**：缺位不红（装配侧 JniOps.loadOrNull() 拿不到
     // so 即不喂分析器，桥对 images.* 回 ERR_NOT_IMPLEMENTED），在位才随包。
     // 装载名与文件名必须同为 opencv：JniOps.loadLibrary("opencv") 找的是 libopencv.so。
+    // 第三候选（/tmp/img-opencv-out）同上：本机临时验证位，不随产线。
     val libopencvCandidates = listOfNotNull(
         System.getenv("LIBOPENCV")?.let { File(it) },
         rootProject.layout.projectDirectory

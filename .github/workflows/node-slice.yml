@@ -83,8 +83,9 @@ jobs:
 
       - name: 构建 libnode + node（fetch-and-build.sh 全链）
         run: |
-          # Node tarball（30MB+）由脚本 §1 自行下载 + 官方 sha256 校验；
-          # 16KB/平台/ABI 门禁在脚本 §7，已是 fatal，无需重复断言。
+          # Node tarball（30MB+）由脚本 §1 自行下载，官方 sha256 由 VERSIONS.env 的
+          # NODE_SHA256 钉死校验（2026-09-29 起唯一来源）；16KB/平台/ABI 门禁在脚本
+          # §7（含 libc++_shared 同门禁），已是 fatal，无需重复断言。
           bash node-runtime-build/scripts/fetch-and-build.sh 2>&1 | tee /tmp/node-slice.log
           grep -q '完成。产物' /tmp/node-slice.log || { echo "构建日志无完成行"; exit 1; }
 
