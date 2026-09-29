@@ -13,6 +13,13 @@ name: node-slice
 #
 # 产物不随 APK 走：out/node 供 adb push 到设备做 §844 垂直切片验证；
 # out/libnode.so.* 是 :bridge:native dlopen 的宿主引擎。artifact 给人下载核验。
+#
+# 缓存两层（合并写法 actions/cache，命中即用、安全阀见各步骤注释）：
+#   A. 下载层 `$WORK/dl`（NDK zip 722MB + Node tarball 30MB+，key 钉 VERSIONS.env
+#      哈希 —— 版本一变即失效重下，不吃过期包）；
+#   B. 编译层 ccache（V8 全量交叉编译是绝对大头：编译单元按预处理内容哈希，
+#      脚本/打包步骤的改动不使它失效 —— "只改 §7 打包步骤"类重跑，解包+重链接即完）。
+# Docker 发布轨不装 ccache → USE_CCACHE 开关恒假，无影响。
 on:
   push:
     paths:
@@ -40,12 +47,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 安装编译期依赖（build-essential + curl + unzip + xz + python3）
+      - name: 安装编译期依赖（build-essential + curl + unzip + xz + python3 + ccache）
         run: |
           # 不赌 runner 镜像预装：fetch-and-build 要 gcc/g++/ar（host toolset，
           # 见脚本 §4）、unzip（NDK 解包）、xz（tarball 解包）、python3（§3b/3c 补丁）。
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential curl unzip xz-utils python3
+          sudo apt-get install -y --no-install-recommends build-essential curl unzip xz-utils python3 ccache
+
+      # A. 下载层缓存（NDK zip 722MB + Node tarball 30MB+）。
+      # key 钉 VERSIONS.env 哈希：版本矩阵任一变更即换 key 重下，不吃过期包
+      # （故意**不给** restore-keys：同名 zip 内容不同时旧包是毒药 —— 脚本 §1/§2 的
+      # size/sha1 复验会 loud die，但干净重下比"复用+续传+再验"更省事；下载本就几分钟）。
+      # 合并写法（actions/cache）：命中则用且构建后跳过存，未命中则构建后自动存 ——
+      # 同 key 重复 save 会炸步骤，拆分写法的 restore+save 在这里是错的。
+      - name: 缓存下载层（NDK zip + Node tarball）
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/work/dl
+          key: node-dl-${{ hashFiles('node-runtime-build/VERSIONS.env') }}
+
+      # B. 编译层缓存（ccache dir，V8 全量交叉编译是绝对大头）。
+      # 命中不看脚本字面 —— ccache 按预处理内容哈希：改脚本 §7 打包步骤
+      # （cp/strip/门禁/基表，不碰任何 .cc/.h 预处理输入）时编译单元几乎全命中，
+      # 只剩重链；改 §3b/3c 补丁（换 zlib.gyp/v8.gyp 源输入）时对应单元自然 miss 重编。
+      # restore-keys 跨版本兜底是安全的（ccache 内容寻址，旧条目对新源码天然 miss，
+      # 只占空间不毒构建）。编译器本体升级风险可忽略：交叉编译器来自 pin 死的 r28c
+      # zip（不随 runner 镜像滚），host gcc 只编 mksnapshot 等小工具。
+      - name: 缓存 ccache（V8 交叉编译单元）
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: node-ccache-${{ hashFiles('node-runtime-build/VERSIONS.env') }}
+          restore-keys: node-ccache-
 
       - name: 安装 NDK r28c（dl.google.com zip + size/sha1 校验，同脚本 §2）
         run: |
@@ -81,13 +114,24 @@ jobs:
             || { echo "解包后无 aarch64-linux-android${API}-clang: $TOOLCHAIN"; exit 1; }
           echo "[OK] NDK 就位: $TOOLCHAIN"
 
-      - name: 构建 libnode + node（fetch-and-build.sh 全链）
+      - name: 构建 libnode + node（fetch-and-build.sh 全链，ccache 开）
+        env:
+          USE_CCACHE: '1'
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+          CCACHE_MAXSIZE: 2G
         run: |
           # Node tarball（30MB+）由脚本 §1 自行下载，官方 sha256 由 VERSIONS.env 的
           # NODE_SHA256 钉死校验（2026-09-29 起唯一来源）；16KB/平台/ABI 门禁在脚本
           # §7（含 libc++_shared 同门禁），已是 fatal，无需重复断言。
+          # USE_CCACHE=1 让脚本 §4 经 ccache 包 CC/CXX（ccache 不在则 WARN 走旧路，
+          # 不炸构建）。CCACHE_DIR 落在 workspace 内（runner 家目录不持久，只有
+          # workspace 相对路径能被 actions/cache 存走）。ccache 零统计开局即 -z
+          # 清零，下方审计步骤读 -s 即"本轮真实命中率"（不清零会把 restore 进来的
+          # 旧计数混进来，分不清本轮有没有命中）。
+          ccache -z || true
           bash node-runtime-build/scripts/fetch-and-build.sh 2>&1 | tee /tmp/node-slice.log
           grep -q '完成。产物' /tmp/node-slice.log || { echo "构建日志无完成行"; exit 1; }
+          ccache -s || true
 
       - name: 产物审计（基表 + 文件清单）
         run: |
@@ -106,3 +150,4 @@ jobs:
             work/out/config.gypi
             work/out/config.mk
           if-no-files-found: error
+

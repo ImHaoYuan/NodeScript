@@ -146,6 +146,21 @@ export RANLIB="$TOOLCHAIN/bin/llvm-ranlib"
 export STRIP="$TOOLCHAIN/bin/llvm-strip"
 [ -x "$CC" ] && [ -x "$CXX" ] || die "NDK clang wrapper 缺失: $NDK_DIR"
 
+# ccache（CI 提速，可选开关）：USE_CCACHE 非空且 ccache 在 PATH 时，CC/CXX 包一层
+# ccache 前缀（`CC="ccache <clang>"` 形态；gyp/make 经 env 取 CC，空格分隔天然可分）。
+# 放在 `[ -x ]` 探针**之后**（探针验的是裸 wrapper 路径）；AR/RANLIB 不包（归档由缓存
+# 对象重链，本就快）；host toolset（CC_host=gcc，下方）不包（mksnapshot 等宿主工具
+# 量小，且换了它们的编译器指纹会污染命中口径）。Docker 发布轨不装 ccache → 条件恒假。
+# 跨轮命中前提：$WORK 布局稳定（ccache 默认按预处理内容哈希；CI 的 WORK_DIR 固定，
+# 见 node-slice.yml）—— 绝对路径一致即命中，无需 sloppiness。
+if [ -n "${USE_CCACHE:-}" ] && command -v ccache >/dev/null 2>&1; then
+    export CC="ccache $CC"
+    export CXX="ccache $CXX"
+    say "ccache 已接管 CC/CXX（dir=${CCACHE_DIR:-~/.ccache}）"
+elif [ -n "${USE_CCACHE:-}" ]; then
+    printf '\033[1;33m[WARN]\033[0m USE_CCACHE=1 但无 ccache，走无缓存构建\n' >&2
+fi
+
 # host toolset：gyp 对 toolsets:['host']（mksnapshot 等构建期 x86_64 宿主工具）从
 # CC_host→CC、CXX_host→CXX 回退解析（tools/gyp/.../make.py:2482-2485）。若缺 CC_host，
 # 会回退到上方 CC=NDK 交叉 clang → mksnapshot 编成 arm64-android ELF → 宿主执行 ENOEXEC

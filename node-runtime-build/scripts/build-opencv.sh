@@ -97,6 +97,18 @@ say "cmake configure（BUILD_LIST=$OPENCV_BUILD_LIST, kleidicv=$KLEIDICV_COMMIT�
 # 命令，而 set -o pipefail 让 cmake 自己的退出码也能传给 set -e —— 配置失败在这里就停，
 # 不会走到 3b 段把"没配完的 configure.log"当成 kleidicv=OFF 的证据。
 CONFIGURE_LOG="$BUILD_DIR/configure.log"
+# ccache（CI 提速，可选开关）：USE_CCACHE 非空且 ccache 在位时，经
+# CMAKE_*_COMPILER_LAUNCHER 包调用层 —— 不换 CMAKE_CXX_COMPILER 本体（换本体会触发
+# cmake 编译器指纹重检；launcher 只包调用，CMakeCache 指纹不变，命中口径干净）。
+# 放在 `rm -rf $BUILD_DIR` 之后无妨（BUILD_DIR 每轮重建，launcher 与缓存目录都只认
+# env）；Docker 发布轨不装 ccache → 条件恒假。无 ccache 但要了开关 → WARN 走旧路。
+CMAKE_LAUNCHER_ARGS=()
+if [ -n "${USE_CCACHE:-}" ] && command -v ccache >/dev/null 2>&1; then
+    CMAKE_LAUNCHER_ARGS=(-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache)
+    say "ccache 已接管 OpenCV 编译（dir=${CCACHE_DIR:-~/.ccache}）"
+elif [ -n "${USE_CCACHE:-}" ]; then
+    printf '\033[1;33m[WARN]\033[0m USE_CCACHE=1 但无 ccache，走无缓存构建\n' >&2
+fi
 cmake -S "$OCV_SRC" -B "$BUILD_DIR" \
     -DCMAKE_TOOLCHAIN_FILE="$NDK_DIR/build/cmake/android.toolchain.cmake" \
     -DANDROID_ABI=arm64-v8a \
@@ -121,7 +133,8 @@ cmake -S "$OCV_SRC" -B "$BUILD_DIR" \
     -DBUILD_ZLIB=ON -DBUILD_JPEG=ON -DBUILD_PNG=ON \
     -DOPENCV_ENABLE_NONFREE=OFF \
     -DENABLE_CONFIG_VERIFICATION=OFF \
-    -DOPENCV_WARNINGS_ARE_ERRORS=OFF 2>&1 | tee "$CONFIGURE_LOG"
+    -DOPENCV_WARNINGS_ARE_ERRORS=OFF \
+    "${CMAKE_LAUNCHER_ARGS[@]}" 2>&1 | tee "$CONFIGURE_LOG"
 
 # ── 3b) kleidicv 审计行：软降级不 fatal，但必须可查───────────────────────
 # **判定源不是 CMakeCache**（2026-09-25 定位教训，此前两处错判都源于此）：
@@ -169,6 +182,11 @@ cmake --build "$BUILD_DIR" --target opencv_features2d -j"$(nproc)"
 IMG_LIB="$OUT/libopencv.so"
 say "链 libopencv.so（计算核 + 装载面 + 静态 opencv + 静态 STL）"
 CXX="$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang++"
+# ccache 作用于 §5 的编链二文件：CXX 本体不变，只包调用层（与 §3 的 launcher 同一条
+# 纪律 —— 配置指纹不受包调用影响）。条件与 §3 同源（USE_CCACHE + ccache 在位）。
+if [ -n "${USE_CCACHE:-}" ] && command -v ccache >/dev/null 2>&1; then
+    CXX="ccache $CXX"
+fi
 "$CXX" -std=c++17 -fPIC -O2 -Wall -Wextra \
     -Wl,-z,max-page-size=16384 -static-libstdc++ \
     -shared \
