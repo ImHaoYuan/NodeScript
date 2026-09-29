@@ -191,8 +191,31 @@ CXX_ARGS=("$CXX_BIN")
 if [ -n "${USE_CCACHE:-}" ] && command -v ccache >/dev/null 2>&1; then
     CXX_ARGS=(ccache "$CXX_BIN")
 fi
+# HAL 静态库（2026-09-30 补，43+125 个悬空符号的根因）：OpenCV 对 carotene/kleidicv
+# 的链接是 CMake target 级 PRIVATE —— 静态 opencv_*.a **不内嵌** HAL 归档，上游靠
+# CMake 传递接口补链；我们这条裸 clang++ 链接面此前没带，于是 168 个
+# `carotene_o4t::*`/`kleidicv*` 符号悬空在动态符号表里（NEEDED 白名单照样绿 ——
+# 悬空符号不产生新 NEEDED）。后果不是"少加速"，是**整个 so 装不进来**：真机
+# dlopen(RTLD_NOW) 第一拍就 `cannot locate symbol "kleidicv_saturating_add_u8"`，
+# System.loadLibrary 抛 UnsatisfiedLinkError → images 恒 ERR_NOT_IMPLEMENTED。
+# 2026-09-30 image-native artifact 实测如此；此前没现形是因为宿主机门禁 kleidicv=OFF
+# 且 x86_64 无 NEON（carotene 同批关），两个 HAL 都不参与，而真机加载面从没跑过。
+# 归档在 3rdparty/lib/<ABI>（kleidicv 三个 + carotene 的 tegra_hal，各自
+# ARCHIVE_OUTPUT_DIRECTORY 同 zlib 那批）；存在才挂 —— 缺席的裁决交给 -z defs：
+# 只要 opencv 归档引用了缺席 HAL 的符号，链接期就红，比装上后才现形早一整段。
+HAL_LIBS=()
+for hal in kleidicv_hal kleidicv kleidicv_thread tegra_hal; do
+    if [ -f "$BUILD_DIR/3rdparty/lib/arm64-v8a/lib${hal}.a" ]; then
+        HAL_LIBS+=("-l${hal}")
+    else
+        say "[WARN] HAL 归档缺席（若 opencv 引用了它的符号，-z defs 会在下方红）: lib${hal}.a"
+    fi
+done
+# -z defs = 本脚本的悬空符号门禁：强 undefined 链接期报错（weak undefined 不算 ——
+# lld 实测放行，bionic 装载面同口径），系统符号由 -l 系当场解掉。没有它，链接器
+# 对 -shared 默认**放行**所有悬空符号，16KB/NEEDED/JNI 三条门禁一条都看不见这类错。
 "${CXX_ARGS[@]}" -std=c++17 -fPIC -O2 -Wall -Wextra \
-    -Wl,-z,max-page-size=16384 -static-libstdc++ \
+    -Wl,-z,max-page-size=16384 -Wl,-z,defs -static-libstdc++ \
     -shared \
     -I "$OCV_SRC/modules/core/include" \
     -I "$OCV_SRC/modules/imgproc/include" \
@@ -204,13 +227,19 @@ fi
     "$IMG_CPP_DIR/imgnative.cpp" \
     "$IMG_CPP_DIR/images_jni.cc" \
     -L"$BUILD_DIR/lib/arm64-v8a" -L"$BUILD_DIR/3rdparty/lib/arm64-v8a" \
+    -Wl,--start-group \
     -lopencv_features2d -lopencv_flann -lopencv_imgcodecs -lopencv_imgproc -lopencv_core \
+    ${HAL_LIBS[@]+"${HAL_LIBS[@]}"} \
+    -Wl,--end-group \
     -llibjpeg-turbo -llibpng -lzlib \
     -ldl -lm -llog
 
-# 链接面 = BUILD_LIST 五个模块 + 它们自带的两个格式库（libjpeg-turbo/libpng/zlib，
-# BUILD_JPEG/BUILD_PNG/BUILD_ZLIB=ON 强制走树内源码，不找宿主/交叉 sysroot ——
-# 无外部下载、无系统依赖，产物可复现）。最终的 NEEDED 白名单由下方门禁来验。
+# 链接面 = BUILD_LIST 五个模块 + HAL 归档（有则挂）+ 它们自带的两个格式库
+# （libjpeg-turbo/libpng/zlib，BUILD_JPEG/BUILD_PNG/BUILD_ZLIB=ON 强制走树内源码，
+# 不找宿主/交叉 sysroot —— 无外部下载、无系统依赖，产物可复现）。opencv 与 HAL 放
+# 同一个 --start-group：HAL 包装层（kleidicv_hal.cpp/tegra_hal）反向调 cv 符号，
+# 环状依赖下单遍扫描顺序敏感，组内顺序无关。最终的 NEEDED 白名单由下方门禁来验，
+# 悬空符号由 -z defs 在本段就验。
 
 # ── 6) strip（保留动态符号：extern "C" 四个入口是 JNI/dlsym 的靶子）──────
 STRIP="$TOOLCHAIN/bin/llvm-strip"
