@@ -3,6 +3,7 @@ package com.autoscript.platform.system
 import com.autoscript.domain.automation.ImageAnalyzer
 import com.autoscript.domain.automation.ImageFrame
 import com.autoscript.domain.automation.ColorHit
+import com.autoscript.domain.automation.FeatureHit
 import com.autoscript.domain.automation.ImageMatch
 import com.autoscript.domain.bridge.HandleRef
 import com.autoscript.domain.core.AutojsException
@@ -68,6 +69,30 @@ class NativeImageAnalyzer(
                 id
             }
             ImageFrame(HandleRef(refId, GENERATION), width, height)
+        }
+    }
+
+    override suspend fun ingest(width: Int, height: Int, rgba: ByteArray): ImageFrame {
+        require(width > 0 && height > 0) { "ingest 的宽高必须为正，实际 ${width}x$height" }
+        require(rgba.size == width * height * 4) {
+            "ingest 的像素必须紧密打包 RGBA：期望 ${width * height * 4} 字节，实际 ${rgba.size}"
+        }
+        return withContext(Dispatchers.IO) {
+            val status = IntArray(1)
+            val ingested = ops.ingest(rgba, width, height, status)
+            val rc = status[0]
+            if (ingested == null) {
+                throw if (rc != 0) statusToException(rc, "ingest ${width}x$height") else {
+                    AutojsException(ErrorCode.ERR_IO, "images ingest 的 native 调用失败")
+                }
+            }
+            val (nativeRef, w, h) = ingested
+            val refId = synchronized(guard) {
+                val id = nextRefId++
+                frames[id] = nativeRef
+                id
+            }
+            ImageFrame(HandleRef(refId, GENERATION), w, h)
         }
     }
 
@@ -164,6 +189,99 @@ class NativeImageAnalyzer(
         }
     }
 
+    // ── P1 图像桥消费方五算子（2026-09-29 开通；:domain `ImageAnalyzer` 新方法）──
+    // 形状统一：源帧 → 产出帧（[frameFromNative] 落表发号，与 decode/ingest 同一张
+    // 表、同一个号段 —— release 对产出帧与源帧同口径）。
+    // 域校验与 findColor 同一条纪律：handler 已先拒，这里再兜一次（两条判据若
+    // 漂移，宁可在这层炸 ERR_INVALID_PARAM，也不让脏参数进 native）。
+
+    override suspend fun toGrayscale(frame: HandleRef): ImageFrame =
+        withContext(Dispatchers.IO) {
+            val nativeRef = requireLive(frame, "toGrayscale")
+            val status = IntArray(1)
+            frameFromNative(ops.gray(nativeRef, status), status, "toGrayscale frame=${frame.refId}")
+        }
+
+    override suspend fun crop(frame: HandleRef, region: List<Int>): ImageFrame {
+        require(region.size == 4) { "images crop 的 region 必须 x,y,w,h 四元组，实际 ${region.size}" }
+        return withContext(Dispatchers.IO) {
+            val nativeRef = requireLive(frame, "crop")
+            val status = IntArray(1)
+            frameFromNative(ops.crop(nativeRef, region.toIntArray(), status), status, "crop frame=${frame.refId}")
+        }
+    }
+
+    override suspend fun resize(frame: HandleRef, width: Int, height: Int): ImageFrame {
+        require(width > 0 && height > 0 && width <= 16384 && height <= 16384) {
+            "images resize 的目标尺寸必须 (0,16384] 正整数，实际 ${width}x$height"
+        }
+        return withContext(Dispatchers.IO) {
+            val nativeRef = requireLive(frame, "resize")
+            val status = IntArray(1)
+            frameFromNative(ops.resize(nativeRef, width, height, status), status, "resize frame=${frame.refId}")
+        }
+    }
+
+    override suspend fun rotate(frame: HandleRef, degrees: Double): ImageFrame {
+        require(degrees.isFinite()) { "images rotate 的 degrees 必须是有限数字，实际 $degrees" }
+        return withContext(Dispatchers.IO) {
+            val nativeRef = requireLive(frame, "rotate")
+            val status = IntArray(1)
+            frameFromNative(ops.rotate(nativeRef, degrees, status), status, "rotate frame=${frame.refId}")
+        }
+    }
+
+    override suspend fun findFeature(scene: HandleRef, template: HandleRef): FeatureHit? =
+        withContext(Dispatchers.IO) {
+            val native = synchronized(guard) {
+                val s = frames[scene.refId]
+                val t = frames[template.refId]
+                if (s == null || t == null) {
+                    throw AutojsException(
+                        ErrorCode.ERR_STALE_HANDLE,
+                        "images findFeature 的帧句柄已释放（scene=${scene.refId}, template=${template.refId}）",
+                    )
+                }
+                s to t
+            }
+            val status = IntArray(1)
+            val hit = ops.feature(native.first, native.second, status)
+            when {
+                hit != null -> hit
+                status[0] == STATUS_OK -> null   // 未匹配（答案，不是异常）
+                else -> throw statusToException(status[0], "findFeature scene=${scene.refId}")
+            }
+        }
+
+    /** 帧在场性兜底（与 match/findColor 同口径：帧表唯一事实源，判据在 [frames]）。 */
+    private fun requireLive(frame: HandleRef, what: String): Long =
+        synchronized(guard) {
+            frames[frame.refId]
+                ?: throw AutojsException(
+                    ErrorCode.ERR_STALE_HANDLE,
+                    "images $what 的帧句柄已释放（frame=${frame.refId}）",
+                )
+        }
+
+    /**
+     * native 产出帧 → 本类 [frames] 表（发号与 [decode]/[ingest] 同一号段）+ 回包。
+     * 失败 = null + status 非 0（同 decode 的判读：null + status 0 = JNI 自身失败，如实 IO）。
+     */
+    private fun frameFromNative(decoded: Triple<Long, Int, Int>?, status: IntArray, what: String): ImageFrame {
+        if (decoded == null) {
+            throw if (status[0] != 0) statusToException(status[0], what) else {
+                AutojsException(ErrorCode.ERR_IO, "images $what 的 native 调用失败")
+            }
+        }
+        val (nativeRef, width, height) = decoded
+        val refId = synchronized(guard) {
+            val id = nextRefId++
+            frames[id] = nativeRef
+            id
+        }
+        return ImageFrame(HandleRef(refId, GENERATION), width, height)
+    }
+
     /** native 状态码 → 分类错误（`imgnative.cpp` 文件头的对表，原码透传）。 */
     private fun statusToException(status: Int, what: String): AutojsException {
         val code = when (status) {
@@ -187,6 +305,13 @@ class NativeImageAnalyzer(
     interface Ops {
         /** @return `Triple(nativeRef, width, height)`；失败 null + `status[0]` 非 0。 */
         fun decode(path: String, status: IntArray): Triple<Long, Int, Int>?
+
+        /**
+         * 登记一屏**已在内存里的 RGBA 紧排像素**（§18 第 8 项 (b)：截屏帧进 images 帧表，
+         * 发号侧归一）。与 [decode] 同一张 native 帧表、同一个号段。
+         * @return `Triple(nativeRef, width, height)`；失败 null + `status[0]` 非 0。
+         */
+        fun ingest(rgba: ByteArray, width: Int, height: Int, status: IntArray): Triple<Long, Int, Int>?
 
         /**
          * @return 命中五元组；**未命中** null + `status[0] == 0`（答案）；
@@ -217,6 +342,37 @@ class NativeImageAnalyzer(
 
         /** @return 0 = OK；1 = 未知/已释放的 native 帧号。 */
         fun release(nativeRef: Long): Int
+
+        /**
+         * 灰度化：源帧 → 产出帧（回 `Triple(nativeRef, width, height)`，宽高与源帧
+         * 同；新帧也落 native 帧表，由调用方 release）。失败 null + `status[0]` 非 0。
+         */
+        fun gray(nativeFrame: Long, status: IntArray): Triple<Long, Int, Int>?
+
+        /**
+         * 裁剪：源帧的 `region = [x,y,w,h]` 子矩形 → 产出帧（尺寸 = region 的 w/h）。
+         * 失败 null + `status[0]` 非 0（region 越帧界 → 4）。
+         */
+        fun crop(nativeFrame: Long, region: IntArray, status: IntArray): Triple<Long, Int, Int>?
+
+        /**
+         * 缩放：源帧 → 目标尺寸 `width` × `height` 产出帧（插值 INTER_LINEAR 固定在
+         * native）。失败 null + `status[0]` 非 0（尺寸非法/超配额 → 4）。
+         */
+        fun resize(nativeFrame: Long, width: Int, height: Int, status: IntArray): Triple<Long, Int, Int>?
+
+        /**
+         * 旋转：源帧绕帧中心逆时针转 [degrees] → 产出帧（expand 画布，宽高随角度
+         * 由包络公式算出）。失败 null + `status[0]` 非 0（非有限角度/画布超配额 → 4）。
+         */
+        fun rotate(nativeFrame: Long, degrees: Double, status: IntArray): Triple<Long, Int, Int>?
+
+        /**
+         * 特征匹配：场景里找模板的**不同尺寸/轻微旋转变体** —— 回模板中心
+         * `(x, y)` + 置信度；**未命中** null + `status[0] == 0`（答案）；失败 null +
+         * status 非 0。不产出帧。
+         */
+        fun feature(scene: Long, template: Long, status: IntArray): FeatureHit?
     }
 
     companion object {
@@ -242,10 +398,12 @@ class NativeImageAnalyzer(
 
 /**
  * so 装载面（[NativeImageAnalyzer.Ops] 的真机实现）：`System.loadLibrary("opencv")`
- * 装载 `libopencv.so`（`:bridge:image` 产物）+ 三个 `external` native 方法。
+ * 装载 `libopencv.so`（`:bridge:image` 产物）+ 五个 `external` native 方法。
  * 方法名与 `:bridge:image` 的 `images_jni.cc`
- * 的 `Java_com_autoscript_platform_system_NativeImageAnalyzer_*` 对表 ——
- * **换包名/换类名必须同批改那边**（JNI 符号名是字符串约定，编译器不看护）。
+ * 的 `Java_com_autoscript_platform_system_JniOps_*` 对表 ——
+ * **换包名/换类名必须同批改那边**（JNI 符号名是字符串约定，编译器不看护；
+ * `bridge/js/test/jni-names.test.cjs` 钉的就是这条，2026-09-26 曾抓到
+ * cc 用 `NativeImageAnalyzer_` 而声明类是 `JniOps` 的对不上）。
  *
  * loadLibrary 在**类初始化**时做（companion 之外的实例化都跑得到）：so 缺位
  * 抛 `UnsatisfiedLinkError`，由 [NativeImageAnalyzer.of] 的捕获转成"不注入"。
@@ -254,6 +412,8 @@ class NativeImageAnalyzer(
 class JniOps : NativeImageAnalyzer.Ops {
 
     private external fun decodeNative(path: String, status: IntArray): LongArray?
+
+    private external fun ingestNative(rgba: ByteArray, width: Int, height: Int, status: IntArray): LongArray?
 
     private external fun matchNative(
         haystack: Long,
@@ -272,8 +432,28 @@ class JniOps : NativeImageAnalyzer.Ops {
         status: IntArray,
     ): LongArray?
 
+    private external fun grayNative(frame: Long, status: IntArray): LongArray?
+
+    private external fun cropNative(frame: Long, region: IntArray, status: IntArray): LongArray?
+
+    private external fun resizeNative(frame: Long, width: Int, height: Int, status: IntArray): LongArray?
+
+    private external fun rotateNative(frame: Long, degrees: Double, status: IntArray): LongArray?
+
+    private external fun featureNative(scene: Long, template: Long, status: IntArray): DoubleArray?
+
     override fun decode(path: String, status: IntArray): Triple<Long, Int, Int>? {
         val r = decodeNative(path, status)
+        return if (r == null || r.size < 3) null else Triple(r[0], r[1].toInt(), r[2].toInt())
+    }
+
+    override fun ingest(
+        rgba: ByteArray,
+        width: Int,
+        height: Int,
+        status: IntArray,
+    ): Triple<Long, Int, Int>? {
+        val r = ingestNative(rgba, width, height, status)
         return if (r == null || r.size < 3) null else Triple(r[0], r[1].toInt(), r[2].toInt())
     }
 
@@ -322,6 +502,40 @@ class JniOps : NativeImageAnalyzer.Ops {
             g = r[3].toInt(),
             b = r[4].toInt(),
             a = r[5].toInt(),
+        )
+    }
+
+    override fun gray(nativeFrame: Long, status: IntArray): Triple<Long, Int, Int>? {
+        val r = grayNative(nativeFrame, status)
+        return if (r == null || r.size < 3) null else Triple(r[0], r[1].toInt(), r[2].toInt())
+    }
+
+    override fun crop(nativeFrame: Long, region: IntArray, status: IntArray): Triple<Long, Int, Int>? {
+        val r = cropNative(nativeFrame, region, status)
+        return if (r == null || r.size < 3) null else Triple(r[0], r[1].toInt(), r[2].toInt())
+    }
+
+    override fun resize(nativeFrame: Long, width: Int, height: Int, status: IntArray): Triple<Long, Int, Int>? {
+        val r = resizeNative(nativeFrame, width, height, status)
+        return if (r == null || r.size < 3) null else Triple(r[0], r[1].toInt(), r[2].toInt())
+    }
+
+    override fun rotate(nativeFrame: Long, degrees: Double, status: IntArray): Triple<Long, Int, Int>? {
+        val r = rotateNative(nativeFrame, degrees, status)
+        return if (r == null || r.size < 3) null else Triple(r[0], r[1].toInt(), r[2].toInt())
+    }
+
+    /**
+     * feature：native 回 jdouble[3]{x,y,confidence}（模板中心）；空数组/`x < 0`
+     * = 未匹配（答案）；null = status 非 0 的分类失败。
+     */
+    override fun feature(scene: Long, template: Long, status: IntArray): FeatureHit? {
+        val r = featureNative(scene, template, status)
+        if (r == null || r.size < 3 || r[0] < 0) return null
+        return FeatureHit(
+            x = r[0].toInt(),
+            y = r[1].toInt(),
+            confidence = r[2],
         )
     }
 

@@ -5,10 +5,12 @@
  * images.decode/matchTemplate/findImage/findColor/release 走 native 分析面（§12.2 第七条独立缝，
  * Kotlin 对偶 `ImagesNamespaceHandler` + `:domain` `ImageAnalyzer`）。
  *
- * **两张桥面别混**：`screen.*` 是截图帧源（句柄由 `ScreenshotSource` 发号，`recycle`
- * 归它自己）；`images.*` 是图像分析面（句柄由 `decode` 从**文件**发号，`release` 归它）。
- * 两者句柄互不通用 —— 拿 `screen.capture()` 的帧去 `images.findImage()` 只会得到
- * `ERR_STALE_HANDLE`（handler 的说法：这张帧不在我的在场面表里）。
+ * **两 namespace 一张帧表**（§18 第 8 项 (b) 2026-09-25 拍板，"帧不通用"那条纪律取消）：
+ * 发号侧归一到宿主的 `ImageAnalyzer`，`screen.capture()` 的帧经 `ingest` 进的就是
+ * `images.decode()` 那张表 —— 于是 `images.findImage(screenFrame, decodeFrame)` 通、
+ * `images.release(screenFrame)` 也通。**释放入口仍是两个**（`frame.recycle()` 按来源
+ * 各打各的 namespace），但打进去是同一张表、同一个"已释放"事实：放过的帧在任一
+ * 侧再用都是 `ERR_STALE_HANDLE`。
  */
 /**
  * 帧句柄（§7.4）：JS 侧持 HandleRef 代理；recycle 释放（比 GC 优先，§7.4 引用计数对象）。
@@ -50,6 +52,17 @@ export interface ColorHitResult {
 }
 /** 找色可选搜索区域 `[x,y,w,h]`（缺省全帧；给了就必须整体落在帧内）。 */
 export type Region4 = readonly [number, number, number, number];
+/**
+ * 特征匹配命中（`images.findFeature`）：`x`/`y` 是**模板中心**在场景中的坐标
+ * （与 [MatchResult] 的左上角 + 模板尺寸不同 —— 特征匹配没有"模板尺寸"概念，
+ * 模板在场景里多大是未知的；回中心让脚本直接点下去）。`confidence` 与
+ * [MatchResult] 同域 `[0,1]`（几何一致内点数 / good 数），可直接比较。
+ */
+export interface FeatureHitResult {
+    x: number;
+    y: number;
+    confidence: number;
+}
 export declare const screen: {
     /**
      * 截图（§9.2）：a11y takeScreenshot（333ms 节流）/ MediaProjection 会话。
@@ -91,18 +104,78 @@ export declare const images: {
      * （脚本要拿它做坐标换算）。路径不得空白；文件缺失/不是合法图片由宿主原码透传
      * （`ERR_FILE_NOT_FOUND`/`ERR_IO`，不折叠成参数错）。
      *
-     * **路径写绝对路径**（2026-09-25 实测记账，见 §18 第 9 项）：`:domain` 契约写着
-     * 「路径解析由实现定」，但**四层里没有一层解析路径** —— 计算核直接 `fopen`/`imread`，
+     * **路径写绝对路径**（§18 第 9 项 2026-09-25 已拍板：只收绝对路径）：**四层里没有一层解析路径** —— 计算核直接 `fopen`/`imread`，
      * 于是相对路径按**宿主进程 CWD** 解析，而 so 载在 `:main` 里、那个进程的 CWD 是 `/`。
      * `decode('part.png')` 会去根目录找一个并不存在的文件，**回 `ERR_FILE_NOT_FOUND`
-     * 且报的路径是对的** —— 看起来像"文件真的不在"，不像"口径没定"。
-     * 基准解析（项目根/filesDir）拍板前，别写相对路径。
+     * 且报的路径是对的** —— 看起来像"文件真的不在"，不像"口径没定"。别写相对路径。
      *
      * 帧是**文件侧**的句柄：`recycle()` 打 `images/release`（不是 `screen/recycle`）。
+     * 两个入口通到同一张表，放过的帧两边都认得"已释放"。
      */
     decode(path: string, opts?: {
         timeout?: number;
     }): Promise<FrameSource>;
+    /**
+     * 灰度化：`frame` → 新帧（4 通道 BGRA，三通道同灰值、alpha 原样带过去）。
+     * **产出新帧不改原帧**：原帧照常可用，新帧要 `recycle()` 独立释放（与 decode 帧
+     * 同一条路 —— 同一个 ref 信封 + 宽高真值）。灰值按 0.299R+0.587G+0.114B
+     * （OpenCV `COLOR_BGRA2GRAY`），权重不经本层。
+     *
+     * 用途由调用方定：匹配前的预处理（灰帧不改变 findImage 的结果，省一点计算）、
+     * 给下游取"亮度面"。
+     */
+    toGrayscale(frame: FrameSource, opts?: {
+        timeout?: number;
+    }): Promise<FrameSource>;
+    /**
+     * 裁剪：`frame` 的 `region` 子矩形 → 新帧（尺寸 = region 的 `[x,y,w,h]`；不含
+     * region 外像素）。**必须给 region**（缺省 = `ERR_INVALID_PARAM`，不是整帧副本）。
+     * region 须**整体落在帧内**（`x+w == 宽` 贴边合法，越界 → `ERR_INVALID_PARAM`，
+     * 不静默裁剪成"只看得到的那半"）—— 与 findColor 的 region 同一条边界口径。
+     *
+     * 第三个参数 defaultValue 没有 —— region 是必填（v9 也要求区域）。
+     */
+    crop(frame: FrameSource, region: Region4, opts?: {
+        timeout?: number;
+    }): Promise<FrameSource>;
+    /**
+     * 缩放：`frame` → 目标尺寸 `width` × `height` 新帧（像素值重算，逐点不一定等于
+     * 原帧）。插值固定 LINEAR（不做入参）。入参是**目标尺寸**不是倍数。
+     *
+     * 域：正整数 + 单边配额 16384（16384²×4≈1GB，再往上是笔误把字节数当宽高 ——
+     * 越界 `ERR_INVALID_PARAM` 且一次调用都不发）。
+     */
+    resize(frame: FrameSource, width: number, height: number, opts?: {
+        timeout?: number;
+    }): Promise<FrameSource>;
+    /**
+     * 旋转：`frame` 绕帧中心**逆时针**转 `degrees` 度 → 新帧。角度必须**有限**
+     * （NaN/Inf → `ERR_INVALID_PARAM`）。
+     *
+     * 画布是 **expand**（包住整图不静默裁像素 —— 宽高随角度由包络公式算出，随回包
+     * 给真值）；0°/360° 恒等。插值 LINEAR、填充 REPLICATE（黑边是找色的假阳性源）。
+     * 想要"旋转裁剪"：先 `rotate` 再 `crop`（两个算子都在）。
+     */
+    rotate(frame: FrameSource, degrees: number, opts?: {
+        timeout?: number;
+    }): Promise<FrameSource>;
+    /**
+     * 特征匹配（`findFeature`）：在 `scene` 帧里找 `template` 帧的**不同尺寸/轻微
+     * 旋转变体**，回**模板中心**坐标 + 置信度。与 [matchTemplate] 的左上角 + 模板
+     * 尺寸不同：特征匹配没有"模板尺寸"概念（模板在场景里多大是未知的），回中心
+     * 让脚本直接点下去。
+     *
+     * 链全固定（ORB 1000 → BFMatcher HAMMING → Lowe ratio 0.75 → 中位数偏移
+     * ±3px 几何一致性）；**未匹配是答案**：回 `null`（与 matchTemplate 同一条
+     * 纪律 —— 纯色模板"空描述子"也落未匹配，不是异常）。**无阈值入参**：置信度
+     * 随回包给，是否"够"由调用方自己判。
+     *
+     * 刚性匹配（matchTemplate，模板尺寸必须一致）与特征匹配（容忍缩放/旋转）是
+     * 两种找图语义，脚本按场景任选其一。
+     */
+    findFeature(scene: FrameSource, template: FrameSource, opts?: {
+        timeout?: number;
+    }): Promise<FeatureHitResult | null>;
     /**
      * 从文件读图（`decode` 的 v9 名：Pro 侧叫 `fromFile`）。保留此别名是为了脚本可读性，
      * wire 上仍是 `decode`（两侧同名，不搞两套方法名）。
@@ -117,7 +190,8 @@ export declare const images: {
     }): Promise<FrameSource>;
     /**
      * 模板匹配（`matchTemplate`）：在 `haystack` 帧里找 `needle` 帧，置信度 ≥ `threshold` 即命中。
-     * **两帧都必须是 `images.decode` 出来的句柄**（`screen.capture()` 的帧不通用 → STALE）。
+     * **两帧只要是同一张表里的在场句柄就行** —— `screen.capture()` 的帧可以直接当
+     * haystack（§18-8(b) 两 namespace 共用帧表）。
      *
      * 未匹配**不是异常**：回 `null`（图里没有达到阈值的位置）。帧已释放 →
      * `ERR_STALE_HANDLE`；阈值缺省 `0.9`（v9 同名默认值；域 `[0,1]` 之外 →

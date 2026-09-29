@@ -291,6 +291,16 @@ internal fun BridgeRequestLite.optStr(
     else -> throw IllegalArgumentException("字段 $key 必须是字符串")
 }
 
+internal fun BridgeRequestLite.requiredLong(
+    o: Map<String, A11yBridgeJson.Value>,
+    key: String,
+): Long = when (val v = o[key]) {
+    null -> throw IllegalArgumentException("缺数字字段 $key")
+    is A11yBridgeJson.Value.Null -> throw IllegalArgumentException("字段 $key 必须是数字")
+    is A11yBridgeJson.Value.N -> v.raw.toLongOrNull() ?: throw IllegalArgumentException("字段 $key 数字越界")
+    else -> throw IllegalArgumentException("字段 $key 必须是数字")
+}
+
 internal fun BridgeRequestLite.optLong(
     o: Map<String, A11yBridgeJson.Value>,
     key: String,
