@@ -366,8 +366,13 @@ class AutojsError extends Error {
 > bridge_native.node`（单文件、字节即版本、不 claim 目录故无孤儿清理）→
 > `addonPath` 注入，引擎按文件在位降级（缺 = 不注入，脚本照跑）。
 > APK 实测三条 `lib/arm64-v8a/*` + `assets/bridge-addon/*` 齐在（debug ~40MB，
-> 含未 strip 的 libnode）。仍待真机：exec 与 dlopen 的设备侧红测（16KB 页机 +
-> targetSdk 提取/执行策略），`.so` strip 归 CI 打包管线。
+> 含未 strip 的 libnode）。**真机台账（2026-09-29，非 root shell，Android 13/arm64）**：
+> exec + `dlopen` + `node::Start` 通（node v24.21.0，冷启 158ms），abstract socket +
+> `SO_PEERCRED` 通，facade→addon→桥→宿主全链 6 帧往返（生产布局 `lib/arm64-v8a/` +
+> 无 `LD_LIBRARY_PATH`）；失败形态按设计：addon 缺位 = 降级照跑，socket 给错 = exit 3。
+> **未覆盖**：16KB 页机（该机 PAGE_SIZE=4096）、非 root 的 SELinux enforcing 上下文、
+> `nativeLibraryDir` 提取路径、targetSdk36 的 app 数据区 exec 策略 —— 仍需 16KB 模拟器
+> 镜像或真机。`.so` strip 归 CI 打包管线。
 
 **符号面（动态 T，稳定 ABI）：**
 
@@ -416,8 +421,16 @@ class AutojsError extends Error {
    离线模式（桥调用如实 `ERR_ENGINE_STOPPED`），env 给了连不上即硬失败 exit 3，不静默降级；
    **宿主建连、经 `AUTOSCRIPT_SOCK_FD` 注入 addon**——addon 契约是「宿主注入已连 fd、
    建连/重试/熔断归宿主」，不自连（§7.5 对接条 + addon 注释）；
-2. `dlopen libnode.so`（RTLD_NOW|RTLD_GLOBAL——addon 的 `napi_*` 从 libnode 动态表
-   解析；16KB 门禁已过，PRODUCT 哈希 `3cadbcdf…` 见 `/tmp/nrb-out7/SHASUMS256`）；
+2. `dlopen libnode.so`（RTLD_NOW|RTLD_GLOBAL；宿主自身 **DT_NEEDED `libc++_shared.so`
+   + RUNPATH `$ORIGIN`**，用来满足 libnode 自己的传递依赖 —— bionic 的 RUNPATH 不作用于
+   被依赖库的传递依赖，2026-09-29 真机实证；16KB 门禁已过，PRODUCT 哈希 `3cadbcdf…`
+   见 `/tmp/nrb-out7/SHASUMS256`）。
+   **`napi_*` 的解析面不是这一步给的**（原口径"addon 的 `napi_*` 从 libnode 动态表解析"
+   已推翻，见 [`design-decisions.md`](design-decisions.md#已推翻--已改口径)）：bionic 的
+   linker namespace **不把先做的 `dlopen(RTLD_GLOBAL)` 符号给后做的 `dlopen`**（glibc 会）。
+   addon 侧的解法是它自己 **DT_NEEDED `libnode.so`**（按 SONAME 命中已在进程内的那份，
+   与落位目录无关），宿主不必先加载 libnode；宿主保持 dlopen 形只为 exit 4 的失败语义与
+   "libnode 可被候选位替换"（见 `engine/node-process/scripts/build-native.sh` 的装载闭包断言）；
 3. `dlsym _ZN4node5StartEiPPc` → `node::Start` 单 isolate/context，argv =
    `node -e BOOTSTRAP -- <script> [args…]`（无 addon 则直接跑 script）：BOOTSTRAP 预载
    `@autojs/bridge-native` addon → `setSocketFd`（首次注入即拉起读线程）→ 读

@@ -27,7 +27,9 @@
 | §10.5 | 生物特征二次确认 | 未落（`BiometricPrompt` 全仓零引用） |
 | §8.5 | 引擎侧 `waitCompletion` 超时不发起 | 未覆盖（§8.6 自己记的诚实边界） |
 | §15 | APK ≤ 40MB | **已超支**（实测 ≈81MB，见 [`design-decisions.md`](design-decisions.md#已推翻--已改口径)） |
-| — | 真机红测（exec/dlopen、16KB 页、性能数字） | 未做 |
+| — | 真机红测：exec/dlopen + 桥全链 | **已做**（2026-09-29，见下「流水」；非 root、Android 13/arm64、生产布局） |
+| — | 真机红测：16KB 页机 / SELinux enforcing / `nativeLibraryDir` 提取路径 / targetSdk36 exec 策略 | 未做（设备 PAGE_SIZE=4096，这几项该机**原理上测不到**） |
+| — | 真机红测：性能数字（冷启/帧往返） | 部分（冷启 158ms；桥往返未计时） |
 
 ---
 
@@ -38,9 +40,36 @@
 
 ## 流水（最新在上）
 
-### 2026-09-29
+### 2026-09-29 —— 真机垂直切片红测（非 root shell，Android 13 / API 33 / arm64-v8a / PAGE_SIZE=4096）
 
-（暂无；本节从 2026-09-25 及更早的沉淀开始，后续按日追加）
+设备：云手机（`Tianyi1Hao2021` / Android 13，内核 5.15.94-android13）。**本机 host 无 `/dev/kvm`**，
+故走 adb 上的真机而非本地模拟器；设备 PAGE_SIZE=4096，16KB 相关结论该机**不能**背书。
+
+**已验（均在生产布局 `lib/arm64-v8a/` + `files/bridge-addon/` + `files/node_modules/auto`，且
+`LD_LIBRARY_PATH` 清空）：**
+
+| 项 | 结果 |
+|---|---|
+| exec + `dlopen` + `dlsym node::Start` | 通，`node v24.21.0`，冷启 158ms |
+| unix abstract socket + `SO_PEERCRED` uid 门禁 | 通（`net.createServer` 侧绑定成功、引擎连入） |
+| facade → addon → 桥 → 宿主 | 通，单次执行 6 帧（3× `console.log` + 3× 心跳，reqId `-seq` 负数命名空间按设计） |
+| 生产形态 20 连跑 | 20/20 `rc=0` |
+| addon 缺位（选填件） | 按设计降级：脚本照跑 `rc=0`，桥调用点才 `ERR_ENGINE_STOPPED` |
+| `AUTOSCRIPT_HOST_SOCKET` 给了但没人听 | 按设计硬失败 `exit 3`，不静默降级 |
+| libnode 缺位 | 链接期即败（`CANNOT LINK EXECUTABLE`，`rc=1`）——**宿主改为 NEEDED `libc++_shared` 后的形态变化，见下** |
+
+**推翻的三条口径**（详见 [`design-decisions.md`](design-decisions.md#已推翻--已改口径)）：
+① 「`RTLD_GLOBAL` 让 addon 的 `napi_*` 从 libnode 动态表解析」——bionic **不给**后做的
+`dlopen` 续期全局作用域（glibc 会）；② 「DT_NEEDED + `$ORIGIN` 就够」——RUNPATH **不作用于
+被依赖库自己的传递依赖**，链接形宿主三处摆放一致死在 `libc++_shared`；③ 「宿主静态 STL」——
+正是它造成 ②。**最终形态**：宿主 = dlopen 形 + 自己 NEEDED `libc++_shared.so` + `$ORIGIN`；
+addon = NEEDED `libnode.so`（SONAME 命中）+ 静态 STL；两者产物 strip 后 1.05MB / 37KB
+（未 strip 时 addon 8.27MB）。断言已进 `build-native.sh`（宿主/addon 各一套 NEEDED 契约 +
+RUNPATH + 16KB align + `p_offset ≡ p_vaddr (mod align)`，四条负向校验均实测变红）。
+
+**仍未验**：16KB 页机（设备 4KB）、SELinux enforcing 上下文（设备 Permissive + root shell）、
+`nativeLibraryDir` 提取路径与 targetSdk36 的 app 数据区 exec 策略（真机红测只有 16KB 模拟器镜像
+或 Pixel 8+ 能给）、`.node` 的 `require` 在 `process.dlopen` 路径上的细节。
 
 ### 2026-09-25 及更早 —— 自 §19 结语整段外迁（逐字保留）
 
