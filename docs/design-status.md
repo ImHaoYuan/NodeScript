@@ -29,7 +29,7 @@
 | §15 | APK ≤ 40MB | **已超支**（实测 ≈81MB，见 [`design-decisions.md`](design-decisions.md#已推翻--已改口径)） |
 | — | 真机红测：exec/dlopen + 桥全链 | **已做**（2026-09-29，见下「流水」；非 root、Android 13/arm64、生产布局） |
 | — | 真机红测：16KB 页机 / SELinux enforcing / `nativeLibraryDir` 提取路径 / targetSdk36 exec 策略 | 未做（设备 PAGE_SIZE=4096，这几项该机**原理上测不到**） |
-| — | 真机红测：性能数字（冷启/帧往返） | 部分（冷启 158ms；桥往返 p95=1ms；引擎 RSS≈46MB；Intl 运行期见流水 9-30 —— 该 libnode 无 Intl，待重编件复测） |
+| — | 真机红测：性能数字（冷启/帧往返） | 部分（冷启 158ms→新件 181–206ms；桥往返 p95=1ms；引擎 RSS≈46MB；`Intl` zh/en 运行期**已验**） |
 
 ---
 
@@ -47,7 +47,7 @@
 | # | 项 | 结果 |
 |---|---|---|
 | A1 | 桥往返（`auto.console.log` 200 次，脚本侧 `Date.now` 打点，host 真处理） | `min=0 p50=0 **p95=1** p99=2 max=2`（ms）；host 侧 205 帧对上（200 console + 5 预热）。§7.7 空 RPC p95 < 2ms 口径下有余量（注：这是 console 整调用往返，非裸 RPC） |
-| A5 | `Intl.*` zh/en 运行期 | **该件无 `Intl`**：`typeof Intl` 未定义（`process.config.variables` 仍有 `icu_small=false` —— 旧件，ICU 旗标 2026-09-26 才进管线，CI 重编 success 但新件未推设备）。结论：待 node-slice 本轮绿后取新件复测；本项仍欠 |
+| A5 | `Intl.*` zh/en 运行期 | **已测 9-30（新件复测）**：node-slice 36609817687 绿后取新 `libnode.so` 推设备，`Intl` 在位（`icu_small=true`/`icu_locales=en,root,zh`/ICU 78）。zh-CN → `1,234,567.89`、`2026年9月30日星期三`，与桌面对照**逐字一致**；en-US 同。ar-EG 回落 latin 数字（small-icu 只带 zh,en 走 root 数据，是**预期**非缺陷——契约拍板的就是 small-icu zh,en）。全链复跑 rc=0、6 帧；新件冷启 181–206ms（旧件 158ms，ICU 数据加载 +~30ms）；桥往返复测 p95=1ms 仍达标 |
 | A6 | 引擎进程 RSS（脚本存活窗内 `smaps_rollup`） | `Rss≈46.6MB Pss≈44.1MB`（其中文件页 ~32MB、匿名 ~12MB）；§15 80–160MB 区间内，偏下限（注：host 宿主进程同法测得 Rss≈47.6MB，同量级） |
 | C1 | `.node` 经 `process.dlopen` 路径的 `require` | 与 9-29 同结论：**无 `DT_NEEDED libnode.so` 的件在 `require` 下仍 `ERR_DLOPEN_FAILED`（`cannot locate symbol "napi_add_env_cleanup_hook"`）**—— 即使宿主自身已 NEEDED libnode（启动闭包里有 libnode）。装载器按 SONAME 找依赖，不是全局作用域续期。`§10.12 不引入第三方 .node` 口径不变 |
 
@@ -67,7 +67,7 @@ A2–A4（截图→找图/找色/模板）仍欠：`libopencv.so` 不在设备�
 | A2 | `captureScreen → findImage` 端到端 | §7.7 < 1s；一次截图两次匹配 < 700ms | 真机截屏（a11y 路径）→ `ingest` → `findImage` 两次，打点三段（截图 / ingest / 匹配×2） | 端到端 < 1s；当前：**待实测**（链路 9-26 已通，数字空） |
 | A3 | `findColor` 1080p | §7.7 < 10ms | 生产布局下落一张 1080p 真机截图，`findColor` 单人独立子图计时（`adb shell` 循环 100 次取中位） | < 10ms；当前：宿主 36 例只保语义，设备耗时空 |
 | A4 | `matchTemplate` 1080p | §7.7 < 40ms | 同 A3，模板用真机 UI 切片（非合成图） | < 40ms |
-| A5 | `Intl.*` zh/en 运行期 | §18 第 4 项跟进 | `node -e "console.log(new Intl.NumberFormat('zh-CN').format(1234567.89))"` + `DateTimeFormat('zh-CN')` 在真机 noden 跑 | **已测 9-30：该件无 `Intl`**（旧件，旗标 9-26 才进管线）；待本轮 node-slice 绿后取新件复测 |
+| A5 | `Intl.*` zh/en 运行期 | §18 第 4 项跟进 | `node -e "console.log(new Intl.NumberFormat('zh-CN').format(1234567.89))"` + `DateTimeFormat('zh-CN')` 在真机 noden 跑 | **已测 9-30：与桌面逐字一致**（新件，ICU 78 small-icu zh,en；见本文件流水 9-30 条） |
 | A6 | 引擎进程 RSS | §15 80–160MB | 脚本存活窗内 `smaps_rollup` 采样 | **已测 9-30：Rss≈46.6MB/Pss≈44MB**，区间内偏下限（见本文件流水 9-30 条） |
 
 **B. 平台策略（现有云手机原理上测不到 —— 要 16KB 模拟器镜像或 Pixel 8+）**
