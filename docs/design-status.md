@@ -19,7 +19,7 @@
 
 | 声明处 | 东西 | 现状 |
 |---|---|---|
-| §18 | 开放决策点 | **7 项未拍板**（第 8/9 项 2026-09-25 已拍板，见 [`design-decisions.md`](design-decisions.md)） |
+| §18 | 开放决策点 | **已全部拍板**（第 8/9 项 2026-09-25，第 1–7 项 2026-09-26，见 [`design-decisions.md`](design-decisions.md)；§18 保留作决策台账） |
 | §14 P1 | MediaProjection 高清会话 | 未落（授权 UI + FGS；换 producer 即插，语义面不动） |
 | §14 P1 | QuickJS `:sandbox` 进程 | 未落（仅模块骨架 `engine/sandbox/build.gradle.kts`） |
 | §14 P1 | `ui` 原生 XML UI 宿主 / `ui_web` | 未落 |
@@ -39,6 +39,43 @@
 只在那里写一份（本文件不复制，避免两处漂移）。
 
 ## 流水（最新在上）
+
+### 2026-09-30 —— 等设备的那笔账：真机红测可执行清单（未执行，只列账）
+
+源头：§19「下一步 (a)」与本表接口期三行真机红测。原则：**设备不到位就不写数字进契约**
+（§7.7/§15 的数字仍是验收口径），本条只把"要什么设备、跑什么、判什么"钉死，
+设备一到按单执行、回填数字。
+
+**A. 性能数字（§7.7 表 + §15 启动预算）—— 要一台能跑生产 APK 的真机即可（现有云手机已够）**
+
+| # | 量什么 | 契约锚 | 怎么量（adb 可脚本化） | 判据 |
+|---|---|---|---|---|
+| A1 | 桥往返（JS→:main→回） | §7.7 空 RPC p95 < 2ms | kBootstrap 心跳帧自带 reqId `-seq` + 时间戳：宿主侧记发出/回包两点（或 `adb shell` 跑 1000 次 invoke 取 p95） | p95 < 2ms；当前：**未计时**（9-29 只数了 6 帧，未打点） |
+| A2 | `captureScreen → findImage` 端到端 | §7.7 < 1s；一次截图两次匹配 < 700ms | 真机截屏（a11y 路径）→ `ingest` → `findImage` 两次，打点三段（截图 / ingest / 匹配×2） | 端到端 < 1s；当前：**待实测**（链路 9-26 已通，数字空） |
+| A3 | `findColor` 1080p | §7.7 < 10ms | 生产布局下落一张 1080p 真机截图，`findColor` 单人独立子图计时（`adb shell` 循环 100 次取中位） | < 10ms；当前：宿主 36 例只保语义，设备耗时空 |
+| A4 | `matchTemplate` 1080p | §7.7 < 40ms | 同 A3，模板用真机 UI 切片（非合成图） | < 40ms |
+| A5 | `Intl.*` zh/en 运行期 | §18 第 4 项跟进 | `node -e "console.log(new Intl.NumberFormat('zh-CN').format(1234567.89))"` + `DateTimeFormat('zh-CN')` 在真机 noden 跑 | 输出与桌面一致；当前：旗标改 + Actions 重编 success，运行期未验 |
+| A6 | 引擎进程 RSS | §15 80–160MB | `adb shell dumpsys meminfo <pkg>` 跑脚本时采样 | 落区间；当前：空 |
+
+**B. 平台策略（现有云手机原理上测不到 —— 要 16KB 模拟器镜像或 Pixel 8+）**
+
+| # | 量什么 | 契约锚 | 为什么现有设备不行 | 要什么 |
+|---|---|---|---|---|
+| B1 | 16KB 页机装载 | §7.8 / §16 | 该机 PAGE_SIZE=4096，`p_offset ≡ p_vaddr` 错了也照样装载 | 16KB 模拟器镜像（CI 门禁只保 ELF 形状，不保内核真装载） |
+| B2 | SELinux enforcing 上下文 | §19 台账 | 该机 Permissive + root shell，域转换/拒绝测不到 | 非 root + enforcing 的真机或模拟器 |
+| B3 | `nativeLibraryDir` 提取路径 | §19 交付轨 | 真机红测走的是 adb push 落位，非 PM 提取路径 | 装生产 APK 走 PM 安装后验 |
+| B4 | targetSdk36 app 数据区 exec 策略 | §19 台账 | 同 B3，且 targetSdk 行为随版本变 | targetSdk36 的 APK 在 Android 15+ 设备上验 |
+
+**C. 语义细节（host 测不了的最后一公里）**
+
+| # | 量什么 | 契约锚 | 说明 |
+|---|---|---|---|
+| C1 | `.node` 经 `process.dlopen` 路径的 `require` | §10.12 / §19 台账 9-29 | 9-29 只否了"第三方 `.node` 搭便车"（无 DT_NEEDED 仍 `cannot locate symbol`）；`require` 走 `process.dlopen` 时的搜索/报错细节未逐条验 |
+| C2 | `captureScreen → findImage` 实测数字回填 §7.7 | §7.7 / §9.2 | = A2 落地后的回填动作（数字进契约表 + 本表接口期行销账） |
+
+执行顺序建议：A（现有设备即刻可做）→ B（等设备）→ C1（可与 A 同批）→ C2（A2 的回填）。
+本条是清单，不改任何契约数字；数字只在实测后按"只追加"纪律另起流水回填。
+
 
 ### 2026-09-29 —— 真机垂直切片红测（非 root shell，Android 13 / API 33 / arm64-v8a / PAGE_SIZE=4096）
 
