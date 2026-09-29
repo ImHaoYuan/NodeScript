@@ -181,13 +181,17 @@ cmake --build "$BUILD_DIR" --target opencv_features2d -j"$(nproc)"
 # 产物名 = 装载名：Kotlin 侧 System.loadLibrary("opencv") 找的就是 libopencv.so。
 IMG_LIB="$OUT/libopencv.so"
 say "链 libopencv.so（计算核 + 装载面 + 静态 opencv + 静态 STL）"
-CXX="$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang++"
-# ccache 作用于 §5 的编链二文件：CXX 本体不变，只包调用层（与 §3 的 launcher 同一条
-# 纪律 —— 配置指纹不受包调用影响）。条件与 §3 同源（USE_CCACHE + ccache 在位）。
+# CXX_ARGS 数组：裸路径与"ccache + 裸路径"两种形态 —— 不能把带空格的包调用塞进
+# 标量再 `"$CXX"` 引用（那会把 "ccache /path/clang++" 当成**一个**文件名 exec，
+# ENOENT）。数组两种形态都展开正确；门禁要的是裸编译器路径（占位未用），给 ${CXX_BIN}。
+CXX_BIN="$TOOLCHAIN/bin/aarch64-linux-android${ANDROID_API}-clang++"
+# ccache 作用于 §5 的编链二文件：只包调用层（与 §3 的 launcher 同一条纪律 ——
+# 配置指纹不受包调用影响）。条件与 §3 同源（USE_CCACHE + ccache 在位）。
+CXX_ARGS=("$CXX_BIN")
 if [ -n "${USE_CCACHE:-}" ] && command -v ccache >/dev/null 2>&1; then
-    CXX="ccache $CXX"
+    CXX_ARGS=(ccache "$CXX_BIN")
 fi
-"$CXX" -std=c++17 -fPIC -O2 -Wall -Wextra \
+"${CXX_ARGS[@]}" -std=c++17 -fPIC -O2 -Wall -Wextra \
     -Wl,-z,max-page-size=16384 -static-libstdc++ \
     -shared \
     -I "$OCV_SRC/modules/core/include" \
@@ -214,7 +218,7 @@ STRIP="$TOOLCHAIN/bin/llvm-strip"
 
 # ── 7) 门禁 ────────────────────────────────────────────────────────────
 say "16KB/ELF/NEEDED 门禁"
-bash "$SCRIPT_DIR/check-opencv-alignment.sh" "$TOOLCHAIN/bin/llvm-readelf" "$IMG_LIB" "$CXX"
+bash "$SCRIPT_DIR/check-opencv-alignment.sh" "$TOOLCHAIN/bin/llvm-readelf" "$IMG_LIB" "$CXX_BIN"
 
 # ── 8) 基表 + 审计行 ────────────────────────────────────────────────────
 # kleidicv 状态进审计：产物 sha256 之外还要能回答"这个 so 里到底有没有 kleidicv 加速"。
