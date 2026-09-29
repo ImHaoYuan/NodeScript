@@ -1,14 +1,13 @@
 package com.autoscript.platform.capabilities
 
 import com.autoscript.domain.automation.ColorHit
+import com.autoscript.domain.automation.FeatureHit
 import com.autoscript.domain.automation.ImageAnalyzer
+import com.autoscript.domain.automation.ImageFrame
 import com.autoscript.domain.automation.ImageMatch
 import com.autoscript.domain.bridge.HandleRef
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import java.util.concurrent.atomic.AtomicLong
 
 /**
  * `images` 命名空间的桥处理器（docs §9.2 / §12.2；JS 对偶 `bridge/js/src/images.ts`；
@@ -21,15 +20,26 @@ import java.util.concurrent.atomic.AtomicLong
  * `SystemNamespaces.kt`：那五个共享一套 OVERLAY/ROOT/ADB_INPUT 门禁组，图像面没有门禁，
  * 混进去只会让「接就五个一起接」的束语义变浑。
  *
- * **四方法 + release**（照抄 `ImageAnalyzer`）：`decode`/`matchTemplate`/`findImage`/`release`
- * + P1 第一个算子 `findColor`。阈值键**统一叫 `threshold`**（[matchTemplate] 与
+ * **十方法**（照抄 `ImageAnalyzer`）：`decode`/`matchTemplate`/`findImage`/`findColor`/`release`
+ * + P1 桥消费方五算子 `toGrayscale`/`crop`/`resize`/`rotate`/`findFeature`
+ * （2026-09-29 开通，§9.2 末"桥面刻意不开"的推演兑现 —— 计算核与 host 语义门
+ * 2026-09-25 已落，消费方已到，同批开）。阈值键**统一叫 `threshold`**（[matchTemplate] 与
  * [findImage] 同一个 opencv 概念，facade 曾一个发 `tolerance` 一个发 `threshold`，
  * 两侧 mock 各自自洽所以漂移没被抓到）；域 `[0,1]`，越界 → `ERR_INVALID_PARAM` 且
  * **一次 SPI 调用都不发**。
  *
- * **帧句柄**：`decode` 发号（handler 自管：单调 refId + generation 恒 1，与
- * [ScreenshotSource] 同一套纪律），回包带 `width/height` 真值（脚本要拿它做坐标换算）；
- * **匹配方法不再要求回传尺寸**（那是对实现报它自己已知的值）。[release] 与
+ * **帧句柄：发号侧归一到 [ImageAnalyzer]（§18 第 8 项 (b)，2026-09-25 拍板）**。
+ * 本 handler **不再自管帧表**（曾经有 `ids`/`live`/`sizes` 三张本地图 —— 与 SPI 的
+ * native 帧表**双写**，靠"两个计数器各自从 1 起、每次 decode 各加一"的隐式不变式
+ * 对齐，一处失败分岔就错位）：`decode` 回包直接用 SPI 回的 [HandleRef]（单调 refId +
+ * generation 恒 1），`matchTemplate`/`findImage`/`findColor`/`release` 一律把 wire 上的
+ * 句柄**原样交给 SPI** 判在场与释放 —— 在场性、发号、像素所有权三件事的唯一事实源
+ * 是 SPI 自己。回包仍带 `width/height` 真值（脚本拿它做坐标换算）；**匹配方法不要求
+ * 回传尺寸**（那是对实现报它自己已知的值）。
+ *
+ * 由此 **`screen` 与 `images` 的句柄在同一个号段上**（截屏帧经 `ImageAnalyzer.ingest`
+ * 进同一张表）："帧不通用"那条纪律已取消 —— 拿 `screen.capture()` 的帧当
+ * `findImage` 的 haystack 不再是 `ERR_STALE_HANDLE`。[release] 与
  * `ScreenshotSource.recycle` 逐字同口径：放掉的帧当场从在场面表移除 —— 未知/跨代/
  * **放过的帧再放**一律 `ERR_STALE_HANDLE`（不提供静默成功的第二次；脚本 `finally`
  * 里补一刀不会炸，是因为帧没放时怎么放都回 `true`）；匹配时任一帧已死 → 同码。
@@ -42,28 +52,23 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * SPI 抛的 `AutojsException` 原码透传（不折叠成 `ERR_INVALID_PARAM`）—— 调用方要能
  * 分辨「路径错了」与「图里没有」与「帧已释放」。未知方法 → `ERR_NOT_IMPLEMENTED`
- * （`toGrayscale`/`crop`/`pixel` 这些 native 面的操作没开桥面，不猜）。
+ * （`pixel`/`captureScreen` 这些 native 面都没有的操作不猜）。
  */
 class ImagesNamespaceHandler(
     private val analyzer: ImageAnalyzer,
 ) {
-    /** decode 发号（单调 refId，generation 恒 1 —— 一个文件一个帧，不复用不缓存）。 */
-    private val ids = AtomicLong(1)
-
-    /** 已发放的帧句柄集合（release/匹配的在场判据；§7.4「关掉的帧」与「没见过的帧」可分辨；只经 [guard] 读写）。 */
-    private val live = HashMap<Long, HandleRef>()
-
-    /** ref → 帧宽高（decode 时登记；匹配只凭 ref 调 SPI，不回显尺寸）。 */
-    private val sizes = HashMap<Long, Pair<Int, Int>>()
-
-    /** 帧表（[live]/[sizes]）的串行闸：handle 是 suspend，多请求可重入。 */
-    private val guard = Mutex()
+    /** 本类**无状态**：帧表（在场/发号/像素）全在 [analyzer] 里（§18-8(b) 发号侧归一）。 */
 
     suspend fun handle(request: BridgeRequestLite): ResponseLite = when (request.method) {
         "decode" -> decode(request)
         "matchTemplate" -> matchTemplate(request)
         "findImage" -> findImage(request)
         "findColor" -> findColor(request)
+        "toGrayscale" -> toGrayscale(request)
+        "crop" -> crop(request)
+        "resize" -> resize(request)
+        "rotate" -> rotate(request)
+        "findFeature" -> findFeature(request)
         "release" -> release(request)
         else -> ResponseLite.err(
             request.id,
@@ -88,12 +93,8 @@ class ImagesNamespaceHandler(
         }
         return try {
             val frame = analyzer.decode(path)
-            val ref = guard.withLock {
-                val r = HandleRef(ids.getAndIncrement(), 1L)
-                live[r.refId] = r
-                sizes[r.refId] = frame.width to frame.height
-                r
-            }
+            // 发号归 SPI：wire 上的 refId 就是帧表的键（handler 不再另起一套号）。
+            val ref = frame.handle
             ResponseLite.Ok(
                 request.id,
                 A11yBridgeJson.encode(
@@ -140,13 +141,9 @@ class ImagesNamespaceHandler(
             )
         }
         val (haystack, needle) = refs
-        if (guard.withLock { !live.containsKey(haystack.refId) || !live.containsKey(needle.refId) }) {
-            return ResponseLite.err(
-                request.id,
-                ErrorCode.ERR_STALE_HANDLE,
-                "images $method 的帧句柄已释放（haystack=${haystack.refId}, needle=${needle.refId}）",
-            )
-        }
+        // 在场性不在这层判（§18-8(b)：帧表唯一事实源是 SPI）—— 任一帧已死由 SPI 抛
+        // ERR_STALE_HANDLE，这里 catch 后原码透传；这样"截屏帧"与"decode 帧"都由
+        // 同一张表回答，不存在 handler 的表认识、SPI 的表不认识的分岔。
         val hit = try {
             if (method == "matchTemplate") {
                 analyzer.matchTemplate(haystack, needle, threshold)
@@ -204,13 +201,7 @@ class ImagesNamespaceHandler(
                 )
             }
         }
-        if (guard.withLock { !live.containsKey(ref.refId) }) {
-            return ResponseLite.err(
-                request.id,
-                ErrorCode.ERR_STALE_HANDLE,
-                "images findColor 的帧句柄已释放（haystack=${ref.refId}）",
-            )
-        }
+        // 在场性同 match：SPI 判、原码透传（见 match 处的说明）。
         val hit = try {
             analyzer.findColor(ref, color, tolerance, region)
         } catch (e: AutojsException) {
@@ -230,27 +221,167 @@ class ImagesNamespaceHandler(
         } catch (e: IllegalArgumentException) {
             return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
         }
-        // 未知/跨代 → ERR_STALE_HANDLE（与 FrameSource.recycle 同口径）："已释放"与
-        // "从未存在"必须能分辨。已知帧才放，sizes 同步清。
-        val known = guard.withLock {
-            if (live[ref.refId]?.generation != ref.generation) {
-                false
-            } else {
-                sizes.remove(ref.refId)
-                live.remove(ref.refId)
-                true
-            }
-        }
-        if (!known) {
-            return ResponseLite.err(
-                request.id,
-                ErrorCode.ERR_STALE_HANDLE,
-                "未知帧句柄 ${ref.refId} gen=${ref.generation}",
-            )
-        }
+        // 未知/跨代/放过的帧再放 → 一律 ERR_STALE_HANDLE，判据在 SPI 的帧表里
+        // （与 ScreenshotSource.recycle 同一张表、同一口径 —— §18-8(b) 发号侧归一的
+        // 直接后果：screen 的帧也能在这里放，反之亦然）。原码透传。
         return try {
             analyzer.release(ref)
             ResponseLite.Ok(request.id, "true")
+        } catch (e: AutojsException) {
+            ResponseLite.err(request.id, e.error, e.message)
+        }
+    }
+
+    // ── P1 图像桥消费方五算子（2026-09-29 开通；§9.2 末 —— 计算核 2026-09-25 已落，
+    // host 语义门全绿，消费方已到，桥面同批开）─────────────────────────────
+    // 形状统一：`{source}` → `{ref,width,height}`（回包与 decode 同形 —— 新帧也落
+    // 进 SPI 同一张表，宽高随产出帧回真值）；域校验照 findColor 同一条纪律
+    // （越界先拒，**一次 SPI 调用都不发**）。
+
+    private suspend fun toGrayscale(request: BridgeRequestLite): ResponseLite =
+        singleRefFrame(request, "toGrayscale") { ref -> analyzer.toGrayscale(ref) }
+
+    private suspend fun crop(request: BridgeRequestLite): ResponseLite {
+        val fields = try {
+            request.decodeObject()
+        } catch (e: IllegalArgumentException) {
+            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
+        }
+        val ref: HandleRef
+        val region: List<Int>
+        try {
+            ref = request.requiredRef(fields, "source")
+            region = request.requiredIntList(fields, "region")
+        } catch (e: IllegalArgumentException) {
+            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
+        }
+        // 域：region 必须 [x,y,w,h] 四元组（整体落在帧内由 SPI/native 判 —— 帧
+        // 尺寸真值不在本层，只把"形状必须成立"挡在桥面）。越界先拒，零 SPI。
+        if (region.size != 4) {
+            return ResponseLite.err(
+                request.id,
+                ErrorCode.ERR_INVALID_PARAM,
+                "images crop 的 region 必须 x,y,w,h 四元组，实际 $region",
+            )
+        }
+        return try {
+            ResponseLite.Ok(request.id, framePayload(analyzer.crop(ref, region)))
+        } catch (e: AutojsException) {
+            ResponseLite.err(request.id, e.error, e.message)
+        }
+    }
+
+    private suspend fun resize(request: BridgeRequestLite): ResponseLite {
+        val fields = try {
+            request.decodeObject()
+        } catch (e: IllegalArgumentException) {
+            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
+        }
+        val ref: HandleRef
+        val width: Int
+        val height: Int
+        try {
+            ref = request.requiredRef(fields, "source")
+            // 目标尺寸是整数域：requiredLong 只认整数，把 1.5 直接挡成参数错（不悄悄截断）。
+            width = request.requiredLong(fields, "width").toInt()
+            height = request.requiredLong(fields, "height").toInt()
+        } catch (e: IllegalArgumentException) {
+            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
+        }
+        // 目标尺寸域：正整数 + 单边配额 16384（16384²×4≈1GB，再往上是笔误把字节数
+        // 当宽高 —— 配额与尺寸不合法同码，native/SPI 同样先拒，这里挡在桥面）。
+        if (width <= 0 || height <= 0 || width > 16384 || height > 16384) {
+            return ResponseLite.err(
+                request.id,
+                ErrorCode.ERR_INVALID_PARAM,
+                "images resize 的目标尺寸必须 (0,16384] 正整数，实际 ${width}x$height",
+            )
+        }
+        return try {
+            ResponseLite.Ok(request.id, framePayload(analyzer.resize(ref, width, height)))
+        } catch (e: AutojsException) {
+            ResponseLite.err(request.id, e.error, e.message)
+        }
+    }
+
+    private suspend fun rotate(request: BridgeRequestLite): ResponseLite {
+        val fields = try {
+            request.decodeObject()
+        } catch (e: IllegalArgumentException) {
+            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
+        }
+        val ref: HandleRef
+        val degrees: Double
+        try {
+            ref = request.requiredRef(fields, "source")
+            degrees = request.requiredDouble(fields, "degrees")
+        } catch (e: IllegalArgumentException) {
+            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
+        }
+        // 角度域：必须有限（NaN/Inf → 参数错 —— 三角函数吃掉它们不报错）。原生侧
+        // 还有 16384 画布配额（包络公式随角度涨），那层拒收原码透传（INVALID_PARAM）。
+        if (!degrees.isFinite()) {
+            return ResponseLite.err(
+                request.id,
+                ErrorCode.ERR_INVALID_PARAM,
+                "images rotate 的 degrees 必须是有限数字，实际 $degrees",
+            )
+        }
+        return try {
+            ResponseLite.Ok(request.id, framePayload(analyzer.rotate(ref, degrees)))
+        } catch (e: AutojsException) {
+            ResponseLite.err(request.id, e.error, e.message)
+        }
+    }
+
+    private suspend fun findFeature(request: BridgeRequestLite): ResponseLite {
+        val fields = try {
+            request.decodeObject()
+        } catch (e: IllegalArgumentException) {
+            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
+        }
+        val refs: Pair<HandleRef, HandleRef>
+        try {
+            refs = request.requiredRef(fields, "scene") to request.requiredRef(fields, "template")
+        } catch (e: IllegalArgumentException) {
+            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
+        }
+        val hit = try {
+            analyzer.findFeature(refs.first, refs.second)
+        } catch (e: AutojsException) {
+            return ResponseLite.err(request.id, e.error, e.message)
+        }
+        return ResponseLite.Ok(request.id, featurePayload(hit))
+    }
+
+    /** 产出帧回包（与 decode 同形：ref + 宽高真值，随产出帧走）。 */
+    private fun framePayload(frame: ImageFrame): String =
+        A11yBridgeJson.encode(
+            mapOf(
+                "ref" to mapOf("refId" to frame.handle.refId, "generation" to frame.handle.generation),
+                "width" to frame.width.toLong(),
+                "height" to frame.height.toLong(),
+            ),
+        )
+
+    /** 单帧变换通用骨架：`{source}` 信封 → SPI 调用 → 产出帧回包（toGrayscale 用）。 */
+    private suspend fun singleRefFrame(
+        request: BridgeRequestLite,
+        methodName: String,
+        call: suspend (HandleRef) -> ImageFrame,
+    ): ResponseLite {
+        val fields = try {
+            request.decodeObject()
+        } catch (e: IllegalArgumentException) {
+            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
+        }
+        val ref = try {
+            request.requiredRef(fields, "source")
+        } catch (e: IllegalArgumentException) {
+            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
+        }
+        return try {
+            ResponseLite.Ok(request.id, framePayload(call(ref)))
         } catch (e: AutojsException) {
             ResponseLite.err(request.id, e.error, e.message)
         }
@@ -285,6 +416,20 @@ class ImagesNamespaceHandler(
                     "width" to m.width.toLong(),
                     "height" to m.height.toLong(),
                     "confidence" to m.confidence,
+                ),
+            )
+        }
+
+    /** 特征命中 → `{x,y,confidence}`（模板中心，无尺寸概念）；未命中 → 裸 `null`。 */
+    private fun featurePayload(h: FeatureHit?): String =
+        if (h == null) {
+            "null"
+        } else {
+            A11yBridgeJson.encode(
+                mapOf(
+                    "x" to h.x.toLong(),
+                    "y" to h.y.toLong(),
+                    "confidence" to h.confidence,
                 ),
             )
         }

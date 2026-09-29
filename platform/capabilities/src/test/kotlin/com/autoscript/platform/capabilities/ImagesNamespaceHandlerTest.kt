@@ -1,9 +1,11 @@
 package com.autoscript.platform.capabilities
 
 import com.autoscript.domain.automation.ColorHit
+import com.autoscript.domain.automation.FeatureHit
 import com.autoscript.domain.automation.ImageAnalyzer
 import com.autoscript.domain.automation.ImageFrame
 import com.autoscript.domain.automation.ImageMatch
+import com.autoscript.domain.automation.ScreenSnapshot
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.bridge.HandleRef
@@ -14,6 +16,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 
 /**
  * `images` 桥处理器测试（§9.2；JS 对偶 `bridge/js/src/images.ts` + `images.test.cjs`）。
@@ -30,14 +33,21 @@ import org.junit.jupiter.api.Test
  * 5. **未匹配是答案**：`null`（不编 `ERR_NOT_FOUND` —— 那是 UiSelector 的语义）；
  * 6. **帧句柄纪律**：release 幂等（脚本 finally 补一刀）、未知/跨代 → `ERR_STALE_HANDLE`
  *    （"已释放"与"从未存在"可分辨）；匹配用已释放的帧 → 同码；
- * 7. **不猜别名**：`toGrayscale`/`crop`/`pixel`/`fromFile` 等未开桥面的操作 →
- *    `ERR_NOT_IMPLEMENTED`（灰度/裁剪归 §9.2 native 面，P1 再说）。
+ * 7. **不猜别名**：`pixel`/`fromFile`/`captureScreen` 等两侧都没有的名字 →
+ *    `ERR_NOT_IMPLEMENTED`（`toGrayscale`/`crop`/`resize`/`rotate`/`findFeature`
+ *    已于 2026-09-29 开桥面，P1 图像桥消费方，见本文件"五算子"段）。
  *
  * 像素语义归 `:bridge:image` 的 native 实现（还没到位）—— 这里只钉桥面形状与口径。
  */
 class ImagesNamespaceHandlerTest {
 
-    /** 假分析器：能看见"像素"的最小替身（匹配结果由用例指定，不是真遍历）。 */
+    /**
+     * 假分析器：能看见"像素"的最小替身（匹配结果由用例指定，不是真遍历）。
+     *
+     * **它是帧表本身**（§18-8(b) 发号侧归一后 handler 不再自管表，于是这里的
+     * 在场/发号/STALE 判据就是被测契约）：`decode` 与 `ingest` 共用 `nextRefId`
+     * 从 1 起，放掉即离场，未知/跨代/已放 → `ERR_STALE_HANDLE`。
+     */
     private class FakeAnalyzer : ImageAnalyzer {
         val decoded = mutableListOf<String>()
         val released = mutableListOf<HandleRef>()
@@ -47,14 +57,37 @@ class ImagesNamespaceHandlerTest {
         var decodeFail: AutojsException? = null
         var matchResult: ImageMatch? = null
 
+        private var nextRefId = 1L
+        private val live = mutableSetOf<Long>()
+
         override suspend fun decode(path: String): ImageFrame {
             decodeFail?.let { throw it }
             decoded += path
-            // 自己的 refId 空间与 handler 无关：handler 只凭 SPI 回包拿宽高
-            return ImageFrame(HandleRef(999, 1), nextWidth, nextHeight)
+            val id = nextRefId++
+            live += id
+            return ImageFrame(HandleRef(id, 1), nextWidth, nextHeight)
+        }
+
+        override suspend fun ingest(width: Int, height: Int, rgba: ByteArray): ImageFrame {
+            require(width > 0 && height > 0) { "ingest 的宽高必须为正，实际 ${width}x$height" }
+            require(rgba.size == width * height * 4) {
+                "ingest 的像素必须紧密打包 RGBA：期望 ${width * height * 4} 字节，实际 ${rgba.size}"
+            }
+            val id = nextRefId++
+            live += id
+            return ImageFrame(HandleRef(id, 1), width, height)
+        }
+
+        /** 在场性唯一判据（与 `NativeImageAnalyzer.release` 同口径）。 */
+        private fun requireLive(h: HandleRef) {
+            if (h.generation != 1L || h.refId !in live) {
+                throw AutojsException(ErrorCode.ERR_STALE_HANDLE, "帧 ${h.refId} 不在场")
+            }
         }
 
         override suspend fun release(handle: HandleRef) {
+            requireLive(handle)
+            live -= handle.refId
             released += handle
         }
 
@@ -63,6 +96,8 @@ class ImagesNamespaceHandlerTest {
             needle: HandleRef,
             threshold: Double,
         ): ImageMatch? {
+            requireLive(haystack)
+            requireLive(needle)
             matches += Triple(haystack, needle, threshold)
             return matchResult
         }
@@ -72,6 +107,8 @@ class ImagesNamespaceHandlerTest {
             needle: HandleRef,
             threshold: Double,
         ): ImageMatch? {
+            requireLive(haystack)
+            requireLive(needle)
             matches += Triple(haystack, needle, threshold)
             return matchResult
         }
@@ -93,10 +130,74 @@ class ImagesNamespaceHandlerTest {
             tolerance: Int,
             region: List<Int>?,
         ): ColorHit? {
+            requireLive(haystack)
             colorFail?.let { throw it }
             colorCalls += ColorCall(haystack, color, tolerance, region)
             return colorResult
         }
+
+        class TransformCall(
+            val source: HandleRef,
+            val region: List<Int>? = null,
+            val width: Int = 0,
+            val height: Int = 0,
+            val degrees: Double = 0.0,
+        )
+
+        val transforms = mutableListOf<TransformCall>()
+        var featureResult: FeatureHit? = null
+        var transformFail: AutojsException? = null
+
+        /** 产出帧发号与 decode 同一号段、同一条在场表（§18-8(b) 发号侧归一）。
+         *  尺寸随调用形状：crop 跟 region 的 w/h，其余跟 [nextWidth]/[nextHeight]。 */
+        private fun issueChild(parent: HandleRef, width: Int = nextWidth, height: Int = nextHeight): ImageFrame {
+            requireLive(parent)
+            val id = nextRefId++
+            live += id
+            return ImageFrame(HandleRef(id, 1), width, height)
+        }
+
+        // 判在场在前（与 NativeImageAnalyzer 同序）：死帧连调用记录都不留 ——
+        // 计数即"真到了 SPI 的调用数"。
+
+        override suspend fun toGrayscale(frame: HandleRef): ImageFrame {
+            requireLive(frame)
+            transformFail?.let { throw it }
+            transforms += TransformCall(frame)
+            return issueChild(frame)
+        }
+
+        override suspend fun crop(frame: HandleRef, region: List<Int>): ImageFrame {
+            requireLive(frame)
+            transformFail?.let { throw it }
+            transforms += TransformCall(frame, region = region)
+            return issueChild(frame, region[2], region[3])
+        }
+
+        override suspend fun resize(frame: HandleRef, width: Int, height: Int): ImageFrame {
+            requireLive(frame)
+            transformFail?.let { throw it }
+            transforms += TransformCall(frame, width = width, height = height)
+            return issueChild(frame)
+        }
+
+        override suspend fun rotate(frame: HandleRef, degrees: Double): ImageFrame {
+            requireLive(frame)
+            transformFail?.let { throw it }
+            transforms += TransformCall(frame, degrees = degrees)
+            return issueChild(frame)
+        }
+
+        override suspend fun findFeature(scene: HandleRef, template: HandleRef): FeatureHit? {
+            requireLive(scene)
+            requireLive(template)
+            transformFail?.let { throw it }
+            featureCalls += (scene to template)
+            return featureResult
+        }
+
+        /** 特征匹配调用记录（scene, template）对。 */
+        val featureCalls = mutableListOf<Pair<HandleRef, HandleRef>>()
     }
 
     private val fake = FakeAnalyzer()
@@ -108,10 +209,13 @@ class ImagesNamespaceHandlerTest {
     private fun ok(r: BridgeResponse): String =
         assertInstanceOf(BridgeResponse.Ok::class.java, r).payload!!
 
+    private fun okay(r: BridgeResponse): BridgeResponse =
+        assertInstanceOf(BridgeResponse.Ok::class.java, r)
+
     private fun errCode(r: BridgeResponse): String =
         assertInstanceOf(BridgeResponse.Err::class.java, r).errorCode
 
-    /** decode 一帧，拿回脚本可见的 ref（handler 自管发号，与假分析器的 999 无关）。 */
+    /** decode 一帧，拿回脚本可见的 ref（发号侧归一后就是 SPI 自己的号段）。 */
     private suspend fun decodeFrame(path: String = "/sdcard/icon.png"): HandleRef {
         val payload = ok(call("decode", """{"path":"$path"}"""))
         val ref = (A11yBridgeJson.decodeObject(payload)["ref"] as A11yBridgeJson.Value.Obj).fields
@@ -151,7 +255,7 @@ class ImagesNamespaceHandlerTest {
         val payload = ok(call("decode", """{"path":"/sdcard/icon.png"}"""))
         val o = A11yBridgeJson.decodeObject(payload)
         val ref = (o["ref"] as A11yBridgeJson.Value.Obj).fields
-        assertEquals("1", (ref["refId"] as A11yBridgeJson.Value.N).raw, "handler 自管发号从 1 起")
+        assertEquals("1", (ref["refId"] as A11yBridgeJson.Value.N).raw, "SPI 发号从 1 起（handler 不再自管表）")
         assertEquals("1", (ref["generation"] as A11yBridgeJson.Value.N).raw, "一个文件一个帧，generation 恒 1")
         assertEquals("1080", (o["width"] as A11yBridgeJson.Value.N).raw, "宽高取文件真值（对齐 :domain ImageFrame）")
         assertEquals("2400", (o["height"] as A11yBridgeJson.Value.N).raw)
@@ -258,7 +362,7 @@ class ImagesNamespaceHandlerTest {
             "ERR_STALE_HANDLE",
             errCode(call("release", """{"ref":{"refId":1,"generation":7}}""")),
         )
-        assertEquals(1, fake.released.size, "后三次一次 SPI 释放都没发")
+        assertEquals(1, fake.released.size, "后三次都到了 SPI，但没一次落成成功释放（在场性唯一判据在帧表）")
 
         // 再 decode 一帧（refId 推进到 2）：释放仍可达 —— 脚本 finally 的补刀不会炸，
         // 是因为帧没放时怎么放都回 true；放过的就是不在场（上面那个 STALE）
@@ -386,13 +490,202 @@ class ImagesNamespaceHandlerTest {
 
     @Test
     fun `未开桥面的图像操作如实 ERR_NOT_IMPLEMENTED`() = runBlocking {
-        for (m in listOf("toGrayscale", "crop", "pixel", "fromFile", "captureScreen", "rotate")) {
+        for (m in listOf("pixel", "fromFile", "captureScreen")) {
             assertEquals(
                 "ERR_NOT_IMPLEMENTED",
                 errCode(call(m, """{"path":"/sdcard/icon.png"}""")),
-                "灰度/裁剪/取像素/旋转归 §9.2 native 面（P1），接口期不猜",
+                "$m 两侧都没有（§12.3.2 第 7 条），接口期不猜",
             )
         }
+        Unit
+    }
+
+    // ── P1 图像桥消费方五算子（2026-09-29 开通，§9.2 末推演兑现）──────────
+    // 判据：wire 形状（`{source}` 或 `{scene,template}`）、域校验零 SPI、产出帧
+    // 与 decode 帧同一条表/同一条释放路、（findFeature）未命中是答案。
+
+    private fun transformJson(source: HandleRef, extra: String = ""): String =
+        """{"source":{"refId":${source.refId},"generation":${source.generation}}$extra}"""
+
+    @Test
+    fun `toGrayscale 发 source 回产出帧`() = runBlocking {
+        val shot = decodeFrame("/sdcard/shot.png")
+        fake.nextWidth = 540
+        fake.nextHeight = 1200
+        val payload = ok(call("toGrayscale", transformJson(shot)))
+        val o = A11yBridgeJson.decodeObject(payload)
+        val ref = (o["ref"] as A11yBridgeJson.Value.Obj).fields
+        assertEquals("2", (ref["refId"] as A11yBridgeJson.Value.N).raw, "产出帧与 decode 同一号段")
+        assertEquals("540", (o["width"] as A11yBridgeJson.Value.N).raw, "宽高随产出帧真值")
+        assertEquals("1200", (o["height"] as A11yBridgeJson.Value.N).raw)
+        val source = fake.transforms.single().source
+        assertEquals(shot, source, "source 原样到 SPI，不拼接不解析")
+        Unit
+    }
+
+    @Test
+    fun `crop 的 region 必填四元组，越界形状先拒且不碰 SPI`() = runBlocking {
+        val shot = decodeFrame()
+        for (bad in listOf(
+            """{"source":{"refId":1,"generation":1}}""",
+            """{"source":{"refId":1,"generation":1},"region":[1,2,3]}""",
+            """{"source":{"refId":1,"generation":1},"region":"x,y,w,h"}""",
+        )) {
+            assertEquals("ERR_INVALID_PARAM", errCode(call("crop", bad)), "缺 region/形状不成立都是参数错: $bad")
+        }
+        assertTrue(fake.transforms.isEmpty(), "形状错一次 SPI 调用都不发")
+        Unit
+    }
+
+    @Test
+    fun `crop 把 region 原样交给 SPI`() = runBlocking {
+        val shot = decodeFrame()
+        val payload = ok(call("crop", """{"source":{"refId":1,"generation":1},"region":[10,20,30,40]}"""))
+        val o = A11yBridgeJson.decodeObject(payload)
+        val ref = (o["ref"] as A11yBridgeJson.Value.Obj).fields
+        assertEquals("2", (ref["refId"] as A11yBridgeJson.Value.N).raw, "产出帧与 decode 同一号段")
+        assertEquals("30", (o["width"] as A11yBridgeJson.Value.N).raw, "宽高随产出帧（区域 w/h）")
+        assertEquals("40", (o["height"] as A11yBridgeJson.Value.N).raw)
+        val region = fake.transforms.single().region
+        assertEquals(listOf(10, 20, 30, 40), region)
+        Unit
+    }
+
+    @Test
+    fun `resize 目标尺寸域校验先拒且不碰 SPI`() = runBlocking {
+        val shot = decodeFrame()
+        for (bad in listOf(
+            """{"source":{"refId":1,"generation":1},"width":0,"height":10}""",
+            """{"source":{"refId":1,"generation":1},"width":10,"height":-5}""",
+            """{"source":{"refId":1,"generation":1},"width":16385,"height":10}""",
+            """{"source":{"refId":1,"generation":1},"width":1.5,"height":10}""",
+        )) {
+            assertEquals("ERR_INVALID_PARAM", errCode(call("resize", bad)), "尺寸非正/超配额/非整都是参数错: $bad")
+        }
+        assertTrue(fake.transforms.isEmpty(), "域错一次 SPI 调用都不发")
+        Unit
+    }
+
+    @Test
+    fun `resize 把目标尺寸原样交给 SPI`() = runBlocking {
+        val shot = decodeFrame()
+        ok(call("resize", """{"source":{"refId":1,"generation":1},"width":270,"height":1200}"""))
+        val w = fake.transforms.single().width
+        val h = fake.transforms.single().height
+        assertEquals(270, w)
+        assertEquals(1200, h)
+        Unit
+    }
+
+    @Test
+    fun `rotate 的角度必须有限且原样交给 SPI`() = runBlocking {
+        val shot = decodeFrame()
+        for (bad in listOf("NaN", "Infinity", "-Infinity")) {
+            assertEquals(
+                "ERR_INVALID_PARAM",
+                errCode(call("rotate", """{"source":{"refId":1,"generation":1},"degrees":$bad}""")),
+                "非有限角度先拒（三角函数吃掉它们不报错）：$bad",
+            )
+        }
+        assertTrue(fake.transforms.isEmpty(), "非有限角度一次 SPI 调用都不发")
+        ok(call("rotate", """{"source":{"refId":1,"generation":1},"degrees":-90}"""))
+        val deg = fake.transforms.single().degrees
+        assertEquals(-90.0, deg, 0.0, "逆时针角度原样到 SPI")
+        Unit
+    }
+
+    @Test
+    fun `findFeature 发 scene+template，未命中回裸 null`() = runBlocking {
+        val scene = decodeFrame()
+        val templ = decodeFrame()
+        fake.featureResult = FeatureHit(345, 678, 0.63)
+        val payload = ok(call("findFeature", """{"scene":{"refId":1,"generation":1},"template":{"refId":2,"generation":1}}"""))
+        val o = A11yBridgeJson.decodeObject(payload)
+        assertEquals("345", (o["x"] as A11yBridgeJson.Value.N).raw)
+        assertEquals("678", (o["y"] as A11yBridgeJson.Value.N).raw)
+        assertEquals("0.63", (o["confidence"] as A11yBridgeJson.Value.N).raw)
+        assertEquals(Pair(scene, templ), fake.featureCalls.single())
+
+        fake.featureResult = null
+        assertEquals("null", ok(call("findFeature", """{"scene":{"refId":1,"generation":1},"template":{"refId":2,"generation":1}}""")), "未匹配是答案，不是异常")
+        Unit
+    }
+
+    @Test
+    fun `产出帧与源帧同一条表——释放、STALE、再变换`() = runBlocking {
+        val shot = decodeFrame()
+        val payload = ok(call("toGrayscale", transformJson(shot)))
+        val ref = (A11yBridgeJson.decodeObject(payload)["ref"] as A11yBridgeJson.Value.Obj).fields
+        val child = HandleRef(
+            (ref["refId"] as A11yBridgeJson.Value.N).raw.toLong(),
+            (ref["generation"] as A11yBridgeJson.Value.N).raw.toLong(),
+        )
+        // 产出帧可释放、可再变换
+        assertEquals("true", ok(call("release", refJson(child))))
+        assertEquals(listOf(child), fake.released, "产出帧与 decode 帧同一条释放路")
+        // 放掉的产出帧 → STALE（同源帧同一张表，判据只有在场性）
+        assertEquals("ERR_STALE_HANDLE", errCode(call("toGrayscale", transformJson(child))))
+        // 源帧不受影响，原帧照常可用
+        okay(call("toGrayscale", transformJson(shot)))
+        assertEquals(2, fake.transforms.size)
+        Unit
+    }
+
+    // ── 跨命名空间（§18-8(b) 2026-09-25 拍板："帧不通用"那条纪律取消）───────
+    // 两个 handler 共用**同一个** fake = 生产侧 `PlatformWiring` 把同一个 analyzer
+    // 同时喂给 `images` 与 `ScreenshotSource` 的形态。判据是"互认"：
+    // 截屏帧当 haystack 能匹配、能被 `images.release` 放掉、放掉后再用 STALE。
+
+    private fun rgbaProducer(w: Int, h: Int): ScreenshotSource.FrameProducer =
+        object : ScreenshotSource.FrameProducer {
+            override suspend fun snapshot(): ScreenSnapshot =
+                ScreenSnapshot(locked = false, secureForeground = false, hasWindows = true)
+
+            override suspend fun produce(width: Int, height: Int): ProducedFrame =
+                ProducedFrame(ByteArray(w * h * 4), w, h)
+        }
+
+
+    @Test
+    fun `截屏帧与 decode 帧同一张表——findImage 通、images 能放 screen 的帧`() = runBlocking {
+        val shared = FakeAnalyzer()
+        val images = CapabilityNamespaces.images(shared)
+        // 可控时钟：capture 走 333ms 节流，别让用例撞在窗口上
+        var now = 1_000L
+        val screen = ScreenshotSource(rgbaProducer(4, 4), clock = { now }, analyzer = shared)
+
+        val shot = screen.capture()
+        assertEquals(1L, shot.handle.refId, "截屏帧进的是 images 那张表（号段从 1 起）")
+
+        val iconPayload = ok(images.handle(BridgeRequest(2, "images", "decode", """{"path":"/sdcard/icon.png"}""", 5_000)))
+        val iconFields = (A11yBridgeJson.decodeObject(iconPayload)["ref"] as A11yBridgeJson.Value.Obj).fields
+        val icon = HandleRef(
+            (iconFields["refId"] as A11yBridgeJson.Value.N).raw.toLong(),
+            (iconFields["generation"] as A11yBridgeJson.Value.N).raw.toLong(),
+        )
+        assertEquals(2L, icon.refId, "decode 接着截屏帧往下发号 —— 同一段，不是两张表")
+
+        // 互认的核心：截屏帧当 haystack 不是 ERR_STALE_HANDLE
+        val matched = ok(
+            images.handle(
+                BridgeRequest(3, "images", "findImage", matchJson(shot.handle, icon, "0.9"), 5_000),
+            ),
+        )
+        assertEquals("null", matched, "跨来源两帧都认得（fake 未设命中 → 裸 null，不是 STALE）")
+
+        // `images.release` 放得掉一帧截屏（曾经：这张表里根本没有它）
+        assertEquals("true", ok(images.handle(BridgeRequest(4, "images", "release", refJson(shot.handle), 5_000))))
+        assertEquals(
+            "ERR_STALE_HANDLE",
+            errCode(images.handle(BridgeRequest(5, "images", "release", refJson(shot.handle), 5_000))),
+            "放掉即离场：两边同一口径",
+        )
+        // screen 侧再 recycle 同一帧 → 同码（同一张表、同一个"已释放"事实）
+        val e = assertThrows<AutojsException> { runBlocking { screen.recycle(shot.handle) } }
+        assertEquals(ErrorCode.ERR_STALE_HANDLE, e.error)
+
+        // 截屏帧放掉后，decode 帧照常在场可放（两帧互不牵连）
+        assertEquals("true", ok(images.handle(BridgeRequest(6, "images", "release", refJson(icon), 5_000))))
         Unit
     }
 }
