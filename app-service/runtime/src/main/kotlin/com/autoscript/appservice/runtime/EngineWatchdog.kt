@@ -40,7 +40,21 @@ class EngineWatchdog(
      * 阈值按轮计而非墙钟：看门狗节奏 = `policy.heartbeatIntervalMillis`，缺省 3 轮 ≈ 1.5s。
      */
     private val driftKillThreshold: Int = DEFAULT_DRIFT_KILL_THRESHOLD,
+    /**
+     * 启动宽限：执行开始后多久之内**允许没有心跳**（§8.4 首跳时延；2026-09-29 加）。
+     *
+     * 为什么必须有：心跳由**引擎进程**在 JS 引导里打（main.cpp 的 kBootstrap `setInterval`
+     * …,500ms），而进程要 spawn → dlopen libnode → 建 isolate → 跑引导脚本才有第一跳。
+     * 真机实测冷启 158ms，但那是空机热态；冷启动/低端机/大脚本可以到秒级。
+     * 没有宽限，「引擎在启动中」与「引擎装死」在账上长得一模一样 —— 宽限期内的
+     * [Tick.noHeartbeat] 只记账不判死，正是把这两种形态分开的那把尺。
+     */
+    private val bootGraceMillis: Long = DEFAULT_BOOT_GRACE_MILLIS,
 ) {
+    init {
+        require(bootGraceMillis >= 0) { "bootGraceMillis 不得为负（负值 = 宽限失效）" }
+    }
+
     /**
      * 心跳来源（runId → 距上次心跳毫秒）；null = 该 run 量不到心跳。
      *
@@ -83,12 +97,24 @@ class EngineWatchdog(
      * - [noPid]：宿主没给 [com.autoscript.domain.engine.ScriptEngine.pid]；
      * - [noHeartbeat]：心跳来源未接线（[heartbeatMillis] 回 null）；
      * - [procUnreadable]：`/proc` 读不到（异 UID / 进程已退出）。
+     *
+     * **`noHeartbeat` 不只是记账，它是决策**（2026-09-29 改口径，见 [killNoHeartbeat]）：
+     * 该 run 本轮**不判死**，但会经 [RuntimeController.killRun] 落一次
+     * [com.autoscript.domain.engine.KillCause.WATCHDOG_HEARTBEAT] 硬杀 ——
+     * 否则"从不打点"等于永久免检，§8.4 最要害的一路被静默关掉。宽限窗口见 [killNoHeartbeat]。
      */
     data class Tick(
         val sampled: Int,
         val killed: List<Long> = emptyList(),
         val noPid: List<Long> = emptyList(),
         val noHeartbeat: List<Long> = emptyList(),
+        /**
+         * 本轮因「启动宽限已过仍无心跳」被杀的 runId（[noHeartbeat] 的子集）。
+         *
+         * 与 [killed] 的关系：[killed] 含它，但它单独列出 —— 判据不是"心跳失联多久"
+         * （那是 [WatchdogPolicy] 的活），而是"这一路根本没接上"，诊断上要分得开。
+         */
+        val noHeartbeatKilled: List<Long> = emptyList(),
         val procUnreadable: List<Long> = emptyList(),
         val forgotten: List<Int> = emptyList(),
         /** 宿主自报与池侧状态机投影**不一致**的在途 runId（§8.3 校准：只报分歧，不擅自改状态）。 */
@@ -169,6 +195,7 @@ class EngineWatchdog(
         val killed = mutableListOf<Long>()
         val noPid = mutableListOf<Long>()
         val noHeartbeat = mutableListOf<Long>()
+        val noHeartbeatKilled = mutableListOf<Long>()
         val procUnreadable = mutableListOf<Long>()
         val forgotten = mutableListOf<Int>()
         val drift = mutableListOf<Long>()
@@ -183,7 +210,13 @@ class EngineWatchdog(
             }
             val beat = heartbeatMillis(anchor.runId)
             if (beat == null) {
+                // 量不到心跳：宽限内只记账（引擎可能还在 spawn/dlopen/建 isolate），
+                // 宽限过了就是"这一路根本没接上" —— 硬杀，否则永不判死。
                 noHeartbeat += anchor.runId
+                if (killNoHeartbeat(anchor)) {
+                    killed += anchor.runId
+                    noHeartbeatKilled += anchor.runId
+                }
                 continue
             }
             val run = controller.statusOf(anchor.runId)
@@ -253,11 +286,28 @@ class EngineWatchdog(
             killed = killed,
             noPid = noPid,
             noHeartbeat = noHeartbeat,
+            noHeartbeatKilled = noHeartbeatKilled,
             procUnreadable = procUnreadable,
             forgotten = forgotten,
             drift = drift,
             driftKilled = driftKilled,
         )
+    }
+
+    /**
+     * 「启动宽限已过仍无心跳」的硬杀判定（[tick] 里 `beat == null` 那一支）。
+     *
+     * 三条边界：
+     * - **宽限内不杀**：`now - startedAt < bootGraceMillis` → 只记账（引擎在启动中）；
+     * - **刚被杀过不重杀**：`anchor.runId in killed` 由调用方保证（与 drift 杀同款）；
+     * - **kill 权威仍在 controller**：本类只调 [RuntimeController.killRun]，不自己动手。
+     *
+     * @return true = 本轮已落杀（调用方把它计入 [Tick.killed]/[Tick.noHeartbeatKilled]）。
+     */
+    private suspend fun killNoHeartbeat(anchor: RuntimeController.WatchAnchor): Boolean {
+        if (clock.nowMillis() - anchor.startedAtMillis < bootGraceMillis) return false
+        controller.killRun(anchor.runId, KillCause.WATCHDOG_HEARTBEAT)
+        return true
     }
 
     /**
@@ -303,5 +353,16 @@ class EngineWatchdog(
          * 池还没 quiesce 完）通常 1 轮内弥合，3 轮还对不上就不是窗口期。
          */
         const val DEFAULT_DRIFT_KILL_THRESHOLD: Int = 3
+
+        /**
+         * 启动宽限缺省值：5s（2026-09-29）。
+         *
+         * 取值依据：心跳首跳由引擎进程的 JS 引导给出（500ms 周期），而首跳前要走完
+         * spawn → dlopen libnode（70MB 映射，真机冷启实测 158ms）→ 建 isolate → 跑引导。
+         * 5s = 10 个心跳周期，足够覆盖冷启动与低端机；再长就会让"装死的引擎"白占槽位。
+         * 这是**判死门槛**不是性能指标：宁可多等 5s 也不要把正在启动的引擎误杀
+         * （误杀会写进运行档案，且 §8.4 的恢复语义会当成一次真崩溃）。
+         */
+        const val DEFAULT_BOOT_GRACE_MILLIS: Long = 5_000
     }
 }

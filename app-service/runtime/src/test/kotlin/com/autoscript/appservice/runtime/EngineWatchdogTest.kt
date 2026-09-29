@@ -50,7 +50,12 @@ class EngineWatchdogTest {
     ): Triple<RuntimeController, EngineWatchdog, FakeEngine> {
         // controller 与 watchdog 必须持**同一个** policy：裁决由 controller.judge 落，
         // watchdog 只决定节奏与记账。两处各配一份 = 阈值悄悄不一致（调试地狱）。
-        val controller = RuntimeController(FixedEnginePool({ engine }, capacity = 1), policy)
+        // 钟也同源：启动宽限（EngineWatchdog.bootGraceMillis）与「这次 run 何时启动」必须
+        // 用同一口钟算，否则给定值时钟推进时两边对不上（一个说宽限过了、一个说没过）。
+        val controller = RuntimeController(
+            FixedEnginePool({ engine }, capacity = 1), policy,
+            clock = { clock.nowMillis() },
+        )
         val watchdog = EngineWatchdog(controller = controller, policy = policy, clock = clock)
             .withMonitor(monitor)
             .withHeartbeat(heartbeat)
@@ -236,7 +241,7 @@ class EngineWatchdogTest {
     }
 
     @Test
-    fun `心跳未接线时不喂假心跳`() = runBlocking {
+    fun `心跳未接线时启动宽限内只记账不判死`() = runBlocking {
         val monitor = ProcessMonitor(100, statReader = { stat(0) }, statusReader = { status() })
         val (controller, watchdog, _) = rig(monitor, heartbeat = { null })
         controller.start(PoolAcquireRequest("p", "a.js"))
@@ -244,7 +249,65 @@ class EngineWatchdogTest {
         val tick = watchdog.tick()
         assertEquals(0, tick.noPid.size + tick.procUnreadable.size)
         assertEquals(1, tick.noHeartbeat.size, "心跳来源未接：如实记账")
-        assertTrue(tick.killed.isEmpty(), "不拿看门狗自己的轮转周期冒充心跳（那会静默关掉最要害的一路）")
+        assertTrue(tick.killed.isEmpty(), "启动宽限内不杀：引擎可能还在 spawn/dlopen/建 isolate")
+        assertTrue(tick.noHeartbeatKilled.isEmpty())
+    }
+
+    @Test
+    fun `心跳未接线且宽限已过：落 WATCHDOG_HEARTBEAT 硬杀（防腐烂免检）`() = runBlocking {
+        val monitor = ProcessMonitor(100, statReader = { stat(0) }, statusReader = { status() })
+        val clock = FakeClock()
+        // 宽限 1s，便于用给定钟精确跨过门槛
+        val (controller, watchdog, engine) = rig(monitor, heartbeat = { null }, clock = clock)
+        val dog = EngineWatchdog(
+            controller = controller,
+            policy = WatchdogPolicy(),
+            clock = clock,
+            bootGraceMillis = 1_000,
+        ).withMonitor(monitor).withHeartbeat { null }
+        val started = controller.start(PoolAcquireRequest("p", "a.js"))
+        val runId = (started as RuntimeController.StartOutcome.Started).runId
+
+        // 宽限内
+        clock.advance(500)
+        val inGrace = dog.tick()
+        assertTrue(inGrace.killed.isEmpty(), "宽限内不杀（widen 未到）")
+        assertEquals(listOf(runId), inGrace.noHeartbeat)
+
+        // 跨过宽限
+        clock.advance(600)
+        val past = dog.tick()
+        assertEquals(listOf(runId), past.noHeartbeatKilled, "宽限已过仍无心跳 = 这一路没接上，硬杀")
+        assertTrue(past.killed.contains(runId))
+        assertEquals(EngineStatus.CRASHED, engine.status(), "WATCHDOG_HEARTBEAT 是强杀（§8.3 归类 CRASHED）")
+        assertTrue(controller.activeRunIds().isEmpty(), "杀即收走在途账，不给下一轮留幽灵")
+    }
+
+    @Test
+    fun `同一轮内不会既判未接线又判失联：心跳源在位时走失联一路`() = runBlocking {
+        // 心跳源接线与否是**接线事实**，由 heartbeat(!) 回 null 表达；只要它还回得出值，
+        // 这一路就没断（哪怕值很大 → 那是 policy 的失联判定，本条验的就是两者不重叠）。
+        val monitor = ProcessMonitor(100, statReader = { stat(0) }, statusReader = { status() })
+        val clock = FakeClock()
+        val (controller, watchdog, engine) = rig(monitor, heartbeat = { 2_000L }, clock = clock)
+
+        val dog = EngineWatchdog(
+            controller = controller,
+            policy = WatchdogPolicy(),
+            clock = clock,
+            bootGraceMillis = 1_000,
+        ).withMonitor(monitor).withHeartbeat { 2_000L }
+        val started = assertInstanceOf(
+            RuntimeController.StartOutcome.Started::class.java,
+            controller.start(PoolAcquireRequest("p", "a.js")),
+        )
+
+        clock.advance(5_000)                       // 远超宽限
+        val tick = dog.tick()
+        assertTrue(tick.noHeartbeat.isEmpty(), "有账在：不算『没接线』")
+        assertTrue(tick.noHeartbeatKilled.isEmpty(), "未接线那一支不该出手")
+        assertEquals(listOf(started.runId), tick.killed, "失联由 policy 判（WATCHDOG_HEARTBEAT）")
+        assertEquals(1, engine.killCalls)
     }
 
     @Test
