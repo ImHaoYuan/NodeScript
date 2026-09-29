@@ -193,9 +193,20 @@ for so in "$OUT"/libnode.so*; do
 done
 
 # ── 7) 门禁 ──────────────────────────────────────────────────────────────
-say "16KB/ELF/平台/ABI 门禁 ..."
-bash "$SCRIPT_DIR/check-alignment.sh" "$TOOLCHAIN/bin/llvm-objdump" "$OUT"
+say "16KB/ELF/平台/ABI 门禁（含 libc++_shared：libnode 的传递依赖，须与它同 16KB 口径）..."
+# libc++_shared.so：libnode 的 DT_NEEDED（readelf 实证；bionic 的 RUNPATH 不作用于
+# 被依赖库的传递依赖，2026-09-29 真机实测 —— 它必须由装载面显式携带）。产线用 NDK
+# sysroot 的同 ABI 版本（与 app/build.gradle.kts 的 prepareEngineNativeLibs 同源），
+# 同门禁断言，保证 APK 里三件套的 16KB 口径一致。
+# NDK 的 sysroot ABI 目录不含 API 号（aarch64-linux-android/，不是 ${TARGET_TUPLE}/）：
+# 顶层 libc++_shared.so 是 r28c 的无前缀版本，30/…/35 子目录是带版本号的（给 crt 变体用）。
+# API 约束只影响链入的库集合（libc.a 等），libc++_shared.so 本体不分 API —— 取无前缀件。
+LIBCXX_SHARED="$NDK_DIR/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/${TARGET_TUPLE%%$ANDROID_API}/libc++_shared.so"
+[ -f "$LIBCXX_SHARED" ] || die "libc++_shared.so 不在 NDK sysroot: $LIBCXX_SHARED"
+bash "$SCRIPT_DIR/check-alignment.sh" "$TOOLCHAIN/bin/llvm-objdump" "$OUT" "$LIBCXX_SHARED"
 
 # ── 8) 产物基表（对照 Node SHASUMS256 语义，供发布审计）──────────────────
-(cd "$OUT" && sha256sum node libnode.so* config.gypi config.mk | tee SHASUMS256)
-say "完成。产物：$OUT/node + $OUT/libnode.so.*（垂直切片见设计 §844）"
+# 三件套同基表（libc++_shared 与 libnode 同 16KB 口径、同为装载闭包成员 —— 真机实测
+# 它是 libnode 的传递依赖，RUNPATH 不替它解析，2026-09-29）。基表件数从 4 → 5。
+(cd "$OUT" && sha256sum node libnode.so* libc++_shared.so config.gypi config.mk | tee SHASUMS256)
+say "完成。产物：$OUT/node + $OUT/libnode.so.* + $OUT/libc++_shared.so（垂直切片见设计 §844）"

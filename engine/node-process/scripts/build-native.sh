@@ -56,7 +56,10 @@ if bad: sys.exit("LOAD align < 16KB:\n" + "\n".join(bad))
 ' || fail "$f 未过 16KB LOAD 对齐门禁"
 }
 
-CXXFLAGS=(-std=c++20 -fPIC -O2 -Wall -Wextra -DNAPI_VERSION=10)
+# -D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_NONE：静态 STL 的 addon 必须钉死无加固
+# 态（libc++ hardening 会把 <string>/<vector> 的内联检查引到 __libcpp_verbose_abort，
+# 该符号只存在于 libc++_shared.so —— 静态 STL 产物的运行期解析面不该需要它）。
+CXXFLAGS=(-std=c++20 -fPIC -O2 -Wall -Wextra -DNAPI_VERSION=10           -D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_NONE)
 # 装载闭包契约（2026-09-29 真机实测改口径，原「-static-libstdc++ 静态 STL」已推翻）：
 #
 #   bionic 的 linker namespace **不把先做的 dlopen(RTLD_GLOBAL) 符号给后做的 dlopen**
