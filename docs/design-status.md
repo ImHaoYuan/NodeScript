@@ -29,7 +29,7 @@
 | §15 | APK ≤ 40MB | **已超支**（实测 ≈81MB，见 [`design-decisions.md`](design-decisions.md#已推翻--已改口径)） |
 | — | 真机红测：exec/dlopen + 桥全链 | **已做**（2026-09-29，见下「流水」；非 root、Android 13/arm64、生产布局） |
 | — | 真机红测：16KB 页机 / SELinux enforcing / `nativeLibraryDir` 提取路径 / targetSdk36 exec 策略 | 未做（设备 PAGE_SIZE=4096，这几项该机**原理上测不到**） |
-| — | 真机红测：性能数字（冷启/帧往返） | 部分（冷启 158ms；桥往返未计时） |
+| — | 真机红测：性能数字（冷启/帧往返） | 部分（冷启 158ms；桥往返 p95=1ms；引擎 RSS≈46MB；Intl 运行期见流水 9-30 —— 该 libnode 无 Intl，待重编件复测） |
 
 ---
 
@@ -39,6 +39,19 @@
 只在那里写一份（本文件不复制，避免两处漂移）。
 
 ## 流水（最新在上）
+
+### 2026-09-30 —— A 组第一批实测（云手机，Android 13 / API 33 / arm64 / PAGE_SIZE=4096）
+
+生产布局（`e2e/lib/arm64-v8a/` + `e2e/files/bridge-addon/` + `files/node_modules/auto`，`LD_LIBRARY_PATH` 清空）复跑 + 三项新数。dist 与设备件同源（`console.js` md5 一致，未推新包）。
+
+| # | 项 | 结果 |
+|---|---|---|
+| A1 | 桥往返（`auto.console.log` 200 次，脚本侧 `Date.now` 打点，host 真处理） | `min=0 p50=0 **p95=1** p99=2 max=2`（ms）；host 侧 205 帧对上（200 console + 5 预热）。§7.7 空 RPC p95 < 2ms 口径下有余量（注：这是 console 整调用往返，非裸 RPC） |
+| A5 | `Intl.*` zh/en 运行期 | **该件无 `Intl`**：`typeof Intl` 未定义（`process.config.variables` 仍有 `icu_small=false` —— 旧件，ICU 旗标 2026-09-26 才进管线，CI 重编 success 但新件未推设备）。结论：待 node-slice 本轮绿后取新件复测；本项仍欠 |
+| A6 | 引擎进程 RSS（脚本存活窗内 `smaps_rollup`） | `Rss≈46.6MB Pss≈44.1MB`（其中文件页 ~32MB、匿名 ~12MB）；§15 80–160MB 区间内，偏下限（注：host 宿主进程同法测得 Rss≈47.6MB，同量级） |
+| C1 | `.node` 经 `process.dlopen` 路径的 `require` | 与 9-29 同结论：**无 `DT_NEEDED libnode.so` 的件在 `require` 下仍 `ERR_DLOPEN_FAILED`（`cannot locate symbol "napi_add_env_cleanup_hook"`）**—— 即使宿主自身已 NEEDED libnode（启动闭包里有 libnode）。装载器按 SONAME 找依赖，不是全局作用域续期。`§10.12 不引入第三方 .node` 口径不变 |
+
+A2–A4（截图→找图/找色/模板）仍欠：`libopencv.so` 不在设备上（`find` 无命中），等 image-native 件或随包后再测。
 
 ### 2026-09-30 —— 等设备的那笔账：真机红测可执行清单（未执行，只列账）
 
