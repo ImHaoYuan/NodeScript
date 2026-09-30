@@ -71,7 +71,7 @@ object NpmShellKit {
         )
         return NpmBridgeHandler(
             InstallCoordinator(services = services, executor = executor, freeSpaceProbe = freeSpaceProbe),
-        ).mount()
+        )
     }
 
     /** 缺省磁盘探针：项目目录在 install 前本来就不存在（stat 会炸），退到 filesDir ——

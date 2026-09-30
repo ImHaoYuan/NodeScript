@@ -7,7 +7,7 @@ import com.autoscript.appservice.scheduler.core.ScreenGuarantee
 import com.autoscript.appservice.scheduler.core.TimedSchedule
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
-import com.autoscript.domain.bridge.NamespaceHandler
+import com.autoscript.domain.bridge.RpcNamespaceHandler
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
 import java.time.ZoneId
@@ -34,20 +34,11 @@ import java.time.ZoneId
  * - `list`：无参 → Ok `[task,…]`（与 create 同一任务形状；按 id 排序）。
  * - 未知方法 → ERR_NOT_IMPLEMENTED；非法载荷 → ERR_INVALID_PARAM。
  */
-class WorkManagerNamespaceHandler(private val scheduler: Scheduler) {
+class WorkManagerNamespaceHandler(private val scheduler: Scheduler) : RpcNamespaceHandler() {
 
-    suspend fun handle(request: BridgeRequest): BridgeResponse = try {
-        BridgeResponse.Ok(request.id, dispatch(request))
-    } catch (e: AutojsException) {
-        BridgeResponse.Err(request.id, e.error.code, e.message)
-    } catch (e: IllegalArgumentException) {
-        BridgeResponse.Err(request.id, ErrorCode.ERR_INVALID_PARAM.code, e.message)
-    }
+    override suspend fun dispatch(request: BridgeRequest): BridgeResponse = ok(request, payload(request))
 
-    /** 挂载为桥 NamespaceHandler（`AppShell.assemble` 直接挂，不经注入缝）。 */
-    fun mount(): NamespaceHandler = NamespaceHandler { req -> handle(req) }
-
-    private suspend fun dispatch(request: BridgeRequest): String? {
+    private suspend fun payload(request: BridgeRequest): String? {
         return when (request.method) {
             "create" -> create(WmJson.decodeObject(requirePayload(request)))
             "cancel" -> {

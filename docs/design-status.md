@@ -40,6 +40,16 @@
 
 ## 流水（最新在上）
 
+### 2026-09-30 —— 外部审查整改·步骤 4：删 \*Lite + RpcNamespaceHandler 基类承接解码与错误映射
+
+（§7.5 handler 形状 / §4.1 缝；拍板见 [`design-decisions.md`](design-decisions.md) 已拍板第 10 项）三点推进：
+
+- **4a（eb84984）**：codec 落位 `:domain` —— `DomainJson.kt`（原 `A11yBridgeJson` 迁入改名）、`Decode.kt`（解码 helpers 上移，public 抛 IAE）、`RpcNamespaceHandler.kt`（基类：`handle` final、fold 两类、`methods()` 留位步骤 7）。
+- **4b（4eec65e）**：`:platform:capabilities` 14 个 handler 全部 `: RpcNamespaceHandler()`，`BridgeRequestLite`/`ResponseLite` 与 a11y/screen 嵌套 `Request`/`Response` 删除，装配工厂束（`CapabilityNamespaces`）直返 handler，净 −682 行。
+- **4c**：`Engines`/`Npm`/`WorkManager`/`PowerManager` 四 handler 转基类（Engines 展开 12 处内联 IAE 折叠、删嵌套形状与本地 `ok/err`）；`AppShell.handleLike` 适配扩展删除（`router.register("engines", enginesHandler)` 直挂）；`.mount()` 4 处调用点去壳（`NpmShellKit`/`AppShell`/`AppShellApplication`/`AppShellCapabilityMountTest`）；Engines 测试 49 处 Request → `enginesReq` 工厂（缺省 TTL 30s——仅即时启动路径用缺省，排队用例全部显式 TTL，语义不漂移），`.code` → `.errorCode`。
+- 收敛核验：`handleLike`/`.mount()`/`*Lite` 全仓代码清零（Lite 仅剩 `CapabilityNamespaces` KDoc 一句退役记录）；`catch (e: AutojsException)` = 8 处（基类 1 + 桥外业务 7），桥折叠全归一。
+- 12 任务（CI 同源行）+ `bridge/js` npm test 全绿（2026-09-30）。
+
 ### 2026-09-30 —— 外部审查整改·步骤 2/4 先行：build-logic 约定插件 + JVM 插件纠偏 + 共享架构门
 
 外部审查（8 步重构顺序）核实后按「2/4 先行、8 步全做、冲突项全盘照做」推进。本条记步骤 2 落地（§4.1/§6 构建面）：

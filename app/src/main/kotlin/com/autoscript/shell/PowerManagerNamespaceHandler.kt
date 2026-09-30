@@ -2,7 +2,7 @@ package com.autoscript.shell
 
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
-import com.autoscript.domain.bridge.NamespaceHandler
+import com.autoscript.domain.bridge.RpcNamespaceHandler
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
 
@@ -45,20 +45,11 @@ import com.autoscript.domain.core.ErrorCode
 class PowerManagerNamespaceHandler(
     private val ledger: WakeLockLedger,
     private val keepalive: ForegroundKeeper? = null,
-) {
+) : RpcNamespaceHandler() {
 
-    suspend fun handle(request: BridgeRequest): BridgeResponse = try {
-        BridgeResponse.Ok(request.id, dispatch(request))
-    } catch (e: AutojsException) {
-        BridgeResponse.Err(request.id, e.error.code, e.message)
-    } catch (e: IllegalArgumentException) {
-        BridgeResponse.Err(request.id, ErrorCode.ERR_INVALID_PARAM.code, e.message)
-    }
+    override suspend fun dispatch(request: BridgeRequest): BridgeResponse = ok(request, payload(request))
 
-    /** 挂载为桥 NamespaceHandler（`AppShell.assemble` 经独立缝直接挂，不经注入束）。 */
-    fun mount(): NamespaceHandler = NamespaceHandler { req -> handle(req) }
-
-    private fun dispatch(request: BridgeRequest): String? {
+    private fun payload(request: BridgeRequest): String? {
         return when (request.method) {
             "acquire" -> acquire(WmJson.decodeObject(requirePayload(request)))
             "release" -> release(WmJson.decodeObject(requirePayload(request)))

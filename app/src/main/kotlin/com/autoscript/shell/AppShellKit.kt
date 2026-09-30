@@ -290,7 +290,7 @@ object AppShellKit {
      *   四方法判据在 SPI，不入 [SystemHandlers]）；
      *   null = 未接线，桥如实 `ERR_NOT_IMPLEMENTED`。
      * @param powerManagerHandler `power_manager` 命名空间实现（§8.7，由 Application 从
-     *   `foregroundKeeper()` 账本现建 `PowerManagerNamespaceHandler(...).mount()` 后传入）；
+     *   `foregroundKeeper()` 账本现建 `PowerManagerNamespaceHandler(...)` 后传入）；
      *   同 datastore 独立缝，不入 [SystemHandlers]；null = 未接线，桥如实 `ERR_NOT_IMPLEMENTED`。
      * @param systemHandlers `dialogs`/`shell`/`device`/`app`/`floatingWindow` 五个命名空间实现（§9.4/§9.6，经 `:platform:capabilities` 的 `CapabilityNamespaces.{shell,device,app,dialogs,floatingWindow}` 转接）；null = 未接线，桥如实 `ERR_NOT_IMPLEMENTED`。与 [a11yHandler]/[screenHandler] 同一注入缝，合成一个束（见 [SystemHandlers]）——本配方只透传，不 new 实现。
      * @param watchdogScope 看门狗轮转的协程域；null = 本配方自建一个壳自己的域

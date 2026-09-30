@@ -3,14 +3,16 @@ package com.autoscript.appservice.packager.npm
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.bridge.NamespaceHandler
+import com.autoscript.domain.bridge.RpcNamespaceHandler
 import com.autoscript.domain.core.ErrorCode
 
 /**
  * `npm` 命名空间桥处理器（docs §10.8 / §12.3 `auto.npm` 的 Kotlin 对偶）。
  *
  * 归属：住 `:app-service:packager`（InstallCoordinator 所在；桥只透传 envelope，
- * 方法语义全在 [PackageManagerFacade] 面）。`:app` 装配层只拿 [mount] 返回的
- * [NamespaceHandler] 挂 Router（同 a11y/screen 注入缝，§4.1/§6）。
+ * 方法语义全在 [PackageManagerFacade] 面）。本类即 [NamespaceHandler]
+ *（承 [RpcNamespaceHandler]），`:app` 装配层 `router.register("npm", it)` 直挂
+ *（同 a11y/screen 注入缝，§4.1/§6）。
  *
  * 项目归属：payload `projectId` 显式指定（`auto.npm.install` 所在的脚本项目）；
  * 缺省走 [DEFAULT_PROJECT_ID]（单项目 IDE 场景）。空串/非字符串 → ERR_INVALID_PARAM，
@@ -43,26 +45,16 @@ import com.autoscript.domain.core.ErrorCode
  *   （**只入队**；脚本绝无 resolve 权。`scripts` 回显：JS facade 一直带着这个字段，
  *   宿主不校验也不回就是静默丢用户显式声明——与 `setRegistry` 的 scope 同一类问题）。
  */
-class NpmBridgeHandler(private val facade: com.autoscript.domain.npm.PackageManagerFacade) {
+class NpmBridgeHandler(private val facade: com.autoscript.domain.npm.PackageManagerFacade) : RpcNamespaceHandler() {
 
     companion object {
         /** 单项目/IDE 直跑场景的缺省项目（多项目时 payload 必须显式带 projectId）。 */
         const val DEFAULT_PROJECT_ID = "main"
     }
 
-    suspend fun handle(request: BridgeRequest): BridgeResponse = try {
-        BridgeResponse.Ok(request.id, dispatch(request))
-    } catch (e: com.autoscript.domain.core.AutojsException) {
-        BridgeResponse.Err(request.id, e.error.code, e.message)
-    } catch (e: IllegalArgumentException) {
-        // 载荷/参数非法 → ERR_INVALID_PARAM（§7 诚实上报，不伪造成功）
-        BridgeResponse.Err(request.id, ErrorCode.ERR_INVALID_PARAM.code, e.message)
-    }
+    override suspend fun dispatch(request: BridgeRequest): BridgeResponse = ok(request, payload(request))
 
-    /** 挂载为桥 NamespaceHandler（:app 装配层只拿这个，不 new 本类）。 */
-    fun mount(): NamespaceHandler = NamespaceHandler { req -> handle(req) }
-
-    private suspend fun dispatch(request: BridgeRequest): String? {
+    private suspend fun payload(request: BridgeRequest): String? {
         val f = NpmBridgeJson.decodeObject(requirePayload(request))
         val projectId = when (val v = f["projectId"]) {
             null, is NpmBridgeJson.Value.Null -> DEFAULT_PROJECT_ID

@@ -66,7 +66,7 @@ class AppShellCapabilityMountTest {
             sensorsHandler = map["sensors"],
             imagesHandler = map["images"],
             // S8.7: power_manager drives the ledger straight; tests feed a keeper on demand.
-            powerManagerHandler = keeper?.let { PowerManagerNamespaceHandler(it.wakeLocks(), it).mount() },
+            powerManagerHandler = keeper?.let { PowerManagerNamespaceHandler(it.wakeLocks(), it) },
         )
     }
 

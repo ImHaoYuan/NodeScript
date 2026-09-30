@@ -256,7 +256,7 @@ class AppShellApplication : Application(), HostSummary {
                 powerManagerHandler = PowerManagerNamespaceHandler(
                     foregroundKeeper().wakeLocks(),
                     foregroundKeeper(),
-                ).mount(),
+                ),
                 systemHandlers = wiring.systemHandlers,
             )
             // accept 开 serve：壳 router 就绪才收（bind 与 start 之间的入连接在内核 backlog
