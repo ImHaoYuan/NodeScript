@@ -285,40 +285,49 @@ export const images = {
   },
 
   /**
-   * 模板匹配（`matchTemplate`）：在 `haystack` 帧里找 `needle` 帧，置信度 ≥ `threshold` 即命中。
-   * **两帧只要是同一张表里的在场句柄就行** —— `screen.capture()` 的帧可以直接当
-   * haystack（§18-8(b) 两 namespace 共用帧表）。
+   * 模板匹配（`matchTemplate`）：在 `haystack` 帧（或其 `region` 子矩形）里找
+   * `needle` 帧，置信度 ≥ `threshold` 即命中。**两帧只要是同一张表里的在场句柄
+   * 就行** —— `screen.capture()` 的帧可以直接当 haystack（§18-8(b) 两 namespace
+   * 共用帧表）。
    *
    * 未匹配**不是异常**：回 `null`（图里没有达到阈值的位置）。帧已释放 →
    * `ERR_STALE_HANDLE`；阈值缺省 `0.9`（v9 同名默认值；域 `[0,1]` 之外 →
    * `ERR_INVALID_PARAM` 且一次匹配都不发）。
+   *
+   * `region` 可选 `[x,y,w,h]` 搜索范围（缺省 = 全帧）：给了必须**整体**落在帧内
+   * （越界 → `ERR_INVALID_PARAM`，不静默裁剪）；**region 比模板小 → `ERR_IO`**
+   * （与"模板比画面大"同属参数关系不成立）。命中坐标恒是**全帧坐标**（区域只是
+   * 搜索范围不是坐标系，与 findColor 同款）。已知大致位置就传 —— 缩窗是小模板
+   * （进不了金字塔粗筛的 <80px 那类）提速的主要出路。
    */
   async matchTemplate(
     haystack: FrameSource,
     needle: FrameSource,
-    opts: { threshold?: number; timeout?: number } = {},
+    opts: { threshold?: number; region?: Region4; timeout?: number } = {},
   ): Promise<MatchResult | null> {
     const payload = await runtimeBridge.invoke('images', 'matchTemplate', {
       haystack: haystack.ref,
       needle: needle.ref,
       threshold: opts.threshold ?? 0.9,
+      region: opts.region,
     }, { ttl: opts.timeout ?? 10_000 })
     return payload as MatchResult | null
   },
 
   /**
-   * 找图（`findImage`，threshold 语义/缺省同 [matchTemplate]）。
+   * 找图（`findImage`，threshold/region 语义/缺省同 [matchTemplate]）。
    * v9 的两个名字是同一个 opencv 概念：wire 形状逐字段相同，宿主侧同一套校验。
    */
   async findImage(
     haystack: FrameSource,
     needle: FrameSource,
-    opts: { threshold?: number; timeout?: number } = {},
+    opts: { threshold?: number; region?: Region4; timeout?: number } = {},
   ): Promise<MatchResult | null> {
     const payload = await runtimeBridge.invoke('images', 'findImage', {
       haystack: haystack.ref,
       needle: needle.ref,
       threshold: opts.threshold ?? 0.9,
+      region: opts.region,
     }, { ttl: opts.timeout ?? 10_000 })
     return payload as MatchResult | null
   },

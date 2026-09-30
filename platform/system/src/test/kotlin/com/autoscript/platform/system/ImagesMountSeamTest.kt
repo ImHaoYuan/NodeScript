@@ -84,9 +84,9 @@ class ImagesMountSeamTest {
 
         override suspend fun release(handle: HandleRef) = Unit
 
-        override suspend fun matchTemplate(haystack: HandleRef, needle: HandleRef, threshold: Double): ImageMatch? = result
+        override suspend fun matchTemplate(haystack: HandleRef, needle: HandleRef, threshold: Double, region: List<Int>?): ImageMatch? = result
 
-        override suspend fun findImage(haystack: HandleRef, needle: HandleRef, threshold: Double): ImageMatch? = result
+        override suspend fun findImage(haystack: HandleRef, needle: HandleRef, threshold: Double, region: List<Int>?): ImageMatch? = result
 
         override suspend fun findColor(
             haystack: HandleRef,

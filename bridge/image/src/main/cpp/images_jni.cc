@@ -30,6 +30,7 @@ int imgnative_decode(const char* path, int64_t* out_ref, int32_t* out_w, int32_t
 int imgnative_ingest(const uint8_t* source, int32_t width, int32_t height,
                      int64_t* out_ref, int32_t* out_w, int32_t* out_h);
 int imgnative_match(int64_t haystack, int64_t needle, double threshold,
+                    const int32_t* region,
                     int32_t* out_x, int32_t* out_y,
                     int32_t* out_w, int32_t* out_h,
                     double* out_conf, int32_t* out_match);
@@ -132,29 +133,45 @@ Java_com_autoscript_platform_system_JniOps_ingestNative(
 
 // ── match：模板匹配。命中回 jdouble[5]{x,y,w,h,confidence}；**未命中回
 // 长度 0 的数组**（比 conf=0 更难误读 —— confidence 恒 ≥ 0，0 会被当成
-// "真的匹上了但很差"）；失败回 null + *outStatus。
+// "真的匹上了但很差"）；失败回 null + *outStatus。region 可选（null = 全帧），
+// 长度 <4 的数组按参数错 —— 转换口径与 colorNative 逐字同款（GetIntArrayRegion
+// 的异常在边界内就地清掉，不让它穿 JNI）。
 JNIEXPORT jdoubleArray JNICALL
 Java_com_autoscript_platform_system_JniOps_matchNative(
     JNIEnv* env, jobject /*thiz*/, jlong haystack, jlong needle, jdouble threshold,
-    jobject out_status) {
+    jintArray region, jobject out_status) {
     jintArray status_arr = static_cast<jintArray>(out_status);
     jint status = 0;
     jdoubleArray result = nullptr;
 
-    int32_t x = 0, y = 0, w = 0, h = 0, hit = 0;
-    double conf = 0.0;
-    const int rc = imgnative_match(
-        static_cast<int64_t>(haystack), static_cast<int64_t>(needle),
-        static_cast<double>(threshold), &x, &y, &w, &h, &conf, &hit);
-    if (rc != 0) {
-        status = rc;
-    } else if (hit == 0) {
-        result = env->NewDoubleArray(0);       // 未匹配是答案，不是异常
-    } else {
-        jdouble quad[5] = {static_cast<jdouble>(x), static_cast<jdouble>(y),
-                           static_cast<jdouble>(w), static_cast<jdouble>(h), conf};
-        result = env->NewDoubleArray(5);
-        if (result != nullptr) env->SetDoubleArrayRegion(result, 0, 5, quad);
+    jint r[4] = {0, 0, 0, 0};
+    jboolean has_region = JNI_FALSE;
+    if (region != nullptr) {
+        env->GetIntArrayRegion(region, 0, 4, r);
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();             // 长度 <4：如实参数错，异常不穿边界
+            status = 4;
+        } else {
+            has_region = JNI_TRUE;
+        }
+    }
+    if (status == 0) {
+        int32_t x = 0, y = 0, w = 0, h = 0, hit = 0;
+        double conf = 0.0;
+        const int rc = imgnative_match(
+            static_cast<int64_t>(haystack), static_cast<int64_t>(needle),
+            static_cast<double>(threshold),
+            has_region == JNI_TRUE ? r : nullptr, &x, &y, &w, &h, &conf, &hit);
+        if (rc != 0) {
+            status = rc;
+        } else if (hit == 0) {
+            result = env->NewDoubleArray(0);   // 未匹配是答案，不是异常
+        } else {
+            jdouble quad[5] = {static_cast<jdouble>(x), static_cast<jdouble>(y),
+                               static_cast<jdouble>(w), static_cast<jdouble>(h), conf};
+            result = env->NewDoubleArray(5);
+            if (result != nullptr) env->SetDoubleArrayRegion(result, 0, 5, quad);
+        }
     }
     if (status_arr != nullptr) env->SetIntArrayRegion(status_arr, 0, 1, &status);
     return result;

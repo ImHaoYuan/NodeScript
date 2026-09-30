@@ -173,11 +173,13 @@ class PlatformWiringTest {
             haystack: HandleRef,
             needle: HandleRef,
             threshold: Double,
+            region: List<Int>?,
         ): ImageMatch? = hit
         override suspend fun findImage(
             haystack: HandleRef,
             needle: HandleRef,
             threshold: Double,
+            region: List<Int>?,
         ): ImageMatch? = hit
 
         var colorHit: ColorHit? = ColorHit(7, 8, 10, 20, 30, 255)

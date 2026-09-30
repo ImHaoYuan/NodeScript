@@ -40,7 +40,14 @@ class NativeImageAnalyzerTest {
         var matchResult: ImageMatch? = null
         var matchStatus = 0
         val released = mutableListOf<Long>()
-        val matchCalls = mutableListOf<Triple<Long, Long, Double>>()
+        data class MatchCall(
+            val haystack: Long,
+            val needle: Long,
+            val threshold: Double,
+            val region: List<Int>?,
+        )
+
+        val matchCalls = mutableListOf<MatchCall>()
         var releaseStatus = 0
 
         override fun decode(path: String, status: IntArray): Triple<Long, Int, Int>? {
@@ -54,9 +61,10 @@ class NativeImageAnalyzerTest {
             haystack: Long,
             needle: Long,
             threshold: Double,
+            region: IntArray?,
             status: IntArray,
         ): ImageMatch? {
-            matchCalls += Triple(haystack, needle, threshold)
+            matchCalls += MatchCall(haystack, needle, threshold, region?.toList())
             status[0] = matchStatus
             return if (matchStatus == 0) matchResult else null
         }
@@ -211,7 +219,29 @@ class NativeImageAnalyzerTest {
         val hit = analyzer.matchTemplate(h.handle, n.handle, 0.8)
         assertEquals(ImageMatch(3, 4, 40, 20, 0.91), hit)
         assertEquals(1, ops.matchCalls.size)
-        assertEquals(Triple(11L, 22L, 0.8), ops.matchCalls.single(), "native 收到它自己发的帧号")
+        assertEquals(FakeOps.MatchCall(11L, 22L, 0.8, null), ops.matchCalls.single(),
+            "native 收到它自己发的帧号（缺省 region = null = 全帧）")
+        Unit
+    }
+
+    @Test
+    fun `match 的 region 穿透：四元组原样到 native，形状错先 require 拒`() = runBlocking {
+        ops.decodeResult = Triple(11L, 640, 480)
+        val h = analyzer.decode("/h.png")
+        ops.decodeResult = Triple(22L, 40, 20)
+        val n = analyzer.decode("/n.png")
+        ops.matchResult = ImageMatch(3, 4, 40, 20, 0.91)
+
+        analyzer.matchTemplate(h.handle, n.handle, 0.8, listOf(10, 20, 30, 40))
+        assertEquals(listOf(10, 20, 30, 40), ops.matchCalls.last().region,
+            "region 四元组原样译成 IntArray 到 native")
+
+        val t = runCatching {
+            analyzer.findImage(h.handle, n.handle, 0.8, listOf(1, 2, 3))
+        }.exceptionOrNull()
+        assertInstanceOf(IllegalArgumentException::class.java, t,
+            "非四元组在 SPI 层 require 拒（与 findColor 同一条兜底纪律）")
+        assertEquals(1, ops.matchCalls.size, "形状错不发第二次 native 调用")
         Unit
     }
 

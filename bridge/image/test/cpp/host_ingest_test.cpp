@@ -31,6 +31,7 @@ int imgnative_ingest(const uint8_t* source, int32_t width, int32_t height,
                      int64_t* out_ref, int32_t* out_w, int32_t* out_h);
 int imgnative_decode(const char* path, int64_t* out_ref, int32_t* out_w, int32_t* out_h);
 int imgnative_match(int64_t haystack, int64_t needle, double threshold,
+                    const int32_t* region,
                     int32_t* out_x, int32_t* out_y,
                     int32_t* out_w, int32_t* out_h,
                     double* out_conf, int32_t* out_match);
@@ -172,7 +173,7 @@ int main() {
 
         int32_t mx = 0, my = 0, mw = 0, mh = 0, hit = 0;
         double conf = 0.0;
-        const int mrc = imgnative_match(shot, icon, 0.9, &mx, &my, &mw, &mh, &conf, &hit);
+        const int mrc = imgnative_match(shot, icon, 0.9, nullptr, &mx, &my, &mw, &mh, &conf, &hit);
         check(mrc == 0 && hit == 1, "截屏帧当 haystack、模板当 needle：命中（跨来源同帧表）");
         check(mw == 4 && mh == 4, "命中区域 = 模板尺寸 4x4");
 

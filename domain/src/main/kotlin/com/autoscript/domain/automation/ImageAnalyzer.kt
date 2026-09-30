@@ -102,15 +102,35 @@ interface ImageAnalyzer {
      * 是"得分在这个模板上没有区分度"。此时命中的坐标稳定可复现但不唯一，别把它当"就是这块"。
      * 要区分"就是这块"请拿带纹理的模板，或改用 [findColor] 后自己核对邻域。
      *
-     * @throws com.autoscript.domain.core.AutojsException `ERR_STALE_HANDLE` 任一帧已死。
+     * **实现走金字塔粗筛 + 原像素精配**（2026-09-30）：粗筛只提名候选，报出的
+     * 坐标/置信度全部在原 4 通道像素上重算 —— 阈值、置信度、"未匹配是答案"
+     * 的语义与精确全图搜索一字不差（`AUTOSCRIPT_MATCH_FORCE_EXACT=1` 可整体
+     * 回退精确路径）。提速的大头在 [region]：小模板进不了粗筛，缩窗才是出路。
+     *
+     * @param region 可选搜索范围 `[x,y,w,h]`：给了就必须**整体**落在帧内（越界 →
+     *   `ERR_INVALID_PARAM`，不静默裁剪）；**region 比模板小 → `ERR_IO`**（与
+     *   "模板比画面大"同属参数关系不成立）。缺省 null = 全帧。命中坐标恒是
+     *   **全帧坐标**（区域只是搜索范围，不是坐标系 —— 与 [findColor] 同款）。
+     * @throws com.autoscript.domain.core.AutojsException `ERR_STALE_HANDLE` 任一帧已死；
+     *   `ERR_INVALID_PARAM` region 越出帧界；`ERR_IO` 模板大于搜索范围。
      */
-    suspend fun matchTemplate(haystack: HandleRef, needle: HandleRef, threshold: Double): ImageMatch?
+    suspend fun matchTemplate(
+        haystack: HandleRef,
+        needle: HandleRef,
+        threshold: Double,
+        region: List<Int>? = null,
+    ): ImageMatch?
 
     /**
-     * 找图（[matchTemplate] 的调用侧别名，阈值语义同）：名字对齐 Pro v9 的 `findImage`。
+     * 找图（[matchTemplate] 的调用侧别名，阈值/region 语义同）：名字对齐 Pro v9 的 `findImage`。
      * @throws com.autoscript.domain.core.AutojsException `ERR_STALE_HANDLE` 任一帧已死。
      */
-    suspend fun findImage(haystack: HandleRef, needle: HandleRef, threshold: Double): ImageMatch?
+    suspend fun findImage(
+        haystack: HandleRef,
+        needle: HandleRef,
+        threshold: Double,
+        region: List<Int>? = null,
+    ): ImageMatch?
 
     /**
      * 找色（§9.2 native 面第一个 P1 算子；§7.7 承诺 `findColor` 1080p < 10ms）：

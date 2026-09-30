@@ -16,6 +16,45 @@
 
 2026-09-30 拍板（外部审查整改步骤 7；非 §18 编号项，原口径不涉）：
 
+13. **`images` 匹配链路提速方案**（2026-09-30 评审拍板；A2–A4 实测 ❌ 后的出路裁决）：
+   背景 = §7.7 实测 A4 933.6ms / A2 1912.8ms 双 ❌（判据 <40ms / <700ms）。评估中
+   被**否掉**的两条：
+   - **帧内缓存频谱**：bench 的 A2 是同帧**同**模板 match×2，看着第二次免费 —— 真实
+     脚本多半是同帧**不同**模板，零收益；且 `cv::matchTemplate` 的内部频谱不暴露、
+     不可跨调用复用，要真缓存得手写 DFT 相关 + 积分图，数值风险不值。
+   - **灰度直配（P0a）**：阈值/置信度语义会漂（灰度化把色差折进亮度加权）——
+     「报出去的数字与精确路径一字不动」这条守不住，放弃。
+   **已拍板（2026-09-30）四件套**：
+   - (1) **金字塔粗筛 + 原像素精配**：灰度 0.25×/0.5× 上只提名 ≤K 候选（thr−margin
+     带宽 + NMS 压重复），逐候选回原 4 通道小窗重算 —— 坐标/置信度全来自原像素，
+     语义不动；小模板（短边 <80px）/纯色/平噪走精确路径。差分双跑门（host
+     `host_match_test`）对拍两条路径；`AUTOSCRIPT_MATCH_FORCE_EXACT=1` 现场回退。
+   - (2) **两匹配方法加可选 `region`**（复用 findColor 的 `resolve_region` 判据；
+     **region 比模板小 → `ERR_IO`**、越界 → `ERR_INVALID_PARAM`、坐标恒全帧口径）——
+     小模板进不了粗筛，缩窗是它唯一的提速出路（bench 决定性行 = 48×48 @ 300×150）。
+   - (3) **计算出锁**：`g_mu` 只盖帧表查找（浅拷贝两个 Mat 头即放锁）—— 帧入表后
+     不可变（十算子产出新帧不改原帧），900ms 级 match 不再把 release/findColor 关在锁后。
+   - (4) **调参口走环境变量**：`MIN_TEMPL_SIDE`/`MARGIN`/`MAX_CANDIDATES` 进程起始
+     读入（真机扫参免重编 so），缺省与原 constexpr 逐字相同。
+   **判据 <40ms 不改**：region 实测数字回来之前不谈口径（改判据是拍板动作，不混在
+   实现里）。附护栏 **频率门**（模板「缩小→放大」自检 <0.8 → 精确路径）是差分门
+   首跑抓到的 i.i.d. 噪声假 miss 的修法 —— 方向保守：挡错只损失速度。
+   挂起不排期：多核条带切分（独立实验）、4→3 通道、`WITH_OPENCL`（两道门 + 体积代价）。
+   **同日真机复测落点（只追加）**：A2 计算段 1912.8 → **171.75ms ✅**；A4 全帧 933.6 →
+   **62.98ms**（仍差 1.6×）；**region 两行 11.77 / 16.57ms ✅**；`FORCE_EXACT` A/B 验证
+   回退阀 ≈ 旧行为（892.3ms）。~~**判据 <40ms 改不改 = 待拍板**（全帧 ❌ vs region ✅ 的
+   口径之争，数字在 §7.7 复测块）—— 本项只记方案拍板，口径另议。~~
+   **同日第三次实测后已裁（只追加，上句划线保留原貌）**：
+   - **本项「小模板（短边 <80px）走精确路径」的阈值口径被同日评审 patch 改写**：
+     `MIN_TEMPL_SIDE` 80→48、`kMinCoarseSide` 24→12、0.25× 候选带宽 +0.05
+     （commit `852fb45`，外部 `vision-optimized.patch` 完整验证轮后采纳）——
+     370×80 因此从 0.5× 升 0.25× 粗筛，全帧 62.98 → **24.47ms**。
+   - **判据行裁决：`matchTemplate 1080p <40ms` 按原全帧口径转绿（形态注明）** ——
+     依据 370×80 形态 24.47ms，**判据原文一字未改**；48×48 形态不进绿字（真机
+     内容双门拦截恒精确 948ms，如实 ❌，region 16.9ms 推荐）。数字见 §7.7 三次实测块。
+   - needle prep 缓存（`g_match_cache_mu` 独立锁）随 patch 一并采纳：模板端准备
+     <1ms/次、真机不可测，账在代码评审面（锁序 `g_mu→cache_mu` 已核无反转）。
+
 12. **wire 面单一事实来源 = `bridge/schema/wire.schema.json`；与 §12.4 的 d.ts 分工**：
     - **schema 管 wire 面**（每 ns 的方法表 + aliases + dynamicSinks + facade 归属），`generate.mjs` 双发射 `bridge/js/src/generated/wire-types.ts` 与 `:domain` `WireMethods.kt`（生成物入库、`--check` + CI `git diff --exit-code` 双门）；19 个 handler 的 `methods()` 申报单源指 `BY_NS.getValue(ns)` —— 表不手抄，杜绝「申报与 `when` 两份手抄互相漂移」。对账三门分工：`wire-schema.test.cjs` 四向（生成物同步 / facade→schema / register↔schema / 申报↔schema + 死分支 aliases 真伪）、`wiring-table.test.cjs` 表↔schema、`pull-wire`/`event-wire`/`err-catalog` 各管自己的拉取环与错误目录。
     - **d.ts 仍是对外 API 评审面（§12.4 口径不动）**：d.ts 描述脚本作者看得见的 TS 形状（参数/返回/重载），schema 描述桥线上跑的 wire 名 —— 对象不同，不合并：把参数形状塞进 schema，生成器就得长出第二套类型系统；把 wire 名塞进 d.ts，内部协议就变成了公共 API 承诺。两份都入库、各有一道门。

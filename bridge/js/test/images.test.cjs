@@ -3,7 +3,7 @@
  * images 双侧契约测试（§9.2 / §12.2 第七条独立缝 + Kotlin ImagesNamespaceHandlerTest）：
  * mock 宿主**逐字复刻** Kotlin handler 的回包，钉住七处最易两侧走偏的地方：
  * 1. wire 形状：decode 发 `{path}` → `{ref,width,height}`（宽高是文件真值）；
- *    matchTemplate/findImage 发 `{haystack:{...},needle:{...},threshold}` → 命中体或裸 null；
+ *    matchTemplate/findImage 发 `{haystack:{...},needle:{...},threshold}`(+ 可选 region) → 命中体或裸 null；
  *    release 发 `{ref}` → true；
  * 2. **阈值一个键 `threshold`**（facade 曾一个发 `tolerance` 一个发 `threshold`，
  *    两侧 mock 各自自洽所以漂移没被抓到）—— 两方法 wire 载荷必须逐字段相同；
@@ -107,11 +107,16 @@ function installMockImages() {
         if (p.threshold < 0 || p.threshold > 1) {
           return err('ERR_INVALID_PARAM', `images ${method} 的 threshold 必须在 [0,1]，实际 ${p.threshold}`)
         }
+        // region 可选：给了就必须四元组（与 findColor 同键同判据，见 Kotlin handler）
+        if (p.region !== undefined && p.region !== null
+          && (!Array.isArray(p.region) || p.region.length !== 4)) {
+          return err('ERR_INVALID_PARAM', 'region 给了就必须 x,y,w,h 四元组')
+        }
         if (!alive(haystack) || !alive(needle)) {
           return err('ERR_STALE_HANDLE', 'images 的帧句柄已释放')
         }
         if (mock.fail) return err(mock.fail.code, mock.fail.detail)
-        installMockImages.matches.push({ haystack, needle, threshold: p.threshold })
+        installMockImages.matches.push({ haystack, needle, threshold: p.threshold, region: p.region ?? null })
         if (mock.miss) return ok('null')
         return ok(JSON.stringify({ x: 12, y: 34, width: 100, height: 50, confidence: 0.97 }))
       }
@@ -374,6 +379,34 @@ test('findColor 的 region 可选：给了才出现在 wire 上', async () => {
   const sent = seenPayloads().at(-1)
   assert.deepEqual(sent.p.region, [10, 20, 30, 40])
   assert.deepEqual(installMockImages.colors.at(-1).region, [10, 20, 30, 40], '宿主按四元组收下')
+})
+
+test('match 的 region 可选：给了才出现在 wire 上，宿主按四元组收下', async () => {
+  installMockImages()
+  installMockImages.reset()
+  const screen = await auto.images.decode('/sdcard/screen.png')
+  const icon = await auto.images.decode('/sdcard/icon.png')
+  await auto.images.matchTemplate(screen, icon, { region: [10, 20, 30, 40] })
+  const sent = seenPayloads().at(-1)
+  assert.deepEqual(sent.p.region, [10, 20, 30, 40])
+  assert.deepEqual(installMockImages.matches.at(-1).region, [10, 20, 30, 40], '宿主按四元组收下')
+  // 缺省不发键：JSON.stringify 把 undefined 丢掉（宿主当全帧）
+  await auto.images.findImage(screen, icon)
+  const bare = seenPayloads().at(-1)
+  assert.equal('region' in bare.p, false, '缺 region 时 wire 上整个键不存在')
+})
+
+test('match 的 region 非四元组 → ERR_INVALID_PARAM 且一次匹配都不发', async () => {
+  installMockImages()
+  installMockImages.reset()
+  const screen = await auto.images.decode('/sdcard/screen.png')
+  const icon = await auto.images.decode('/sdcard/icon.png')
+  const before = installMockImages.matches.length
+  await assert.rejects(
+    () => auto.images.matchTemplate(screen, icon, { region: [1, 2, 3] }),
+    (e) => e.code === 'ERR_INVALID_PARAM',
+  )
+  assert.equal(installMockImages.matches.length, before, '形状错一次匹配都不发')
 })
 
 test('findColor 未命中回 null（扫过了、没有）', async () => {
