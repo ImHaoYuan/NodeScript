@@ -1,6 +1,6 @@
 # :platform:system —— 系统侧 SPI 实现
 
-> 设计章节：`docs/framework-design.md` §9.4 / §9.6 / §12.2。
+> 设计章节：`docs/design/09-capabilities.md` §9.4 / §9.6 / `docs/design/12-js-api.md` §12.2。
 > 本文件只记**本模块内部**的分层约定与新增实现的落点；跨模块契约以 `:domain` 为准。
 
 ## 分层（§12.2「分两层」的下面那层）

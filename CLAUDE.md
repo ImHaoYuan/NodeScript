@@ -1,13 +1,14 @@
 # AutoScript
 
-内置 Node.js 的安卓自动化平台（对标 AutoJsPro v9）：每脚本一个 Node 进程、跨进程异步桥、能力三态门禁。架构设计见 `docs/framework-design.md`（§0–§19 全覆盖，**契约的单一事实来源**）；「实现到哪了」看 `docs/design-status.md`，「为什么这么定 / 什么被改过」看 `docs/design-decisions.md`。
+内置 Node.js 的安卓自动化平台（对标 AutoJsPro v9）：每脚本一个 Node 进程、跨进程异步桥、能力三态门禁。架构设计见 **`docs/design/` 12 卷**（按 § 号分卷，入口/导航 = `docs/framework-design.md` 薄索引，**契约的单一事实来源**，2026-09-30 审查步骤 8 拆分、§号与标题逐字保留）；「实现到哪了」看 `docs/design-status.md`，「为什么这么定 / 什么被改过」看 `docs/design-decisions.md`。
 
 ## 仓库地图
 
 | 路径 | 说明 | 设计章节 |
 |---|---|---|
-| `docs/framework-design.md` | 架构设计（**契约的单一事实来源**）—— 只写「是什么」 | §0–§17 |
-| `docs/design-decisions.md` | 决策记录：已拍板项 + 被推翻/改过的口径（原口径不删） | 原 §18 已拍板两项 |
+| `docs/framework-design.md` | 架构设计**薄索引**（分卷导航 + 文档边界；2026-09-30 拆分后只做入口） | §0–§19 |
+| `docs/design/*.md` | 架构设计**分卷**（**契约的单一事实来源**）—— 只写「是什么」；`00-overview/03-technology/04-architecture/06-modules/07-bridge/08-execution/09-capabilities/10-npm/11-security/12-js-api/13-roadmap-budget/18-19-ledger` | §0–§19 |
+| `docs/design-decisions.md` | 决策记录：已拍板项（原 §18 全部九项 + 后续编号项）+ 被推翻/改过的口径（原口径不删，只追加） | 原 §18 |
 | `docs/design-status.md` | 落地台账：接口期清单 + 流水（原 §19 的 9,584 字符流水外迁于此） | 原 §19 |
 | `.claude/skills/skill-designer/` | 项目级 skill：设计/创建技能 + 外科手术式改代码 + git 提交 | — |
 | `module-stubs` 之外的模块 | 各模块职责见下 | §6 |
@@ -39,17 +40,17 @@
 
 ## 构建
 
-- 本机已配置 Android SDK：`/root/android-sdk`（platform-35 + build-tools 35 + platform-tools；`local.properties` 指 `sdk.dir`，已 gitignore），JDK 17 = `/root/develop/claude/tools/jdk-17.0.17+10`。**CI 同款 `./gradlew …` 命令可本机直跑**（12 个测试任务 2026-09-23 实测全绿）——CI 仍是权威门，但本机已能同源复现。**本机快速门 = 同一条 `./gradlew` 命令**（`tools/jvm-test*` 旁路已删，2026-09-30）：约定插件 `autoscript.test-guard` 把「skipped/aborted ≠ 绿」守卫做进 Gradle，本机与 CI 同一口径、无第二口径脚本。
+- 本机已配置 Android SDK：`/root/android-sdk`（platform-35 + build-tools 35 + platform-tools；`local.properties` 指 `sdk.dir`，已 gitignore），JDK 17 = `/root/develop/claude/tools/jdk-17.0.17+10`。**CI 同款 `./gradlew …` 命令可本机直跑**（13 个测试任务 2026-09-30 实测全绿）——CI 仍是权威门，但本机已能同源复现。**本机快速门 = 同一条 `./gradlew` 命令**（`tools/jvm-test*` 旁路已删，2026-09-30）：约定插件 `autoscript.test-guard` 把「skipped/aborted ≠ 绿」守卫做进 Gradle，本机与 CI 同一口径、无第二口径脚本。
 - **CI 验证门**：`.github/workflows/ci.yml` —— JVM 单测（13 个模块：`:domain`、`:bridge:java`、`:app-service:{runtime,scheduler,script-repo,permission-center,packager,npm}`、`:platform:{capabilities,system}`、`:engine:node-process`、`:ui`、`:app`）+ archUnit + `bridge/js` 的 npm test，跑在 ubuntu-latest（JDK 17 + Gradle 8.9 + Android SDK license + Node 24）。Android assemble 走后续 `node-runtime-build/Dockerfile`。**`bridge/js/dist` 是构建产物**（2026-09-30 步骤 7 出库、不入 git）：jvm-tests job 前置 `npm --prefix bridge/js ci && run build`（`:app` bridgeDist 随包任务与 e2e 测试要 tsc 产物），js-tests job 另跑 `npm run gen:wire && git diff --exit-code` 门（`bridge/schema/wire.schema.json` → 两份生成物同步）。
 - **可用 GitHub Actions 跑远端 CI**：远端 `origin` = `git@github.com:Ventus-Pluviam/NodeScript.git`（私有仓，SSH 可推）。`ci.yml` 在 `push→main` 与 `pull_request` 时触发——把分支 `git push origin <分支>` 后开 PR 即跑全套门（JVM 单测 + archUnit + npm test），不用等合入 main 才知道红绿。本机 `gh` token 若无该私仓权限（`gh pr create` 报 404/解析不到仓库），用 push 后远端打印的 PR 链接手动开 PR；看不到 runs 输出时以本机 `./gradlew` 同源复现为准。**不要为触发 CI 直推 main**。
 - **本机快速门**：与 CI **逐字同源**的 `./gradlew`（ci.yml L 任务行），单模块跑 `./gradlew :<模块>:test`（纯 JVM）或 `:<模块>:testDebugUnitTest`（android 模块）。守卫在约定插件里：测试出现 skipped/aborted 即红（`TestGuard.ENV_GATED` 只放行设计上环境门禁的 E2E；其余用 `-PallowSkipped=<类名>` 显式放行）。**`:ui`/`:app` 同源直跑**（`./gradlew :ui:testDebugUnitTest :app:testDebugUnitTest`）。
 
 ## 协作纪律（子 agent 必须遵守）
 
-1. **改前先读**：动手前读 `docs/framework-design.md` 对应章节 + 本文件 + `settings.gradle.kts`；未知默认问协调者。
+1. **改前先读**：动手前读 `docs/design/` 对应分卷（按 § 号定位，如 §7 → `07-bridge.md`；导航见 `docs/framework-design.md` 索引）+ 本文件 + `settings.gradle.kts`；未知默认问协调者。
 2. **只动自己的模块目录**；`settings.gradle.kts`、`gradle/libs.versions.toml`、根 `build.gradle.kts` 由协调者冻结——需要改先提给协调者。
 3. **外科手术式读写**：Grep/Glob 定位，Read 带 offset/limit，Edit 用最小唯一匹配，不整库读代码。
-4. **git 提交**：每个逻辑完成点提交，信息 `type(scope): 摘要` + 结尾 `Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`；不提交无关文件；不 init 仓库（已是仓库）。
+4. **git 提交**：每个逻辑完成点提交，信息 `type(scope): 摘要` + 结尾 `Co-Authored-By: Claude Code <noreply@anthropic.com>`；不提交无关文件；不 init 仓库（已是仓库）。
 5. **契约先行**：接口/DTO 以 `:domain` 骨架为准；别自行发明跨模块类型。
 ## NDK（本机）
 

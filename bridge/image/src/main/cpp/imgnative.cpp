@@ -1,4 +1,4 @@
-// bridge/image —— libopencv.so 的 C++ 面（docs/framework-design.md §9.2）
+// bridge/image —— libopencv.so 的 C++ 面（docs §9.2）
 //
 // 职责边界（与 :domain 的 ImageAnalyzer SPI 逐条对齐）：
 //   - 只做十件事：decode 一帧（**顺带把帧归一成 4 通道 BGRA**）、
