@@ -12,7 +12,7 @@
  *
  * 同一文件顺带钉**键名面**：条目/信封的每个键都是两侧各写一半（Kotlin `mapOf` 发、
  * JS `w.x` 读），mock 测试永远发 JS 自己认识的键，所以「宿主改了键名、两侧单测照绿、
- * 运行期读出 undefined」这类漂移只有源码对账能抓。方向纪律与 wire-reconcile 相同：
+ * 运行期读出 undefined」这类漂移只有源码对账能抓。方向纪律与 wire-schema 相同：
  * JS 读了宿主不发的键 = 红；宿主发了 JS 不读的键 = 须登记在 UNREAD 并写明为什么。
  *
  * 不做的：不验 seq/游标语义与丢帧行为（`npm-events.test.cjs` 的活）。
@@ -87,7 +87,7 @@ function bothWays(name, ktSide, jsSide) {
 
 /**
  * 宿主发了、facade 不读的键 → 为什么可以不读。
- * 与 wire-reconcile 的 ALIASES 同纪律：登记即承诺，键真被读走或真消失都要红（见下）。
+ * 与 schema `aliases` 同纪律（wire-schema.test.cjs 验真）：登记即承诺，键真被读走或真消失都要红（见下）。
  */
 const UNREAD = {
   seq: '条目上的 seq 是宿主环位置的冗余标注：游标推进只看信封的 last，丢帧判据是 first > cursor+1（见 pumpInstallEvents KDoc），故条目 seq 无人读',
