@@ -16,7 +16,7 @@
 
 - `:app` — AppShellApplication 启动装配（§4.1 Composition Root）；Compose UI 已拆去 `:ui`（2026-09-23 落地：launcher 随库 manifest 合并，`:app` 源码零 compose / 零 import ui）
 - `:app-service:runtime` — RuntimeController / EnginePool / Watchdog 仲裁（§8）
-- `:app-service:scheduler` — 定时/Intent/事件任务、checkpoint 意图日志、runNonce 幂等（§9.6）
+- `:app-service:scheduler` — 定时/Intent/事件任务、checkpoint 意图日志、runNonce 幂等 + `workManager` 桥 handler（步骤 6c 自 :app 迁入，§9.6/§8.6）
 - `:app-service:script-repo` — 项目/资源/脚本库、assets→filesDir 原子部署（§9.6）
 - `:app-service:permission-center` — 权限三态门禁、引导页、降级路径（§9.5）
 - `:app-service:packager` — 模板 APK 改写、签名向导（§14；整轨已移后续版本，加密资产/loader 已裁）
@@ -27,8 +27,8 @@
 - `:bridge:image` — C++ 图像管线 libopencv.so（OpenCV 4.x，§9.2，CI 构建）
 - `:engine:node-process` — :nodeN 进程宿主：`NodeProcessEngine`（Kotlin spawn，实现 `:domain` 的 `ScriptEngine`）+ main.cpp（§5/§7.8；addon `.so` 本机 NDK 可交叉编译验证，APK `assembleDebug` 本机可直跑）
 - `:engine:sandbox` — QuickJS 宿主进程（**已裁 §18 第 1 项；壳 2026-09-30 已从 settings 注释摘除、不计 15**，目录留盘；复活 = 注释回 include + ModuleGraphTest 允许集登记）
-- `:platform:capabilities` — a11y/截图/输入/悬浮窗/系统/存储（§9.1–9.4）
-- `:platform:system` — overlay/通知/datastore/shell/zip/设备信息（§9.6）
+- `:platform:capabilities` — **无障碍三面**：a11y 树/手势、screen 截图帧源、dialogs 对话框编排（`capabilities/{a11y,screen,dialogs,device}/` 子包；2026-09-30 步骤 6 系统面迁出，§9.1–9.4）
+- `:platform:system` — **系统面 handler + SPI 实现 + 能力专用契约**：`SystemNamespaces` 十一件（shell/device/app/floatingWindow/datastore/zip/settings/notification/clipboard/sensors/images）+ 电源面 `PowerManagerNamespaceHandler`/`WakeLockLedger`（§8.7）+ `SystemSpis.of` 实现入口 + 五契约（步骤 6a 自 :domain 迁入；`DialogHost` 留 :domain，§9.6/§12.2）
 - `:ui` — Compose UI 呈现层：启动 Activity（launcher）、首屏/任务中心/控制台/能力中心界面；状态经 `:domain` 的 `HostSummary` 读口现取，禁依赖 `:app`（§6）
 - `bridge/js/` — **npm workspace**（TS facade SDK `@autojs/*`，非 Gradle 模块，§12.4）
 - `node-runtime-build/` — **CI 构建管线**（Node 24 源码 recipe + 16KB 对齐门禁，非 Gradle 模块，§3）

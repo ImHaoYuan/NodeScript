@@ -40,6 +40,18 @@
 
 ## 流水（最新在上）
 
+### 2026-09-30 —— 外部审查整改·步骤 6：platform 按能力重组 + Wm/Power 移出 `:app`（零新模块，模块表 15 不动）
+
+（§6 模块表两行 + §12.2 接线表与两段散文 + §8.7 位置声明；ModuleGraphTest allowed **零改** 是本方案选型收益 —— 「每能力一模块」方案因要动 settings/allowed/§6/CI/计数五处且与 §6「薄模块已合并」口径冲突，明确否，见 design-decisions）。四个子步各自一提交：
+
+- **6b（572e453）handler 归位**：系统面 handler 七件 + `SystemNamespaces.kt` 五内迁 `:platform:system`；capabilities 收敛为 a11y/screen/dialogs 三面（子包 `capabilities/{a11y,screen,dialogs,device}/`，`android..` 按包豁免线 `..capabilities.device` 不破）；`CapabilityNamespaces` 只剩三工厂；`PlatformWiring` 系统面前缀换 `SystemNamespaces.`。测试安置：7 个 handler 测试随迁；`SystemNamespacesTest` 拆出 `DialogsNamespaceHandlerTest`（6 例）；**images×screen 跨命名空间帧表互认测试迁 `:app` `PlatformWiringTest`**（跨 system×capabilities 只有共同依赖方 `:app` 能住，复用其 `FakeImageAnalyzer`）。
+- **6a（fd5c190）契约搬移判据（单独提交）**：全仓 grep `import com.autoscript.domain.system|storage.` + 生产读面 src/main 扫描 —— **随迁**五契约文件（Clipboard/Notification/Sensor/Zip/SystemSettings）+ `SystemContracts.kt` 四段（shell/device/app/floating → 新 `SystemHostContracts.kt`），判据「仅 handler+impl 消费，`:app`/`:ui`/app-service 生产读面零引用」写进提交信息；**留 `:domain`** 反例两条：`DialogHost` 六型（`PlatformWiring.kt:6` 生产 import —— 装配层参数面在读）、`DataStore` 系（`:app` 测试在读共享替身、非能力专用）。测试同批拆（system 新 `SystemHostContractsTest` 4 例 / domain `SystemContractsTest` 留对话框 3 例）；system 模块 81 行同包 import 删除、`PlatformWiringTest` 16 个 import 重指、契约 KDoc「为什么住 :domain」改写为迁移判据。
+- **6c（aebc2a1）`WorkManagerNamespaceHandler` → `:app-service:scheduler`**（与 `EnginesNamespaceHandler` 住 runtime 同形态）；同批 scheduler `ArchitectureTest` 撤黑名单 `domain.bridge..` 并量化注释（仅 BridgeRequest/Response/RpcNamespaceHandler 转接面三型）；装配层测试「装配壳恒挂 workManager」回迁 `:app` 新 `WorkManagerMountTest`（scheduler 见不到 `AppShell`/引擎假件）。
+- **6d（c53dd5c）`PowerManagerNamespaceHandler` + `WakeLock.kt` → `:platform:system`**；`:domain` 新增 `fun interface KeepAliveRenew`（`renew(): List<String>`，`ForegroundKeeper` 签名吻合直接 `override`）收窄 handler 的 keepalive 缝 —— 平台模块不反向见 `:app`；根包三处构造点走 shell 工厂缝（`PlatformWiring.wakeLockLedger/powerManagerHandler` + `ForegroundKeeper.lockHeld()` 读口），**根包字节码零 platform 方法属主**（ArchitectureTest 是依赖级门禁）；并删根包 6 条死 platform import（与「不 import 任何 com.autoscript.platform..」注释自洽）。PM 测试随迁改用 `KeepAliveRenew` 假件，框架席位字面量 `framework:keepalive` 与 `:app` `ForegroundKeeperTest` 跨模块对钉。
+- **文档收尾（同批）**：framework-design §6 capabilities/system 两行整段重写 + §12.2 表 11 处 handler 列改模块/工厂 + 两段散文口径反转 + §8.7/§9/§19 六处位置声明（含 `WakeLockLedger::isHeld` → `keeper::lockHeld`）；design-decisions「已推翻」表加 §12.2 反转行 + **被反转原文照抄引用块**；CLAUDE.md 模块表三行（scheduler/capabilities/system）。顺手修 `pull-wire.test.cjs` 两条硬编码路径（6b 子包重组与 sensors 迁移后失效 —— 6b 当时未跑 npm test 的欠账，本步收尾抓回）。
+- **验证**：CI 同源 13 任务 BUILD SUCCESSFUL + `bridge/js` npm test **185 pass / 1 env-gated skip / 0 fail**（wiring-table 三向对账在新表上过）；四处 ArchitectureTest + ModuleGraphTest 随各任务绿。
+
+
 ### 2026-09-30 —— 外部审查整改·步骤 5：拆 `:app-service:npm`（模块 14 → 15）
 
 （§6 模块表 + §10 npm 面；CI 任务行 12 → 13 模块）切分依据是零耦合：`packager/npm/` 对父包零 import、共享编排（`PackagerCollector`/`PackagerPipeline`/`TestIo`）也零反向引用 —— `git mv` 即净，编译器兜底：
