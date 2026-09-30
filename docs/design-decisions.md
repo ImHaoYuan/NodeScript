@@ -42,8 +42,18 @@
    挂起不排期：多核条带切分（独立实验）、4→3 通道、`WITH_OPENCL`（两道门 + 体积代价）。
    **同日真机复测落点（只追加）**：A2 计算段 1912.8 → **171.75ms ✅**；A4 全帧 933.6 →
    **62.98ms**（仍差 1.6×）；**region 两行 11.77 / 16.57ms ✅**；`FORCE_EXACT` A/B 验证
-   回退阀 ≈ 旧行为（892.3ms）。**判据 <40ms 改不改 = 待拍板**（全帧 ❌ vs region ✅ 的
-   口径之争，数字在 §7.7 复测块）—— 本项只记方案拍板，口径另议。
+   回退阀 ≈ 旧行为（892.3ms）。~~**判据 <40ms 改不改 = 待拍板**（全帧 ❌ vs region ✅ 的
+   口径之争，数字在 §7.7 复测块）—— 本项只记方案拍板，口径另议。~~
+   **同日第三次实测后已裁（只追加，上句划线保留原貌）**：
+   - **本项「小模板（短边 <80px）走精确路径」的阈值口径被同日评审 patch 改写**：
+     `MIN_TEMPL_SIDE` 80→48、`kMinCoarseSide` 24→12、0.25× 候选带宽 +0.05
+     （commit `852fb45`，外部 `vision-optimized.patch` 完整验证轮后采纳）——
+     370×80 因此从 0.5× 升 0.25× 粗筛，全帧 62.98 → **24.47ms**。
+   - **判据行裁决：`matchTemplate 1080p <40ms` 按原全帧口径转绿（形态注明）** ——
+     依据 370×80 形态 24.47ms，**判据原文一字未改**；48×48 形态不进绿字（真机
+     内容双门拦截恒精确 948ms，如实 ❌，region 16.9ms 推荐）。数字见 §7.7 三次实测块。
+   - needle prep 缓存（`g_match_cache_mu` 独立锁）随 patch 一并采纳：模板端准备
+     <1ms/次、真机不可测，账在代码评审面（锁序 `g_mu→cache_mu` 已核无反转）。
 
 12. **wire 面单一事实来源 = `bridge/schema/wire.schema.json`；与 §12.4 的 d.ts 分工**：
     - **schema 管 wire 面**（每 ns 的方法表 + aliases + dynamicSinks + facade 归属），`generate.mjs` 双发射 `bridge/js/src/generated/wire-types.ts` 与 `:domain` `WireMethods.kt`（生成物入库、`--check` + CI `git diff --exit-code` 双门）；19 个 handler 的 `methods()` 申报单源指 `BY_NS.getValue(ns)` —— 表不手抄，杜绝「申报与 `when` 两份手抄互相漂移」。对账三门分工：`wire-schema.test.cjs` 四向（生成物同步 / facade→schema / register↔schema / 申报↔schema + 死分支 aliases 真伪）、`wiring-table.test.cjs` 表↔schema、`pull-wire`/`event-wire`/`err-catalog` 各管自己的拉取环与错误目录。
