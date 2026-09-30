@@ -21,17 +21,16 @@ import com.autoscript.domain.storage.ZipArchiver
 import com.autoscript.domain.system.ShellExecutor
 
 /**
- * 能力 handler → 桥挂载缝的薄转接（§4.1/§6）。
+ * 能力 handler 的装配工厂束（§4.1/§6）。
  *
- * 为什么转接层住本模块：`BridgeRouter` 的 `RequestHandler` 是 `:domain` 的
- * [NamespaceHandler]（`typealias`），而本模块只允许依赖 `:domain`
- * （§6 + ArchitectureTest 把 `com.autoscript.bridge..` 列进黑名单），
- * `:app` 除 `com.autoscript.shell` 装配包（§6 包级例外二，落点 `PlatformWiring` 的
- * 生产装配）外禁止直连 `:platform`。于是「自有 Request/Response 形状 → 桥信封」的
- * 字段级转接只能落在本模块（唯一同时看得到两边形状又不碰 bridge 的位置）；装配层
- * 拿到的始终是现成的 [NamespaceHandler] —— 协议解释权在本模块，装配只挂载。
+ * 审查步骤 4（2026-09-30）之后**本文件不再做字段转接**：全部 handler 直接实现
+ * `:domain` 的 [NamespaceHandler]（基类 `RpcNamespaceHandler` 收口错误映射，
+ * `BridgeRequestLite`/`ResponseLite` 与 a11y/screen 的自定义 Request/Response 已退役）。
+ * 现存职责只剩「SPI 参数 → handler 实例」的构造收拢：装配层（`PlatformWiring`/
+ * `AppShell.assemble`）拿现成 [NamespaceHandler] 挂 Router，只依赖 `:domain`（§6），
+ * 不逐个 import 本模块的 14 个 handler 类。
  *
- * 本文件无逻辑：逐字段搬运，不解释 payload、不吞错误、不改错误码（§7 桥侧只透传）。
+ * 本文件无逻辑：不解释 payload、不吞错误、不改错误码（§7 桥侧只透传）。
  * handler 自己的方法表/错误分类在 [A11yNamespaceHandler] / [ScreenNamespaceHandler]。
  */
 object CapabilityNamespaces {
@@ -39,8 +38,8 @@ object CapabilityNamespaces {
     /**
      * `a11y` 命名空间（§9.1）：窗口树 + 动作 + 输入通道的装配缝。
      * 缺省三参 = 内存实现（单测/骨架可测）；Android 真实现（AccessibilityNodeInfo 遍历 /
-     * dispatchGesture）到位 = 传三块 SPI 实现（树、动作、输入，可选事件流）再转接 ——
-     * 本函数不解释 payload（见上），只做形状转接。
+     * dispatchGesture）到位 = 传三块 SPI 实现（树、动作、输入，可选事件流）再构造 ——
+     * 本函数不解释 payload（见上），只做构造收拢。
      */
     fun a11y(
         tree: UiNodeTreeReader,
@@ -48,17 +47,7 @@ object CapabilityNamespaces {
         input: InputProvider = InMemoryInputProvider(),
         events: UiEventStream? = null,
     ): NamespaceHandler {
-        val handler = A11yNamespaceHandler(tree, actions, input, events)
-        return NamespaceHandler { request ->
-            when (
-                val r = handler.handle(
-                    A11yNamespaceHandler.Request(request.id, request.method, request.payload),
-                )
-            ) {
-                is A11yNamespaceHandler.Response.Ok -> BridgeResponse.Ok(r.id, r.payload)
-                is A11yNamespaceHandler.Response.Err -> BridgeResponse.Err(r.id, r.code, r.detail)
-            }
-        }
+        return A11yNamespaceHandler(tree, actions, input, events)
     }
 
     /**
@@ -68,17 +57,7 @@ object CapabilityNamespaces {
      * （PlatformWiring 落点；MediaProjection 升级 = 换 producer）。
      */
     fun screen(source: FrameSource): NamespaceHandler {
-        val handler = ScreenNamespaceHandler(source)
-        return NamespaceHandler { request ->
-            when (
-                val r = handler.handle(
-                    ScreenNamespaceHandler.Request(request.id, request.method, request.payload),
-                )
-            ) {
-                is ScreenNamespaceHandler.Response.Ok -> BridgeResponse.Ok(r.id, r.payload)
-                is ScreenNamespaceHandler.Response.Err -> BridgeResponse.Err(r.id, r.code, r.detail)
-            }
-        }
+        return ScreenNamespaceHandler(source)
     }
 
     // ── 系统侧五个命名空间（§9.4/§9.6，handler 见 SystemNamespaces.kt）──────
@@ -88,32 +67,27 @@ object CapabilityNamespaces {
         executor: ShellExecutor,
         defaultTimeoutMillis: Long = DEFAULT_SHELL_TIMEOUT_MILLIS,
     ): NamespaceHandler {
-        val handler = ShellNamespaceHandler(executor, defaultTimeoutMillis)
-        return lite { request -> handler.handle(request) }
+        return ShellNamespaceHandler(executor, defaultTimeoutMillis)
     }
 
     /** `device` 命名空间：`model`/`sdkInt`（P0 最小集，§12.3）。 */
     fun device(info: DeviceInfoProvider): NamespaceHandler {
-        val handler = DeviceNamespaceHandler(info)
-        return lite { request -> handler.handle(request) }
+        return DeviceNamespaceHandler(info)
     }
 
     /** `app` 命名空间：`launch`/`currentPackage`。 */
     fun app(launcher: AppLauncher): NamespaceHandler {
-        val handler = AppNamespaceHandler(launcher)
-        return lite { request -> handler.handle(request) }
+        return AppNamespaceHandler(launcher)
     }
 
     /** `dialogs` 命名空间：`prompt`/`choose`（§9.4 BAL 安全路径）。 */
     fun dialogs(host: DialogHost): NamespaceHandler {
-        val handler = DialogsNamespaceHandler(host)
-        return lite { request -> handler.handle(request) }
+        return DialogsNamespaceHandler(host)
     }
 
     /** `floatingWindow` 命名空间：`create`/`close`（§9.4）。 */
     fun floatingWindow(host: FloatingWindowHost): NamespaceHandler {
-        val handler = FloatingWindowNamespaceHandler(host)
-        return lite { request -> handler.handle(request) }
+        return FloatingWindowNamespaceHandler(host)
     }
 
     /**
@@ -124,8 +98,7 @@ object CapabilityNamespaces {
      * `AppShell.assemble` 的 `datastoreHandler`，不入 `systemHandlers` 束。
      */
     fun datastore(store: DataStore): NamespaceHandler {
-        val handler = DatastoreNamespaceHandler(store)
-        return lite { request -> handler.handle(request) }
+        return DatastoreNamespaceHandler(store)
     }
 
     /**
@@ -135,8 +108,7 @@ object CapabilityNamespaces {
      * 无共担门禁 → 独立注入缝 `AppShell.assemble` 的 `zipHandler`。
      */
     fun zip(archiver: ZipArchiver): NamespaceHandler {
-        val handler = ZipNamespaceHandler(archiver)
-        return lite { request -> handler.handle(request) }
+        return ZipNamespaceHandler(archiver)
     }
 
     /**
@@ -148,8 +120,7 @@ object CapabilityNamespaces {
      * `AppShell.assemble` 的 `settingsHandler`。
      */
     fun settings(systemSettings: SystemSettings): NamespaceHandler {
-        val handler = SettingsNamespaceHandler(systemSettings)
-        return lite { request -> handler.handle(request) }
+        return SettingsNamespaceHandler(systemSettings)
     }
 
     /**
@@ -160,8 +131,7 @@ object CapabilityNamespaces {
      * 通知的门禁是 `POST_NOTIFICATIONS`，判据在 SPI（与那五个不共担）。
      */
     fun notification(poster: NotificationPoster): NamespaceHandler {
-        val handler = NotificationNamespaceHandler(poster)
-        return lite { request -> handler.handle(request) }
+        return NotificationNamespaceHandler(poster)
     }
 
     /**
@@ -172,8 +142,7 @@ object CapabilityNamespaces {
      * 剪贴板无门禁（读受限是系统的 null 答案、写不受限，判据在 SPI 自己身上）。
      */
     fun clipboard(clipboard: Clipboard): NamespaceHandler {
-        val handler = ClipboardNamespaceHandler(clipboard)
-        return lite { request -> handler.handle(request) }
+        return ClipboardNamespaceHandler(clipboard)
     }
 
     /**
@@ -185,8 +154,7 @@ object CapabilityNamespaces {
      * 系统拒收→`ERR_SERVICE_DISABLED`，判据在 SPI 自己身上）。
      */
     fun sensors(sensors: SensorSource): NamespaceHandler {
-        val handler = SensorsNamespaceHandler(sensors)
-        return lite { request -> handler.handle(request) }
+        return SensorsNamespaceHandler(sensors)
     }
 
     /**
@@ -197,19 +165,6 @@ object CapabilityNamespaces {
      * `systemHandlers` 束 —— 图像面无共担门禁（文件缺失/句柄失效判据在 SPI 自己身上）。
      */
     fun images(analyzer: ImageAnalyzer): NamespaceHandler {
-        val handler = ImagesNamespaceHandler(analyzer)
-        return lite { request -> handler.handle(request) }
+        return ImagesNamespaceHandler(analyzer)
     }
 }
-
-/**
- * [BridgeRequestLite] 形状的 handler → 桥信封的字段级转接（本文件私有）。
- * 系统侧五个与存储/通知/剪贴板面五个（§9.6/§12.2）共用；同 [NamespaceHandler] 缝，无逻辑。
- */
-private inline fun lite(crossinline handle: suspend (BridgeRequestLite) -> ResponseLite): NamespaceHandler =
-    NamespaceHandler { request ->
-        when (val r = handle(BridgeRequestLite(request.id, request.method, request.payload))) {
-            is ResponseLite.Ok -> BridgeResponse.Ok(r.id, r.payload)
-            is ResponseLite.Err -> BridgeResponse.Err(r.id, r.code, r.detail)
-        }
-    }

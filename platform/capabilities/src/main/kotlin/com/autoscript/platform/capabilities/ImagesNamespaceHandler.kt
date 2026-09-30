@@ -1,5 +1,15 @@
 package com.autoscript.platform.capabilities
 
+import com.autoscript.domain.bridge.decodeObject
+import com.autoscript.domain.bridge.requiredStr
+import com.autoscript.domain.bridge.requiredLong
+import com.autoscript.domain.bridge.requiredDouble
+import com.autoscript.domain.bridge.requiredRef
+import com.autoscript.domain.bridge.requiredIntList
+import com.autoscript.domain.bridge.optIntList
+import com.autoscript.domain.bridge.RpcNamespaceHandler
+import com.autoscript.domain.bridge.BridgeResponse
+import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.automation.ColorHit
 import com.autoscript.domain.automation.FeatureHit
@@ -57,10 +67,10 @@ import com.autoscript.domain.core.ErrorCode
  */
 class ImagesNamespaceHandler(
     private val analyzer: ImageAnalyzer,
-) {
+) : RpcNamespaceHandler() {
     /** 本类**无状态**：帧表（在场/发号/像素）全在 [analyzer] 里（§18-8(b) 发号侧归一）。 */
 
-    suspend fun handle(request: BridgeRequestLite): ResponseLite = when (request.method) {
+    override suspend fun dispatch(request: BridgeRequest): BridgeResponse = when (request.method) {
         "decode" -> decode(request)
         "matchTemplate" -> matchTemplate(request)
         "findImage" -> findImage(request)
@@ -71,34 +81,22 @@ class ImagesNamespaceHandler(
         "rotate" -> rotate(request)
         "findFeature" -> findFeature(request)
         "release" -> release(request)
-        else -> ResponseLite.err(
-            request.id,
-            ErrorCode.ERR_NOT_IMPLEMENTED,
+        else -> err(request, ErrorCode.ERR_NOT_IMPLEMENTED,
             "未知 images 方法: ${request.method}",
         )
     }
 
-    private suspend fun decode(request: BridgeRequestLite): ResponseLite {
-        val fields = try {
-            request.decodeObject()
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val path = try {
-            request.requiredStr(fields, "path")
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
+    private suspend fun decode(request: BridgeRequest): BridgeResponse {
+        val fields = request.decodeObject()
+        val path = request.requiredStr(fields, "path")
         if (path.isBlank()) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, "images decode 的 path 不得为空白")
+            return err(request, ErrorCode.ERR_INVALID_PARAM, "images decode 的 path 不得为空白")
         }
-        return try {
+        return run {
             val frame = analyzer.decode(path)
             // 发号归 SPI：wire 上的 refId 就是帧表的键（handler 不再另起一套号）。
             val ref = frame.handle
-            ResponseLite.Ok(
-                request.id,
-                DomainJson.encode(
+            ok(request, DomainJson.encode(
                     mapOf(
                         "ref" to mapOf("refId" to ref.refId, "generation" to ref.generation),
                         "width" to frame.width.toLong(),
@@ -106,38 +104,26 @@ class ImagesNamespaceHandler(
                     ),
                 ),
             )
-        } catch (e: IllegalArgumentException) {
-            ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        } catch (e: AutojsException) {
-            ResponseLite.err(request.id, e.error, e.message)
         }
     }
 
-    private suspend fun matchTemplate(request: BridgeRequestLite): ResponseLite =
+    private suspend fun matchTemplate(request: BridgeRequest): BridgeResponse =
         match(request, "matchTemplate")
 
-    private suspend fun findImage(request: BridgeRequestLite): ResponseLite =
+    private suspend fun findImage(request: BridgeRequest): BridgeResponse =
         match(request, "findImage")
 
-    private suspend fun match(request: BridgeRequestLite, method: String): ResponseLite {
-        val fields = try {
-            request.decodeObject()
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
+    private suspend fun match(request: BridgeRequest, method: String): BridgeResponse {
+        val fields = request.decodeObject()
         val refs: Pair<HandleRef, HandleRef>
         val threshold: Double
-        try {
+        run {
             refs = request.requiredRef(fields, "haystack") to request.requiredRef(fields, "needle")
             threshold = request.requiredDouble(fields, "threshold")
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
         }
         // 域 [0,1]：域外阈值在任何实现上都命中不了/恒命中，先拒（不发 SPI 调用）。
         if (threshold < 0.0 || threshold > 1.0) {
-            return ResponseLite.err(
-                request.id,
-                ErrorCode.ERR_INVALID_PARAM,
+            return err(request, ErrorCode.ERR_INVALID_PARAM,
                 "images $method 的 threshold 必须在 [0,1]，实际 $threshold",
             )
         }
@@ -145,91 +131,63 @@ class ImagesNamespaceHandler(
         // 在场性不在这层判（§18-8(b)：帧表唯一事实源是 SPI）—— 任一帧已死由 SPI 抛
         // ERR_STALE_HANDLE，这里 catch 后原码透传；这样"截屏帧"与"decode 帧"都由
         // 同一张表回答，不存在 handler 的表认识、SPI 的表不认识的分岔。
-        val hit = try {
+        val hit = run {
             if (method == "matchTemplate") {
                 analyzer.matchTemplate(haystack, needle, threshold)
             } else {
                 analyzer.findImage(haystack, needle, threshold)
             }
-        } catch (e: AutojsException) {
-            return ResponseLite.err(request.id, e.error, e.message)
         }
-        return ResponseLite.Ok(request.id, matchPayload(hit))
+        return ok(request, matchPayload(hit))
     }
 
-    private suspend fun findColor(request: BridgeRequestLite): ResponseLite {
-        val fields = try {
-            request.decodeObject()
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
+    private suspend fun findColor(request: BridgeRequest): BridgeResponse {
+        val fields = request.decodeObject()
         val ref: HandleRef
         val color: List<Int>
         val tolerance: Int
         val region: List<Int>?
-        try {
+        run {
             ref = request.requiredRef(fields, "haystack")
             color = request.requiredIntList(fields, "color")
             tolerance = request.requiredDouble(fields, "tolerance").toInt()
             // region 可选：缺键/JSON null = 全帧；给了就必须四元组（不是就参数错）。
             region = request.optIntList(fields, "region")
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
         }
         // 域校验（与 :domain ImageAnalyzer.findColor KDoc 逐条对齐）：
         //   color 恒四分量 [r,g,b,a]、各 [0,255]；tolerance [0,255]；region 四元组。
         // 全部先拒，**一次 SPI 调用都不发**（与阈值域同一条纪律）。
         if (color.size != 4 || color.any { it < 0 || it > 255 }) {
-            return ResponseLite.err(
-                request.id,
-                ErrorCode.ERR_INVALID_PARAM,
+            return err(request, ErrorCode.ERR_INVALID_PARAM,
                 "images findColor 的 color 必须 r,g,b,a 四分量且各在 [0,255]，实际 $color",
             )
         }
         if (tolerance < 0 || tolerance > 255) {
-            return ResponseLite.err(
-                request.id,
-                ErrorCode.ERR_INVALID_PARAM,
+            return err(request, ErrorCode.ERR_INVALID_PARAM,
                 "images findColor 的 tolerance 必须在 [0,255]，实际 $tolerance",
             )
         }
         region?.let { box ->
             if (box.size != 4) {
-                return ResponseLite.err(
-                    request.id,
-                    ErrorCode.ERR_INVALID_PARAM,
+                return err(request, ErrorCode.ERR_INVALID_PARAM,
                     "images findColor 的 region 必须 x,y,w,h 四元组，实际 $box",
                 )
             }
         }
         // 在场性同 match：SPI 判、原码透传（见 match 处的说明）。
-        val hit = try {
-            analyzer.findColor(ref, color, tolerance, region)
-        } catch (e: AutojsException) {
-            return ResponseLite.err(request.id, e.error, e.message)
-        }
-        return ResponseLite.Ok(request.id, colorPayload(hit))
+        val hit = analyzer.findColor(ref, color, tolerance, region)
+        return ok(request, colorPayload(hit))
     }
 
-    private suspend fun release(request: BridgeRequestLite): ResponseLite {
-        val fields = try {
-            request.decodeObject()
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val ref = try {
-            request.requiredRef(fields, "ref")
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
+    private suspend fun release(request: BridgeRequest): BridgeResponse {
+        val fields = request.decodeObject()
+        val ref = request.requiredRef(fields, "ref")
         // 未知/跨代/放过的帧再放 → 一律 ERR_STALE_HANDLE，判据在 SPI 的帧表里
         // （与 ScreenshotSource.recycle 同一张表、同一口径 —— §18-8(b) 发号侧归一的
         // 直接后果：screen 的帧也能在这里放，反之亦然）。原码透传。
-        return try {
+        return run {
             analyzer.release(ref)
-            ResponseLite.Ok(request.id, "true")
-        } catch (e: AutojsException) {
-            ResponseLite.err(request.id, e.error, e.message)
+            ok(request, "true")
         }
     }
 
@@ -239,120 +197,74 @@ class ImagesNamespaceHandler(
     // 进 SPI 同一张表，宽高随产出帧回真值）；域校验照 findColor 同一条纪律
     // （越界先拒，**一次 SPI 调用都不发**）。
 
-    private suspend fun toGrayscale(request: BridgeRequestLite): ResponseLite =
+    private suspend fun toGrayscale(request: BridgeRequest): BridgeResponse =
         singleRefFrame(request, "toGrayscale") { ref -> analyzer.toGrayscale(ref) }
 
-    private suspend fun crop(request: BridgeRequestLite): ResponseLite {
-        val fields = try {
-            request.decodeObject()
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
+    private suspend fun crop(request: BridgeRequest): BridgeResponse {
+        val fields = request.decodeObject()
         val ref: HandleRef
         val region: List<Int>
-        try {
+        run {
             ref = request.requiredRef(fields, "source")
             region = request.requiredIntList(fields, "region")
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
         }
         // 域：region 必须 [x,y,w,h] 四元组（整体落在帧内由 SPI/native 判 —— 帧
         // 尺寸真值不在本层，只把"形状必须成立"挡在桥面）。越界先拒，零 SPI。
         if (region.size != 4) {
-            return ResponseLite.err(
-                request.id,
-                ErrorCode.ERR_INVALID_PARAM,
+            return err(request, ErrorCode.ERR_INVALID_PARAM,
                 "images crop 的 region 必须 x,y,w,h 四元组，实际 $region",
             )
         }
-        return try {
-            ResponseLite.Ok(request.id, framePayload(analyzer.crop(ref, region)))
-        } catch (e: AutojsException) {
-            ResponseLite.err(request.id, e.error, e.message)
-        }
+        return ok(request, framePayload(analyzer.crop(ref, region)))
     }
 
-    private suspend fun resize(request: BridgeRequestLite): ResponseLite {
-        val fields = try {
-            request.decodeObject()
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
+    private suspend fun resize(request: BridgeRequest): BridgeResponse {
+        val fields = request.decodeObject()
         val ref: HandleRef
         val width: Int
         val height: Int
-        try {
+        run {
             ref = request.requiredRef(fields, "source")
             // 目标尺寸是整数域：requiredLong 只认整数，把 1.5 直接挡成参数错（不悄悄截断）。
             width = request.requiredLong(fields, "width").toInt()
             height = request.requiredLong(fields, "height").toInt()
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
         }
         // 目标尺寸域：正整数 + 单边配额 16384（16384²×4≈1GB，再往上是笔误把字节数
         // 当宽高 —— 配额与尺寸不合法同码，native/SPI 同样先拒，这里挡在桥面）。
         if (width <= 0 || height <= 0 || width > 16384 || height > 16384) {
-            return ResponseLite.err(
-                request.id,
-                ErrorCode.ERR_INVALID_PARAM,
+            return err(request, ErrorCode.ERR_INVALID_PARAM,
                 "images resize 的目标尺寸必须 (0,16384] 正整数，实际 ${width}x$height",
             )
         }
-        return try {
-            ResponseLite.Ok(request.id, framePayload(analyzer.resize(ref, width, height)))
-        } catch (e: AutojsException) {
-            ResponseLite.err(request.id, e.error, e.message)
-        }
+        return ok(request, framePayload(analyzer.resize(ref, width, height)))
     }
 
-    private suspend fun rotate(request: BridgeRequestLite): ResponseLite {
-        val fields = try {
-            request.decodeObject()
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
+    private suspend fun rotate(request: BridgeRequest): BridgeResponse {
+        val fields = request.decodeObject()
         val ref: HandleRef
         val degrees: Double
-        try {
+        run {
             ref = request.requiredRef(fields, "source")
             degrees = request.requiredDouble(fields, "degrees")
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
         }
         // 角度域：必须有限（NaN/Inf → 参数错 —— 三角函数吃掉它们不报错）。原生侧
         // 还有 16384 画布配额（包络公式随角度涨），那层拒收原码透传（INVALID_PARAM）。
         if (!degrees.isFinite()) {
-            return ResponseLite.err(
-                request.id,
-                ErrorCode.ERR_INVALID_PARAM,
+            return err(request, ErrorCode.ERR_INVALID_PARAM,
                 "images rotate 的 degrees 必须是有限数字，实际 $degrees",
             )
         }
-        return try {
-            ResponseLite.Ok(request.id, framePayload(analyzer.rotate(ref, degrees)))
-        } catch (e: AutojsException) {
-            ResponseLite.err(request.id, e.error, e.message)
-        }
+        return ok(request, framePayload(analyzer.rotate(ref, degrees)))
     }
 
-    private suspend fun findFeature(request: BridgeRequestLite): ResponseLite {
-        val fields = try {
-            request.decodeObject()
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
+    private suspend fun findFeature(request: BridgeRequest): BridgeResponse {
+        val fields = request.decodeObject()
         val refs: Pair<HandleRef, HandleRef>
-        try {
+        run {
             refs = request.requiredRef(fields, "scene") to request.requiredRef(fields, "template")
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
         }
-        val hit = try {
-            analyzer.findFeature(refs.first, refs.second)
-        } catch (e: AutojsException) {
-            return ResponseLite.err(request.id, e.error, e.message)
-        }
-        return ResponseLite.Ok(request.id, featurePayload(hit))
+        val hit = analyzer.findFeature(refs.first, refs.second)
+        return ok(request, featurePayload(hit))
     }
 
     /** 产出帧回包（与 decode 同形：ref + 宽高真值，随产出帧走）。 */
@@ -367,25 +279,13 @@ class ImagesNamespaceHandler(
 
     /** 单帧变换通用骨架：`{source}` 信封 → SPI 调用 → 产出帧回包（toGrayscale 用）。 */
     private suspend fun singleRefFrame(
-        request: BridgeRequestLite,
+        request: BridgeRequest,
         methodName: String,
         call: suspend (HandleRef) -> ImageFrame,
-    ): ResponseLite {
-        val fields = try {
-            request.decodeObject()
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val ref = try {
-            request.requiredRef(fields, "source")
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        return try {
-            ResponseLite.Ok(request.id, framePayload(call(ref)))
-        } catch (e: AutojsException) {
-            ResponseLite.err(request.id, e.error, e.message)
-        }
+    ): BridgeResponse {
+        val fields = request.decodeObject()
+        val ref = request.requiredRef(fields, "source")
+        return ok(request, framePayload(call(ref)))
     }
 
         /** 命中 → `{x,y,r,g,b,a}`；未命中 → 裸 `null`（答案，不是异常）。 */

@@ -1,5 +1,10 @@
 package com.autoscript.platform.capabilities
 
+import com.autoscript.domain.bridge.decodeObject
+import com.autoscript.domain.bridge.requiredStr
+import com.autoscript.domain.bridge.RpcNamespaceHandler
+import com.autoscript.domain.bridge.BridgeResponse
+import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
@@ -30,116 +35,68 @@ import com.autoscript.domain.storage.StoredEntry
  */
 class DatastoreNamespaceHandler(
     private val store: DataStore,
-) {
-    suspend fun handle(request: BridgeRequestLite): ResponseLite = when (request.method) {
+) : RpcNamespaceHandler() {
+    override suspend fun dispatch(request: BridgeRequest): BridgeResponse = when (request.method) {
         "get" -> get(request)
         "put" -> put(request)
         "remove" -> remove(request)
         "contains" -> contains(request)
         "keys" -> keys(request)
         "clear" -> clear(request)
-        else -> ResponseLite.err(
-            request.id,
-            ErrorCode.ERR_NOT_IMPLEMENTED,
+        else -> err(request, ErrorCode.ERR_NOT_IMPLEMENTED,
             "未知 datastore 方法: ${request.method}",
         )
     }
 
-    private suspend fun get(request: BridgeRequestLite): ResponseLite {
-        val key = try {
-            readKey(request)
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val entry = try {
-            store.get(key)
-        } catch (e: AutojsException) {
-            return ResponseLite.err(request.id, e.error, e.message)
-        } ?: return ResponseLite.Ok(request.id, NOT_FOUND)
+    private suspend fun get(request: BridgeRequest): BridgeResponse {
+        val key = readKey(request)
+        val entry = store.get(key) ?: return ok(request, NOT_FOUND)
         return when (entry) {
             is StoredEntry.Json ->
-                ResponseLite.Ok(request.id, """{"found":true,"value":${entry.text}}""")
-            is StoredEntry.Bytes -> ResponseLite.err(
-                request.id,
-                ErrorCode.ERR_NOT_IMPLEMENTED,
+                ok(request, """{"found":true,"value":${entry.text}}""")
+            is StoredEntry.Bytes -> err(request, ErrorCode.ERR_NOT_IMPLEMENTED,
                 "字节值不过 JSON 桥（§7.4 side-channel 未接）",
             )
         }
     }
 
-    private suspend fun put(request: BridgeRequestLite): ResponseLite {
-        val fields = try {
-            request.decodeObject()
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val key = try {
-            request.requiredStr(fields, "key").also(::requireNonBlank)
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
+    private suspend fun put(request: BridgeRequest): BridgeResponse {
+        val fields = request.decodeObject()
+        val key = request.requiredStr(fields, "key").also(::requireNonBlank)
         // 显式 JSON null 是合法值 —— 用「键在不在」而不是「值是不是 Null」区分缺参。
         if (!fields.containsKey("value")) {
-            return ResponseLite.err(
-                request.id,
-                ErrorCode.ERR_INVALID_PARAM,
+            return err(request, ErrorCode.ERR_INVALID_PARAM,
                 "put 缺 value 字段（写 JSON null 请传 value:null，不是省略）",
             )
         }
         val text = DomainJson.encodeParsed(fields.getValue("value"))
-        return try {
+        return run {
             store.put(key, StoredEntry.Json(text))
-            ResponseLite.Ok(request.id, "true")
-        } catch (e: AutojsException) {
-            ResponseLite.err(request.id, e.error, e.message)
-        } catch (e: IllegalArgumentException) {
-            ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
+            ok(request, "true")
         }
     }
 
-    private suspend fun remove(request: BridgeRequestLite): ResponseLite {
-        val key = try {
-            readKey(request)
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val removed = try {
-            store.remove(key)
-        } catch (e: AutojsException) {
-            return ResponseLite.err(request.id, e.error, e.message)
-        }
-        return ResponseLite.Ok(request.id, (removed != null).toString())
+    private suspend fun remove(request: BridgeRequest): BridgeResponse {
+        val key = readKey(request)
+        val removed = store.remove(key)
+        return ok(request, (removed != null).toString())
     }
 
-    private suspend fun contains(request: BridgeRequestLite): ResponseLite {
-        val key = try {
-            readKey(request)
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val present = try {
-            store.contains(key)
-        } catch (e: AutojsException) {
-            return ResponseLite.err(request.id, e.error, e.message)
-        }
-        return ResponseLite.Ok(request.id, present.toString())
+    private suspend fun contains(request: BridgeRequest): BridgeResponse {
+        val key = readKey(request)
+        val present = store.contains(key)
+        return ok(request, present.toString())
     }
 
-    private suspend fun keys(request: BridgeRequestLite): ResponseLite = try {
-        ResponseLite.Ok(request.id, DomainJson.encode(store.keys()))
-    } catch (e: AutojsException) {
-        ResponseLite.err(request.id, e.error, e.message)
-    }
+    private suspend fun keys(request: BridgeRequest): BridgeResponse = ok(request, DomainJson.encode(store.keys()))
 
-    private suspend fun clear(request: BridgeRequestLite): ResponseLite = try {
+    private suspend fun clear(request: BridgeRequest): BridgeResponse = run {
         store.clear()
-        ResponseLite.Ok(request.id, "true")
-    } catch (e: AutojsException) {
-        ResponseLite.err(request.id, e.error, e.message)
+        ok(request, "true")
     }
 
     /** 解 payload 取非空白 key；参数非法抛 [IllegalArgumentException]（调用方折叠 ERR_INVALID_PARAM）。 */
-    private fun readKey(request: BridgeRequestLite): String {
+    private fun readKey(request: BridgeRequest): String {
         val fields = request.decodeObject()
         val key = request.requiredStr(fields, "key")
         requireNonBlank(key)

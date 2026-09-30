@@ -1,5 +1,8 @@
 package com.autoscript.platform.capabilities
 
+import com.autoscript.domain.bridge.RpcNamespaceHandler
+import com.autoscript.domain.bridge.BridgeResponse
+import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.automation.GestureInput
 import com.autoscript.domain.automation.GesturePoint
@@ -60,14 +63,9 @@ class A11yNamespaceHandler(
      * 事件监听做在树之外，可显式注入 —— handler 不关心事件从哪来，只认游标契约。
      */
     private val events: UiEventStream? = null,
-) {
-    data class Request(val id: Long, val method: String, val payload: String?)
-    sealed interface Response {
-        data class Ok(val id: Long, val payload: String?) : Response
-        data class Err(val id: Long, val code: String, val detail: String?) : Response
-    }
+) : RpcNamespaceHandler() {
 
-    suspend fun handle(request: Request): Response = when (request.method) {
+    override suspend fun dispatch(request: BridgeRequest): BridgeResponse = when (request.method) {
         "findOne" -> findOne(request, single = true)
         "findOneOrNull" -> findOne(request, single = true)
         "findAll" -> findAll(request)
@@ -88,40 +86,26 @@ class A11yNamespaceHandler(
         "gesture" -> gesture(request)
         // 服务未连时 AndroidGestureInput 抛 ERR_SERVICE_DISABLED：原码回桥（不折 false ——
         // "没服务"与"手势关门"是两回事，后者才走能力中心引导）。
-        "canPerformGestures" -> try {
-            ok(request.id, if (input.canPerformGestures) "true" else "false")
-        } catch (e: AutojsException) {
-            err(request.id, e.error, e.message)
+        "canPerformGestures" -> run {
+            ok(request, if (input.canPerformGestures) "true" else "false")
         }
-        else -> err(request.id, ErrorCode.ERR_NOT_IMPLEMENTED, "未知 a11y 方法: ${request.method}")
+        else -> err(request, ErrorCode.ERR_NOT_IMPLEMENTED, "未知 a11y 方法: ${request.method}")
     }
 
     // ── 查找 ─────────────────────────────────────────────────────────
 
-    private suspend fun findOne(request: Request, single: Boolean): Response {
-        val o = try {
-            decodePayload(request.payload)
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val selector = try {
-            selectorOf(o["conditions"])
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val matched = try {
-            tree.findBySelector(selector)
-        } catch (e: AutojsException) {
-            return err(request.id, e.error, e.message)
-        }
+    private suspend fun findOne(request: BridgeRequest, single: Boolean): BridgeResponse {
+        val o = decodePayload(request.payload)
+        val selector = selectorOf(o["conditions"])
+        val matched = tree.findBySelector(selector)
         if (matched.isEmpty()) {
-            return err(request.id, ErrorCode.ERR_NOT_FOUND, "选择器无匹配")
+            return err(request, ErrorCode.ERR_NOT_FOUND, "选择器无匹配")
         }
         if (!single) {
-            return ok(request.id, DomainJson.encode(matched.map { nodePayload(it.handle, null) }))
+            return ok(request, DomainJson.encode(matched.map { nodePayload(it.handle, null) }))
         }
         val first = matched.first()
-        return ok(request.id, DomainJson.encode(nodePayload(first.handle, null)))
+        return ok(request, DomainJson.encode(nodePayload(first.handle, null)))
     }
 
     /**
@@ -135,182 +119,86 @@ class A11yNamespaceHandler(
      * 而不是 `Err NOT_FOUND`，是因为调用方拿它做分支判断（`if (await waitFor(...))`），
      * 不是当异常处理；**参数错误仍是 Err**（ERR_INVALID_PARAM），不一并折成 false。
      */
-    private suspend fun waitFor(request: Request): Response {
-        val o = try {
-            decodePayload(request.payload)
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val selector = try {
-            selectorOf(o["conditions"])
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val matched = try {
-            tree.findBySelector(selector)
-        } catch (e: AutojsException) {
-            return err(request.id, e.error, e.message)
-        }
-        return ok(request.id, if (matched.isEmpty()) "false" else "true")
+    private suspend fun waitFor(request: BridgeRequest): BridgeResponse {
+        val o = decodePayload(request.payload)
+        val selector = selectorOf(o["conditions"])
+        val matched = tree.findBySelector(selector)
+        return ok(request, if (matched.isEmpty()) "false" else "true")
     }
 
-    private suspend fun findAll(request: Request): Response {
-        val o = try {
-            decodePayload(request.payload)
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val selector = try {
-            selectorOf(o["conditions"])
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val max = try {
-            optLong(o, "max")?.toInt() ?: Int.MAX_VALUE
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        if (max < 0) return err(request.id, ErrorCode.ERR_INVALID_PARAM, "max 不得为负")
-        val matched = try {
-            tree.findBySelector(selector)
-        } catch (e: AutojsException) {
-            return err(request.id, e.error, e.message)
-        }
-        return ok(request.id, DomainJson.encode(matched.take(max).map { nodePayload(it.handle, null) }))
+    private suspend fun findAll(request: BridgeRequest): BridgeResponse {
+        val o = decodePayload(request.payload)
+        val selector = selectorOf(o["conditions"])
+        val max = optLong(o, "max")?.toInt() ?: Int.MAX_VALUE
+        if (max < 0) return err(request, ErrorCode.ERR_INVALID_PARAM, "max 不得为负")
+        val matched = tree.findBySelector(selector)
+        return ok(request, DomainJson.encode(matched.take(max).map { nodePayload(it.handle, null) }))
     }
 
     // ── 动作 ─────────────────────────────────────────────────────────
 
-    private suspend fun boolAction(request: Request, run: suspend (HandleRef) -> Boolean): Response {
-        val ref = try {
-            requiredRef(decodePayload(request.payload))
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        return try {
-            ok(request.id, if (run(ref)) "true" else "false")
-        } catch (e: AutojsException) {
-            err(request.id, e.error, e.message)
-        }
+    private suspend fun boolAction(request: BridgeRequest, run: suspend (HandleRef) -> Boolean): BridgeResponse {
+        val ref = requiredRef(decodePayload(request.payload))
+        return ok(request, if (run(ref)) "true" else "false")
     }
 
-    private suspend fun setText(request: Request): Response {
-        val o = try {
-            decodePayload(request.payload)
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
+    private suspend fun setText(request: BridgeRequest): BridgeResponse {
+        val o = decodePayload(request.payload)
         val ref: HandleRef
         val text: String
-        try {
+        run {
             ref = requiredRef(o)
             text = requiredStr(o, "text")
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
         }
-        return try {
-            ok(request.id, if (actions.setText(ref, text)) "true" else "false")
-        } catch (e: AutojsException) {
-            err(request.id, e.error, e.message)
-        }
+        return ok(request, if (actions.setText(ref, text)) "true" else "false")
     }
 
     /**
      * 滚动：payload `{ref,direction?}`（direction 缺省 FORWARD；非法方向名 →
      * ERR_INVALID_PARAM）。不可滚动容器回 `"false"`（不抛错，与 click 同口径）。
      */
-    private suspend fun scroll(request: Request): Response {
-        val o = try {
-            decodePayload(request.payload)
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
+    private suspend fun scroll(request: BridgeRequest): BridgeResponse {
+        val o = decodePayload(request.payload)
         val ref: HandleRef
         val direction: ScrollDirection
-        try {
+        run {
             ref = requiredRef(o)
             direction = optDirection(o, "direction") ?: ScrollDirection.FORWARD
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
         }
-        return try {
-            ok(request.id, if (actions.scroll(ref, direction)) "true" else "false")
-        } catch (e: AutojsException) {
-            err(request.id, e.error, e.message)
-        }
+        return ok(request, if (actions.scroll(ref, direction)) "true" else "false")
     }
 
-    private suspend fun bounds(request: Request): Response {
-        val ref = try {
-            requiredRef(decodePayload(request.payload))
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val b: UiBounds? = try {
-            actions.bounds(ref)
-        } catch (e: AutojsException) {
-            return err(request.id, e.error, e.message)
-        }
-        if (b == null) return ok(request.id, null)
-        return ok(
-            request.id,
-            DomainJson.encode(mapOf("left" to b.left.toLong(), "top" to b.top.toLong(), "right" to b.right.toLong(), "bottom" to b.bottom.toLong())),
+    private suspend fun bounds(request: BridgeRequest): BridgeResponse {
+        val ref = requiredRef(decodePayload(request.payload))
+        val b: UiBounds? = actions.bounds(ref)
+        if (b == null) return ok(request, null)
+        return ok(request, DomainJson.encode(mapOf("left" to b.left.toLong(), "top" to b.top.toLong(), "right" to b.right.toLong(), "bottom" to b.bottom.toLong())),
         )
     }
 
-    private suspend fun attr(request: Request, name: String): Response {
-        val ref = try {
-            requiredRef(decodePayload(request.payload))
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val v = try {
-            actions.attribute(ref, name)
-        } catch (e: AutojsException) {
-            return err(request.id, e.error, e.message)
-        }
-        return ok(request.id, if (v == null) null else DomainJson.encode(v))
+    private suspend fun attr(request: BridgeRequest, name: String): BridgeResponse {
+        val ref = requiredRef(decodePayload(request.payload))
+        val v = actions.attribute(ref, name)
+        return ok(request, if (v == null) null else DomainJson.encode(v))
     }
 
-    private suspend fun children(request: Request): Response {
-        val ref = try {
-            requiredRef(decodePayload(request.payload))
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val kids = try {
-            actions.children(ref)
-        } catch (e: AutojsException) {
-            return err(request.id, e.error, e.message)
-        }
-        return ok(request.id, DomainJson.encode(kids.map { nodePayload(it.handle, null) }))
+    private suspend fun children(request: BridgeRequest): BridgeResponse {
+        val ref = requiredRef(decodePayload(request.payload))
+        val kids = actions.children(ref)
+        return ok(request, DomainJson.encode(kids.map { nodePayload(it.handle, null) }))
     }
 
-    private suspend fun parent(request: Request): Response {
-        val ref = try {
-            requiredRef(decodePayload(request.payload))
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val p = try {
-            actions.parent(ref)
-        } catch (e: AutojsException) {
-            return err(request.id, e.error, e.message)
-        }
-        return ok(request.id, if (p == null) null else DomainJson.encode(nodePayload(p.handle, null)))
+    private suspend fun parent(request: BridgeRequest): BridgeResponse {
+        val ref = requiredRef(decodePayload(request.payload))
+        val p = actions.parent(ref)
+        return ok(request, if (p == null) null else DomainJson.encode(nodePayload(p.handle, null)))
     }
 
-    private suspend fun dispose(request: Request): Response {
-        val ref = try {
-            requiredRef(decodePayload(request.payload))
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        return try {
+    private suspend fun dispose(request: BridgeRequest): BridgeResponse {
+        val ref = requiredRef(decodePayload(request.payload))
+        return run {
             actions.dispose(ref)
-            ok(request.id, "true")
-        } catch (e: AutojsException) {
-            err(request.id, e.error, e.message)
+            ok(request, "true")
         }
     }
 
@@ -319,25 +207,17 @@ class A11yNamespaceHandler(
      * 空增量回 `{first:sinceSeq,last:sinceSeq,events:[]}`（调用方以前进游标为准，
      * 不以空数组为终结——事件是开放流）。
      */
-    private suspend fun events(request: Request): Response {
-        val o = try {
-            if (request.payload == null) emptyMap() else decodePayload(request.payload)
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
+    private suspend fun events(request: BridgeRequest): BridgeResponse {
+        val o = if (request.payload == null) emptyMap() else decodePayload(request.payload)
         val sinceSeq: Long
         val batch: Int
-        try {
+        run {
             sinceSeq = optLong(o, "sinceSeq") ?: 0L
             batch = (optLong(o, "batch") ?: 32L).toInt()
             require(batch > 0) { "batch 必须 > 0" }
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
         }
         val got = (events ?: tree.events()).next(sinceSeq, batch)
-        return ok(
-            request.id,
-            DomainJson.encode(
+        return ok(request, DomainJson.encode(
                 mapOf(
                     "first" to got.firstSeq,
                     "last" to got.lastSeq,
@@ -362,23 +242,10 @@ class A11yNamespaceHandler(
      * 关门（canPerformGestures=false）→ `"false"`（不抛错，走能力中心引导）；
      * 服务未连 → ERR_SERVICE_DISABLED 原码（不折 false，与"关门"区分）。
      */
-    private suspend fun gesture(request: Request): Response {
-        val o = try {
-            decodePayload(request.payload)
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val gesture = try {
-            gestureOf(o["strokes"])
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        return try {
-            ok(request.id, if (input.dispatchGesture(gesture)) "true" else "false")
-        } catch (e: AutojsException) {
-            // 服务未连 → ERR_SERVICE_DISABLED 原码（与其余动作路径同折叠纪律）。
-            err(request.id, e.error, e.message)
-        }
+    private suspend fun gesture(request: BridgeRequest): BridgeResponse {
+        val o = decodePayload(request.payload)
+        val gesture = gestureOf(o["strokes"])
+        return ok(request, if (input.dispatchGesture(gesture)) "true" else "false")
     }
 
     private fun gestureOf(v: DomainJson.Value?): GestureInput {
@@ -477,11 +344,6 @@ class A11yNamespaceHandler(
             throw IllegalArgumentException("未知滚动方向 $name（FORWARD/BACKWARD/UP/DOWN/LEFT/RIGHT）")
         }
     }
-
-    private fun ok(id: Long, payload: String?): Response = Response.Ok(id, payload)
-
-    private fun err(id: Long, code: ErrorCode, detail: String?): Response =
-        Response.Err(id, code.code, detail)
 
     companion object {
         val SELECTOR_KEYS: Set<String> = setOf("text", "desc", "id", "className", "packageName", "clickable")

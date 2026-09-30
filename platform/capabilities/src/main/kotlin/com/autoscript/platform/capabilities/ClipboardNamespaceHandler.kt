@@ -1,5 +1,9 @@
 package com.autoscript.platform.capabilities
 
+import com.autoscript.domain.bridge.decodeObject
+import com.autoscript.domain.bridge.RpcNamespaceHandler
+import com.autoscript.domain.bridge.BridgeResponse
+import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
@@ -30,42 +34,28 @@ import com.autoscript.domain.system.Clipboard
  */
 class ClipboardNamespaceHandler(
     private val clipboard: Clipboard,
-) {
-    suspend fun handle(request: BridgeRequestLite): ResponseLite = when (request.method) {
+) : RpcNamespaceHandler() {
+    override suspend fun dispatch(request: BridgeRequest): BridgeResponse = when (request.method) {
         "getText" -> getText(request)
         "setText" -> setText(request)
-        else -> ResponseLite.err(
-            request.id,
-            ErrorCode.ERR_NOT_IMPLEMENTED,
+        else -> err(request, ErrorCode.ERR_NOT_IMPLEMENTED,
             "未知 clipboard 方法: ${request.method}",
         )
     }
 
     /** 读剪贴板文本；null = 无内容（裸 JSON null，与 settings 读缺失同形）。 */
-    private fun getText(request: BridgeRequestLite): ResponseLite = try {
-        ResponseLite.Ok(request.id, DomainJson.encode(clipboard.getText()))
-    } catch (e: AutojsException) {
-        ResponseLite.err(request.id, e.error, e.message)
-    }
+    private fun getText(request: BridgeRequest): BridgeResponse = ok(request, DomainJson.encode(clipboard.getText()))
 
-    private fun setText(request: BridgeRequestLite): ResponseLite {
-        val fields = try {
-            request.decodeObject()
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
+    private fun setText(request: BridgeRequest): BridgeResponse {
+        val fields = request.decodeObject()
         // 空串是合法内容 —— 缺参/非串/null 才是参数错，不拿 isBlank 卡 text。
         val text = fields["text"] as? DomainJson.Value.S
-            ?: return ResponseLite.err(
-                request.id,
-                ErrorCode.ERR_INVALID_PARAM,
+            ?: return err(request, ErrorCode.ERR_INVALID_PARAM,
                 "setText 缺 text 字段或 text 不是字符串",
             )
-        return try {
+        return run {
             clipboard.setText(text.v)
-            ResponseLite.Ok(request.id, "true")
-        } catch (e: AutojsException) {
-            ResponseLite.err(request.id, e.error, e.message)
+            ok(request, "true")
         }
     }
 }

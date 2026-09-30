@@ -1,5 +1,10 @@
 package com.autoscript.platform.capabilities
 
+import com.autoscript.domain.bridge.decodeObject
+import com.autoscript.domain.bridge.requiredStr
+import com.autoscript.domain.bridge.RpcNamespaceHandler
+import com.autoscript.domain.bridge.BridgeResponse
+import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
@@ -24,58 +29,36 @@ import java.nio.file.Path
  */
 class ZipNamespaceHandler(
     private val archiver: ZipArchiver,
-) {
-    suspend fun handle(request: BridgeRequestLite): ResponseLite = when (request.method) {
+) : RpcNamespaceHandler() {
+    override suspend fun dispatch(request: BridgeRequest): BridgeResponse = when (request.method) {
         "compress" -> compress(request)
         "extract" -> extract(request)
-        else -> ResponseLite.err(
-            request.id,
-            ErrorCode.ERR_NOT_IMPLEMENTED,
+        else -> err(request, ErrorCode.ERR_NOT_IMPLEMENTED,
             "未知 zip 方法: ${request.method}",
         )
     }
 
-    private suspend fun compress(request: BridgeRequestLite): ResponseLite {
-        val fields = try {
-            request.decodeObject()
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val (source, archive) = try {
-            pathOf(request, fields, "source") to pathOf(request, fields, "archive")
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        return try {
+    private suspend fun compress(request: BridgeRequest): BridgeResponse {
+        val fields = request.decodeObject()
+        val (source, archive) = pathOf(request, fields, "source") to pathOf(request, fields, "archive")
+        return run {
             archiver.compress(source, archive)
-            ResponseLite.Ok(request.id, "true")
-        } catch (e: AutojsException) {
-            ResponseLite.err(request.id, e.error, e.message)
+            ok(request, "true")
         }
     }
 
-    private suspend fun extract(request: BridgeRequestLite): ResponseLite {
-        val fields = try {
-            request.decodeObject()
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val (archive, targetDir) = try {
-            pathOf(request, fields, "archive") to pathOf(request, fields, "targetDir")
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        return try {
+    private suspend fun extract(request: BridgeRequest): BridgeResponse {
+        val fields = request.decodeObject()
+        val (archive, targetDir) = pathOf(request, fields, "archive") to pathOf(request, fields, "targetDir")
+        return run {
             archiver.extract(archive, targetDir)
-            ResponseLite.Ok(request.id, "true")
-        } catch (e: AutojsException) {
-            ResponseLite.err(request.id, e.error, e.message)
+            ok(request, "true")
         }
     }
 
     /** 取非空白路径字段；非法（缺/非字符串/空白/NUL 字符）抛 IllegalArgumentException。 */
     private fun pathOf(
-        request: BridgeRequestLite,
+        request: BridgeRequest,
         fields: Map<String, DomainJson.Value>,
         key: String,
     ): Path {

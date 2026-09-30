@@ -1,5 +1,12 @@
 package com.autoscript.platform.capabilities
 
+import com.autoscript.domain.bridge.decodeObject
+import com.autoscript.domain.bridge.optLong
+import com.autoscript.domain.bridge.requiredRef
+import com.autoscript.domain.bridge.enumOrNull
+import com.autoscript.domain.bridge.RpcNamespaceHandler
+import com.autoscript.domain.bridge.BridgeResponse
+import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
@@ -35,110 +42,68 @@ import com.autoscript.domain.system.SensorSource
  */
 class SensorsNamespaceHandler(
     private val sensors: SensorSource,
-) {
-    suspend fun handle(request: BridgeRequestLite): ResponseLite = when (request.method) {
+) : RpcNamespaceHandler() {
+    override suspend fun dispatch(request: BridgeRequest): BridgeResponse = when (request.method) {
         "isSupported" -> isSupported(request)
         "register" -> register(request)
         "unregister" -> unregister(request)
         "unregisterAll" -> unregisterAll(request)
         "drain" -> drain(request)
-        else -> ResponseLite.err(
-            request.id,
-            ErrorCode.ERR_NOT_IMPLEMENTED,
+        else -> err(request, ErrorCode.ERR_NOT_IMPLEMENTED,
             "未知 sensors 方法: ${request.method}",
         )
     }
 
     /** 设备是否支持该传感器；空白名 → `ERR_INVALID_PARAM`（不是 false —— 垃圾名不是答案）。 */
-    private fun isSupported(request: BridgeRequestLite): ResponseLite {
-        val name = try {
-            sensorNameOf(request)
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        return ResponseLite.Ok(request.id, sensors.isSupported(name).toString())
+    private fun isSupported(request: BridgeRequest): BridgeResponse {
+        val name = sensorNameOf(request)
+        return ok(request, sensors.isSupported(name).toString())
     }
 
-    private suspend fun register(request: BridgeRequestLite): ResponseLite {
-        val fields = try {
-            request.decodeObject()
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
+    private suspend fun register(request: BridgeRequest): BridgeResponse {
+        val fields = request.decodeObject()
         val name: String
         val delay: SensorDelay
-        try {
+        run {
             name = sensorNameOf(fields)
             delay = request.enumOrNull(fields, "delay", SensorDelay.NORMAL) {
                 SensorDelay.valueOf(it.uppercase())
             }
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
         }
-        return try {
+        return run {
             val ref = sensors.register(name, delay)
-            ResponseLite.Ok(
-                request.id,
-                DomainJson.encode(mapOf("refId" to ref.refId, "generation" to ref.generation)),
+            ok(request, DomainJson.encode(mapOf("refId" to ref.refId, "generation" to ref.generation)),
             )
-        } catch (e: IllegalArgumentException) {
-            ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        } catch (e: AutojsException) {
-            ResponseLite.err(request.id, e.error, e.message)
         }
     }
 
-    private suspend fun unregister(request: BridgeRequestLite): ResponseLite {
-        val fields = try {
-            request.decodeObject()
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val ref = try {
-            request.requiredRef(fields)
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        return try {
+    private suspend fun unregister(request: BridgeRequest): BridgeResponse {
+        val fields = request.decodeObject()
+        val ref = request.requiredRef(fields)
+        return run {
             sensors.unregister(ref)
-            ResponseLite.Ok(request.id, "true")
-        } catch (e: AutojsException) {
-            ResponseLite.err(request.id, e.error, e.message)
+            ok(request, "true")
         }
     }
 
-    private suspend fun unregisterAll(request: BridgeRequestLite): ResponseLite = try {
+    private suspend fun unregisterAll(request: BridgeRequest): BridgeResponse = run {
         sensors.unregisterAll()
-        ResponseLite.Ok(request.id, "true")
-    } catch (e: AutojsException) {
-        ResponseLite.err(request.id, e.error, e.message)
+        ok(request, "true")
     }
 
-    private suspend fun drain(request: BridgeRequestLite): ResponseLite {
-        val fields = try {
-            request.decodeObject()
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val ref = try {
-            request.requiredRef(fields)
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
+    private suspend fun drain(request: BridgeRequest): BridgeResponse {
+        val fields = request.decodeObject()
+        val ref = request.requiredRef(fields)
         val sinceSeq: Long
         val max: Int
-        try {
+        run {
             sinceSeq = request.optLong(fields, "sinceSeq") ?: 0L
             max = (request.optLong(fields, "max") ?: 128L).toInt()
             require(max > 0) { "drain 的 max 必须 > 0，实际 $max" }
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
         }
-        return try {
+        return run {
             val got = sensors.drain(ref, sinceSeq, max)
-            ResponseLite.Ok(
-                request.id,
-                DomainJson.encode(
+            ok(request, DomainJson.encode(
                     mapOf(
                         "first" to got.firstSeq,
                         "last" to got.lastSeq,
@@ -153,15 +118,11 @@ class SensorsNamespaceHandler(
                     ),
                 ),
             )
-        } catch (e: IllegalArgumentException) {
-            ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        } catch (e: AutojsException) {
-            ResponseLite.err(request.id, e.error, e.message)
         }
     }
 
     /** 取 `name` 字段：必须是**非空白**字符串（空白名是参数错，不是"不支持"）。 */
-    private fun sensorNameOf(request: BridgeRequestLite): String =
+    private fun sensorNameOf(request: BridgeRequest): String =
         sensorNameOf(request.decodeObject())
 
     private fun sensorNameOf(fields: Map<String, DomainJson.Value>): String {

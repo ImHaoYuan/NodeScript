@@ -1,5 +1,8 @@
 package com.autoscript.platform.capabilities
 
+import com.autoscript.domain.bridge.RpcNamespaceHandler
+import com.autoscript.domain.bridge.BridgeResponse
+import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.automation.FrameSource
 import com.autoscript.domain.automation.ImageFrame
@@ -33,92 +36,59 @@ import com.autoscript.domain.core.ErrorCode
  */
 class ScreenNamespaceHandler(
     private val source: FrameSource,
-) {
-    data class Request(val id: Long, val method: String, val payload: String?)
-    sealed interface Response {
-        data class Ok(val id: Long, val payload: String?) : Response
-        data class Err(val id: Long, val code: String, val detail: String?) : Response
-    }
+) : RpcNamespaceHandler() {
 
     private val guard = Any()
     private val sessions = HashMap<Long, ScreenCaptureSession>()
     private var nextSessionId = 1L
 
-    suspend fun handle(request: Request): Response = when (request.method) {
+    override suspend fun dispatch(request: BridgeRequest): BridgeResponse = when (request.method) {
         "capture" -> capture(request)
         "recycle" -> recycle(request)
         "startCapturer" -> startCapturer(request)
         "nextFrame" -> nextFrame(request)
         "closeSession" -> closeSession(request)
-        else -> err(request.id, ErrorCode.ERR_NOT_IMPLEMENTED, "未知 screen 方法: ${request.method}")
+        else -> err(request, ErrorCode.ERR_NOT_IMPLEMENTED, "未知 screen 方法: ${request.method}")
     }
 
-    private suspend fun capture(request: Request): Response {
-        return try {
-            ok(request.id, framePayload(source.capture()))
-        } catch (e: AutojsException) {
-            err(request.id, e.error, e.message)
-        }
+    private suspend fun capture(request: BridgeRequest): BridgeResponse {
+        return ok(request, framePayload(source.capture()))
     }
 
-    private suspend fun recycle(request: Request): Response {
-        val ref = try {
-            requiredRef(decodePayload(request.payload), "ref")
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        return try {
+    private suspend fun recycle(request: BridgeRequest): BridgeResponse {
+        val ref = requiredRef(decodePayload(request.payload), "ref")
+        return run {
             source.recycle(ref)
-            ok(request.id, "true")
-        } catch (e: AutojsException) {
-            err(request.id, e.error, e.message)
+            ok(request, "true")
         }
     }
 
-    private suspend fun startCapturer(request: Request): Response {
-        val size = try {
-            optSize(request.payload)
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        return try {
+    private suspend fun startCapturer(request: BridgeRequest): BridgeResponse {
+        val size = optSize(request.payload)
+        return run {
             val session = source.openSession(size.first, size.second)
             val id = synchronized(guard) {
                 val nid = nextSessionId++
                 sessions[nid] = session
                 nid
             }
-            ok(request.id, DomainJson.encode(mapOf("session" to mapOf("refId" to id, "generation" to 1L))))
-        } catch (e: AutojsException) {
-            err(request.id, e.error, e.message)
+            ok(request, DomainJson.encode(mapOf("session" to mapOf("refId" to id, "generation" to 1L))))
         }
     }
 
-    private suspend fun nextFrame(request: Request): Response {
-        val sessionId = try {
-            requiredRef(decodePayload(request.payload), "session").refId
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
+    private suspend fun nextFrame(request: BridgeRequest): BridgeResponse {
+        val sessionId = requiredRef(decodePayload(request.payload), "session").refId
         val session = synchronized(guard) { sessions[sessionId] }
-            ?: return err(request.id, ErrorCode.ERR_NOT_FOUND, "未知截图会话 $sessionId")
-        return try {
-            ok(request.id, framePayload(session.nextFrame()))
-        } catch (e: AutojsException) {
-            err(request.id, e.error, e.message)
-        }
+            ?: return err(request, ErrorCode.ERR_NOT_FOUND, "未知截图会话 $sessionId")
+        return ok(request, framePayload(session.nextFrame()))
     }
 
-    private suspend fun closeSession(request: Request): Response {
-        val sessionId = try {
-            requiredRef(decodePayload(request.payload), "session").refId
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
+    private suspend fun closeSession(request: BridgeRequest): BridgeResponse {
+        val sessionId = requiredRef(decodePayload(request.payload), "session").refId
         val session = synchronized(guard) { sessions.remove(sessionId) }
-            ?: return err(request.id, ErrorCode.ERR_NOT_FOUND, "未知截图会话 $sessionId")
+            ?: return err(request, ErrorCode.ERR_NOT_FOUND, "未知截图会话 $sessionId")
         session.close()
-        return ok(request.id, "true")
+        return ok(request, "true")
     }
 
     // ── 载荷 ─────────────────────────────────────────────────────────
@@ -166,9 +136,4 @@ class ScreenNamespaceHandler(
             ?: throw IllegalArgumentException("缺数字 $key.generation")
         return HandleRef(refId, gen)
     }
-
-    private fun ok(id: Long, payload: String?): Response = Response.Ok(id, payload)
-
-    private fun err(id: Long, code: ErrorCode, detail: String?): Response =
-        Response.Err(id, code.code, detail)
 }

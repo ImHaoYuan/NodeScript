@@ -1,5 +1,10 @@
 package com.autoscript.platform.capabilities
 
+import com.autoscript.domain.bridge.decodeObject
+import com.autoscript.domain.bridge.optStr
+import com.autoscript.domain.bridge.RpcNamespaceHandler
+import com.autoscript.domain.bridge.BridgeResponse
+import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
@@ -29,59 +34,39 @@ import com.autoscript.domain.system.NotificationSpec
  */
 class NotificationNamespaceHandler(
     private val poster: NotificationPoster,
-) {
-    suspend fun handle(request: BridgeRequestLite): ResponseLite = when (request.method) {
-        "canPost" -> ResponseLite.Ok(request.id, poster.canPost().toString())
+) : RpcNamespaceHandler() {
+    override suspend fun dispatch(request: BridgeRequest): BridgeResponse = when (request.method) {
+        "canPost" -> ok(request, poster.canPost().toString())
         "post" -> post(request)
         "cancel" -> cancel(request)
-        else -> ResponseLite.err(
-            request.id,
-            ErrorCode.ERR_NOT_IMPLEMENTED,
+        else -> err(request, ErrorCode.ERR_NOT_IMPLEMENTED,
             "未知 notification 方法: ${request.method}",
         )
     }
 
-    private fun post(request: BridgeRequestLite): ResponseLite {
-        val fields = try {
-            request.decodeObject()
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val spec = try {
+    private fun post(request: BridgeRequest): BridgeResponse {
+        val fields = request.decodeObject()
+        val spec = run {
             NotificationSpec(
                 id = idOf(fields),
                 text = textOf(fields),
                 title = request.optStr(fields, "title"),
             )
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
         }
-        return try {
+        return run {
             poster.post(spec)
-            ResponseLite.Ok(request.id, "true")
-        } catch (e: AutojsException) {
-            ResponseLite.err(request.id, e.error, e.message)
+            ok(request, "true")
         }
     }
 
-    private fun cancel(request: BridgeRequestLite): ResponseLite {
-        val fields = try {
-            request.decodeObject()
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val id = try {
-            idOf(fields)
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        return try {
+    private fun cancel(request: BridgeRequest): BridgeResponse {
+        val fields = request.decodeObject()
+        val id = idOf(fields)
+        return run {
             poster.cancel(id)
             // 无回执（见 :domain NotificationPoster KDoc）—— 回裸 true 表示"这次调用发出去了"，
             // 不表示"系统真撤到了"；JS 侧也据此回 void，不编一个撤销成功的布尔。
-            ResponseLite.Ok(request.id, "true")
-        } catch (e: AutojsException) {
-            ResponseLite.err(request.id, e.error, e.message)
+            ok(request, "true")
         }
     }
 

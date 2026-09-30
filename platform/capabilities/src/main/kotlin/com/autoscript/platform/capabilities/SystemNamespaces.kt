@@ -1,5 +1,15 @@
 package com.autoscript.platform.capabilities
 
+import com.autoscript.domain.bridge.decodeObject
+import com.autoscript.domain.bridge.requiredStr
+import com.autoscript.domain.bridge.optStr
+import com.autoscript.domain.bridge.optLong
+import com.autoscript.domain.bridge.requiredStrList
+import com.autoscript.domain.bridge.requiredRef
+import com.autoscript.domain.bridge.enumOrNull
+import com.autoscript.domain.bridge.RpcNamespaceHandler
+import com.autoscript.domain.bridge.BridgeResponse
+import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.bridge.HandleRef
 import com.autoscript.domain.core.AutojsException
@@ -45,142 +55,92 @@ const val DEFAULT_SHELL_TIMEOUT_MILLIS: Long = 30_000
 class ShellNamespaceHandler(
     private val executor: ShellExecutor,
     private val defaultTimeoutMillis: Long = DEFAULT_SHELL_TIMEOUT_MILLIS,
-) {
-    suspend fun handle(request: BridgeRequestLite): ResponseLite = when (request.method) {
+) : RpcNamespaceHandler() {
+    override suspend fun dispatch(request: BridgeRequest): BridgeResponse = when (request.method) {
         "exec", "shell" -> exec(request)
-        else -> ResponseLite.err(request.id, ErrorCode.ERR_NOT_IMPLEMENTED, "未知 shell 方法: ${request.method}")
+        else -> err(request, ErrorCode.ERR_NOT_IMPLEMENTED, "未知 shell 方法: ${request.method}")
     }
 
-    private suspend fun exec(request: BridgeRequestLite): ResponseLite {
-        val fields = try {
-            request.decodeObject()
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val cmd = try {
-            request.requiredStr(fields, "cmd")
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val mode = try {
-            request.enumOrNull(fields, "mode", ShellMode.DEFAULT) { ShellMode.valueOf(it.uppercase()) }
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val timeout = try {
-            request.optLong(fields, "timeout") ?: defaultTimeoutMillis
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
+    private suspend fun exec(request: BridgeRequest): BridgeResponse {
+        val fields = request.decodeObject()
+        val cmd = request.requiredStr(fields, "cmd")
+        val mode = request.enumOrNull(fields, "mode", ShellMode.DEFAULT) { ShellMode.valueOf(it.uppercase()) }
+        val timeout = request.optLong(fields, "timeout") ?: defaultTimeoutMillis
         if (timeout <= 0) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, "timeout 必须 > 0，实际 $timeout")
+            return err(request, ErrorCode.ERR_INVALID_PARAM, "timeout 必须 > 0，实际 $timeout")
         }
-        return try {
+        return run {
             val r = executor.exec(cmd, mode, timeout)
-            ResponseLite.Ok(
-                request.id,
-                DomainJson.encode(
+            ok(request, DomainJson.encode(
                     mapOf("code" to r.code.toLong(), "stdout" to r.stdout, "stderr" to r.stderr),
                 ),
             )
-        } catch (e: AutojsException) {
-            ResponseLite.err(request.id, e.error, e.message)
         }
     }
 }
 
 // ── device（§9.6）───────────────────────────────────────────────────
 
-class DeviceNamespaceHandler(private val info: DeviceInfoProvider) {
-    suspend fun handle(request: BridgeRequestLite): ResponseLite = when (request.method) {
+class DeviceNamespaceHandler(private val info: DeviceInfoProvider) : RpcNamespaceHandler() {
+    override suspend fun dispatch(request: BridgeRequest): BridgeResponse = when (request.method) {
         "model" -> {
             val p = info.profile()   // 构造期已校验（空型号/SDK<1 即拒）
-            ResponseLite.Ok(request.id, DomainJson.encode(p.model))
+            ok(request, DomainJson.encode(p.model))
         }
-        "sdkInt" -> ResponseLite.Ok(request.id, DomainJson.encode(info.profile().sdkInt.toLong()))
-        else -> ResponseLite.err(request.id, ErrorCode.ERR_NOT_IMPLEMENTED, "未知 device 方法: ${request.method}")
+        "sdkInt" -> ok(request, DomainJson.encode(info.profile().sdkInt.toLong()))
+        else -> err(request, ErrorCode.ERR_NOT_IMPLEMENTED, "未知 device 方法: ${request.method}")
     }
 }
 
 // ── app（§9.3/§12.2）────────────────────────────────────────────────
 
-class AppNamespaceHandler(private val launcher: AppLauncher) {
-    suspend fun handle(request: BridgeRequestLite): ResponseLite = when (request.method) {
+class AppNamespaceHandler(private val launcher: AppLauncher) : RpcNamespaceHandler() {
+    override suspend fun dispatch(request: BridgeRequest): BridgeResponse = when (request.method) {
         "launch" -> {
-            val fields = try {
-                request.decodeObject()
-            } catch (e: IllegalArgumentException) {
-                return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-            }
-            val pkg = try {
-                request.requiredStr(fields, "packageName")
-            } catch (e: IllegalArgumentException) {
-                return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-            }
+            val fields = request.decodeObject()
+            val pkg = request.requiredStr(fields, "packageName")
             // 起不来回 false（JS facade `=== true` 判成败），不抛错
-            ResponseLite.Ok(request.id, DomainJson.encode(launcher.launch(pkg)))
+            ok(request, DomainJson.encode(launcher.launch(pkg)))
         }
         "currentPackage" -> {
             val pkg = launcher.currentPackage()
-            ResponseLite.Ok(request.id, DomainJson.encode(pkg))
+            ok(request, DomainJson.encode(pkg))
         }
-        else -> ResponseLite.err(request.id, ErrorCode.ERR_NOT_IMPLEMENTED, "未知 app 方法: ${request.method}")
+        else -> err(request, ErrorCode.ERR_NOT_IMPLEMENTED, "未知 app 方法: ${request.method}")
     }
 }
 
 // ── dialogs（§9.4）──────────────────────────────────────────────────
 
-class DialogsNamespaceHandler(private val host: DialogHost) {
-    suspend fun handle(request: BridgeRequestLite): ResponseLite = when (request.method) {
+class DialogsNamespaceHandler(private val host: DialogHost) : RpcNamespaceHandler() {
+    override suspend fun dispatch(request: BridgeRequest): BridgeResponse = when (request.method) {
         "prompt" -> {
-            val fields = try {
-                request.decodeObject()
-            } catch (e: IllegalArgumentException) {
-                return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-            }
-            val req = try {
+            val fields = request.decodeObject()
+            val req = run {
                 DialogPromptRequest(
                     title = request.requiredStr(fields, "title"),
                     placeholder = request.optStr(fields, "placeholder"),
                     mode = request.enumOrNull(fields, "mode", DialogMode.AUTO) { DialogMode.valueOf(it.uppercase()) },
                 )
-            } catch (e: IllegalArgumentException) {
-                return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
             }
-            val out = try {
-                host.prompt(req)
-            } catch (e: AutojsException) {
-                return ResponseLite.err(request.id, e.error, e.message)
-            }
-            ResponseLite.Ok(
-                request.id,
-                DomainJson.encode(mapOf("value" to out.value, "confirmed" to out.confirmed)),
+            val out = host.prompt(req)
+            ok(request, DomainJson.encode(mapOf("value" to out.value, "confirmed" to out.confirmed)),
             )
         }
         "choose" -> {
-            val fields = try {
-                request.decodeObject()
-            } catch (e: IllegalArgumentException) {
-                return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-            }
-            val req = try {
+            val fields = request.decodeObject()
+            val req = run {
                 DialogChooseRequest(
                     title = request.requiredStr(fields, "title"),
                     options = request.requiredStrList(fields, "options"),
                     mode = request.enumOrNull(fields, "mode", DialogMode.AUTO) { DialogMode.valueOf(it.uppercase()) },
                 )
-            } catch (e: IllegalArgumentException) {
-                return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
             }
-            val choice = try {
-                host.choose(req)
-            } catch (e: AutojsException) {
-                return ResponseLite.err(request.id, e.error, e.message)
-            }
+            val choice = host.choose(req)
             // 下标直出（JS facade `?? -1`）；取消即 -1，不套 null
-            ResponseLite.Ok(request.id, DomainJson.encode(choice.index.toLong()))
+            ok(request, DomainJson.encode(choice.index.toLong()))
         }
-        else -> ResponseLite.err(request.id, ErrorCode.ERR_NOT_IMPLEMENTED, "未知 dialogs 方法: ${request.method}")
+        else -> err(request, ErrorCode.ERR_NOT_IMPLEMENTED, "未知 dialogs 方法: ${request.method}")
     }
 }
 
@@ -188,211 +148,33 @@ class DialogsNamespaceHandler(private val host: DialogHost) {
 
 class FloatingWindowNamespaceHandler(
     private val host: FloatingWindowHost,
-) {
-    suspend fun handle(request: BridgeRequestLite): ResponseLite {
+) : RpcNamespaceHandler() {
+    override suspend fun dispatch(request: BridgeRequest): BridgeResponse {
         return when (request.method) {
             "create" -> {
-                val fields = try {
-                    request.decodeObject()
-                } catch (e: IllegalArgumentException) {
-                    return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-                }
-                val spec = try {
+                val fields = request.decodeObject()
+                val spec = run {
                     FloatingWindowSpec(
                         title = request.optStr(fields, "title"),
                         width = request.optLong(fields, "width")?.toInt(),
                         height = request.optLong(fields, "height")?.toInt(),
                     )
-                } catch (e: IllegalArgumentException) {
-                    return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
                 }
-                val ref = try {
-                    host.create(spec)
-                } catch (e: AutojsException) {
-                    return ResponseLite.err(request.id, e.error, e.message)
-                }
-                ResponseLite.Ok(
-                    request.id,
-                    DomainJson.encode(mapOf("refId" to ref.refId, "generation" to ref.generation)),
+                val ref = host.create(spec)
+                ok(request, DomainJson.encode(mapOf("refId" to ref.refId, "generation" to ref.generation)),
                 )
             }
             "close" -> {
-                val fields = try {
-                    request.decodeObject()
-                } catch (e: IllegalArgumentException) {
-                    return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-                }
-                val ref = try {
-                    request.requiredRef(fields)
-                } catch (e: IllegalArgumentException) {
-                    return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-                }
-                try {
+                val fields = request.decodeObject()
+                val ref = request.requiredRef(fields)
+                run {
                     host.close(ref)
-                } catch (e: AutojsException) {
-                    return ResponseLite.err(request.id, e.error, e.message)
                 }
-                ResponseLite.Ok(request.id, "true")
+                ok(request, "true")
             }
-            else -> ResponseLite.err(
-                request.id,
-                ErrorCode.ERR_NOT_IMPLEMENTED,
+            else -> err(request, ErrorCode.ERR_NOT_IMPLEMENTED,
                 "未知 floatingWindow 方法: ${request.method}",
             )
         }
     }
-}
-
-/**
- * 桥信封的最小视图（§7.4 BridgeRequest 的同构子集）。
- *
- * 为什么不让 handler 直接吃 `com.autoscript.domain.bridge.BridgeRequest`：本模块
- * archUnit 门禁把 `com.autoscript.bridge..` 整体列进黑名单（§6，严于设计表），
- * 而 `:domain` 与 `:bridge:java` 是两个不同包。用最小视图接住 id/method/payload
- * 三字段，转接层（[SystemNamespaces]）做字段级映射，逻辑零改动、门禁仍成立。
- * 与 [CapabilityNamespaces] 用 `NamespaceHandler` 缝是同一套办法的两面。
- */
-data class BridgeRequestLite(
-    val id: Long,
-    val method: String,
-    val payload: String?,
-)
-
-/** handler 自有响应形状（[ResponseLite.Err] 的 code 用 `ErrorCode.code` 原样透传）。 */
-sealed interface ResponseLite {
-    data class Ok(val id: Long, val payload: String?) : ResponseLite
-    data class Err(val id: Long, val code: String, val detail: String?) : ResponseLite
-
-    companion object {
-        fun err(id: Long, code: ErrorCode, detail: String?): Err = Err(id, code.code, detail)
-    }
-}
-
-/**
- * 载荷 helpers（[BridgeRequestLite] 的扩展，只在本文件用）。
- * 每个方法在非法输入上抛 IllegalArgumentException —— handler 折叠为
- * ERR_INVALID_PARAM（§7 诚实上报，不伪造成功）。
- */
-internal fun BridgeRequestLite.decodeObject(): Map<String, DomainJson.Value> {
-    if (payload == null) throw IllegalArgumentException("$method 缺 payload")
-    return DomainJson.decodeObject(payload)
-}
-
-internal fun BridgeRequestLite.requiredStr(
-    o: Map<String, DomainJson.Value>,
-    key: String,
-): String = (o[key] as? DomainJson.Value.S)?.v ?: throw IllegalArgumentException("缺字符串字段 $key")
-
-internal fun BridgeRequestLite.optStr(
-    o: Map<String, DomainJson.Value>,
-    key: String,
-): String? = when (val v = o[key]) {
-    null, is DomainJson.Value.Null -> null
-    is DomainJson.Value.S -> v.v
-    else -> throw IllegalArgumentException("字段 $key 必须是字符串")
-}
-
-internal fun BridgeRequestLite.requiredLong(
-    o: Map<String, DomainJson.Value>,
-    key: String,
-): Long = when (val v = o[key]) {
-    null -> throw IllegalArgumentException("缺数字字段 $key")
-    is DomainJson.Value.Null -> throw IllegalArgumentException("字段 $key 必须是数字")
-    is DomainJson.Value.N -> v.raw.toLongOrNull() ?: throw IllegalArgumentException("字段 $key 数字越界")
-    else -> throw IllegalArgumentException("字段 $key 必须是数字")
-}
-
-internal fun BridgeRequestLite.optLong(
-    o: Map<String, DomainJson.Value>,
-    key: String,
-): Long? = when (val v = o[key]) {
-    null, is DomainJson.Value.Null -> null
-    is DomainJson.Value.N -> v.raw.toLongOrNull() ?: throw IllegalArgumentException("字段 $key 数字越界")
-    else -> throw IllegalArgumentException("字段 $key 必须是数字")
-}
-
-internal fun BridgeRequestLite.requiredStrList(
-    o: Map<String, DomainJson.Value>,
-    key: String,
-): List<String> {
-    val v = o[key] ?: throw IllegalArgumentException("缺 $key 字段")
-    if (v !is DomainJson.Value.Arr) throw IllegalArgumentException("$key 必须是数组")
-    return v.items.map { (it as? DomainJson.Value.S)?.v ?: throw IllegalArgumentException("$key 必须是字符串数组") }
-}
-
-/** 必填数字（JSON 数字原文 → Double；缺键/非数字 → IllegalArgumentException）。
- * 置信度/阈值这类非整数量走它（optLong 只认整数，会悄悄把 `0.9` 挡成参数错）。 */
-internal fun BridgeRequestLite.requiredDouble(
-    o: Map<String, DomainJson.Value>,
-    key: String,
-): Double {
-    val v = o[key] ?: throw IllegalArgumentException("缺数字字段 $key")
-    return rawDouble(v, key)
-}
-
-/** 数字原文 → Double（拒绝 NaN/Infinity：wire 上送不着，实现侧也不该拿到）。 */
-private fun rawDouble(v: DomainJson.Value, key: String): Double {
-    if (v !is DomainJson.Value.N) throw IllegalArgumentException("字段 $key 必须是数字")
-    val d = v.raw.toDoubleOrNull() ?: throw IllegalArgumentException("字段 $key 不是数字: ${v.raw}")
-    if (!d.isFinite()) throw IllegalArgumentException("字段 $key 必须是有限数字")
-    return d
-}
-
-internal fun BridgeRequestLite.requiredRef(o: Map<String, DomainJson.Value>): HandleRef =
-    requiredRef(o, "ref")
-
-/** 句柄字段：键可配（一处请求带两个句柄时 —— `images.matchTemplate` 的 haystack/needle）。 */
-internal fun BridgeRequestLite.requiredRef(
-    o: Map<String, DomainJson.Value>,
-    key: String,
-): HandleRef {
-    val v = o[key] ?: throw IllegalArgumentException("缺 $key 字段")
-    if (v !is DomainJson.Value.Obj) throw IllegalArgumentException("$key 必须是对象")
-    val refId = (v.fields["refId"] as? DomainJson.Value.N)?.raw?.toLongOrNull()
-        ?: throw IllegalArgumentException("缺数字 $key.refId")
-    val gen = (v.fields["generation"] as? DomainJson.Value.N)?.raw?.toLongOrNull()
-        ?: throw IllegalArgumentException("缺数字 $key.generation")
-    return HandleRef(refId, gen)
-}
-
-/** 必填整数数组（JSON 数字数组 → List<Int>；缺键/非数组/非整数元素即抛）。
- * `images findColor` 的 color/region 走它：分量是原生侧的域（0..255），非整数
- * 由本层折 `ERR_INVALID_PARAM`，不把 `1.5` 这种值悄悄截给 native。 */
-internal fun BridgeRequestLite.requiredIntList(
-    o: Map<String, DomainJson.Value>,
-    key: String,
-): List<Int> {
-    val v = o[key] ?: throw IllegalArgumentException("缺 $key 字段")
-    if (v !is DomainJson.Value.Arr) throw IllegalArgumentException("$key 必须是数组")
-    return v.items.map { item ->
-        val n = item as? DomainJson.Value.N
-            ?: throw IllegalArgumentException("$key 必须是数字数组")
-        val i = n.raw.toIntOrNull() ?: throw IllegalArgumentException("$key 元素不是整数: ${n.raw}")
-        i
-    }
-}
-
-/** 可选整数数组：缺键/JSON `null` → null；在场即按 [requiredIntList] 同一口径解析。 */
-internal fun BridgeRequestLite.optIntList(
-    o: Map<String, DomainJson.Value>,
-    key: String,
-): List<Int>? = when (val v = o[key]) {
-    null, is DomainJson.Value.Null -> null
-    else -> requiredIntList(o, key)
-}
-
-/** 枚举字段：缺省/`null` 走 [fallback]；未知字面量拒绝（拼错即报错，不静默套默认）。 */
-internal fun <T> BridgeRequestLite.enumOrNull(
-    o: Map<String, DomainJson.Value>,
-    key: String,
-    fallback: T,
-    parse: (String) -> T,
-): T = when (val v = o[key]) {
-    null, is DomainJson.Value.Null -> fallback
-    is DomainJson.Value.S -> try {
-        parse(v.v)
-    } catch (_: IllegalArgumentException) {
-        throw IllegalArgumentException("未知 $key 值: ${v.v}")
-    }
-    else -> throw IllegalArgumentException("字段 $key 必须是字符串")
 }

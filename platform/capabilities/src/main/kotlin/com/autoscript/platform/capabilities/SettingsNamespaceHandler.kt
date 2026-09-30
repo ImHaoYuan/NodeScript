@@ -1,5 +1,10 @@
 package com.autoscript.platform.capabilities
 
+import com.autoscript.domain.bridge.decodeObject
+import com.autoscript.domain.bridge.requiredStr
+import com.autoscript.domain.bridge.RpcNamespaceHandler
+import com.autoscript.domain.bridge.BridgeResponse
+import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
@@ -34,121 +39,75 @@ import com.autoscript.domain.storage.SystemSettings
  */
 class SettingsNamespaceHandler(
     private val settings: SystemSettings,
-) {
-    suspend fun handle(request: BridgeRequestLite): ResponseLite = when (request.method) {
+) : RpcNamespaceHandler() {
+    override suspend fun dispatch(request: BridgeRequest): BridgeResponse = when (request.method) {
         "canWrite" -> canWrite(request)
         "getString" -> getString(request)
         "getInt" -> getInt(request)
         "putString" -> putString(request)
         "putInt" -> putInt(request)
-        else -> ResponseLite.err(
-            request.id,
-            ErrorCode.ERR_NOT_IMPLEMENTED,
+        else -> err(request, ErrorCode.ERR_NOT_IMPLEMENTED,
             "未知 settings 方法: ${request.method}",
         )
     }
 
     /** 授权探针：读设置不需要授权，写前的诚实提问（JS 可先问再写）。 */
-    private fun canWrite(request: BridgeRequestLite): ResponseLite =
-        ResponseLite.Ok(request.id, settings.canWrite().toString())
+    private fun canWrite(request: BridgeRequest): BridgeResponse =
+        ok(request, settings.canWrite().toString())
 
-    private fun getString(request: BridgeRequestLite): ResponseLite {
-        val key = try {
-            readKey(request)
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
+    private fun getString(request: BridgeRequest): BridgeResponse {
+        val key = readKey(request)
         // 缺失 = 裸 null（见类 KDoc：值面无显式 null，不需要信封）
-        return try {
-            ResponseLite.Ok(request.id, DomainJson.encode(settings.getString(key)))
-        } catch (e: AutojsException) {
-            ResponseLite.err(request.id, e.error, e.message)
-        }
+        return ok(request, DomainJson.encode(settings.getString(key)))
     }
 
-    private fun getInt(request: BridgeRequestLite): ResponseLite {
-        val key = try {
-            readKey(request)
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        return try {
-            ResponseLite.Ok(request.id, DomainJson.encode(settings.getInt(key)))
-        } catch (e: AutojsException) {
-            ResponseLite.err(request.id, e.error, e.message)
-        }
+    private fun getInt(request: BridgeRequest): BridgeResponse {
+        val key = readKey(request)
+        return ok(request, DomainJson.encode(settings.getInt(key)))
     }
 
-    private fun putString(request: BridgeRequestLite): ResponseLite {
-        val fields = try {
-            request.decodeObject()
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val key = try {
-            keyOf(request, fields)
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
+    private fun putString(request: BridgeRequest): BridgeResponse {
+        val fields = request.decodeObject()
+        val key = keyOf(request, fields)
         // 空串是合法设置值 —— 缺参/非串才是参数错，不拿 isBlank 卡 value。
         val value = fields["value"] as? DomainJson.Value.S
-            ?: return ResponseLite.err(
-                request.id,
-                ErrorCode.ERR_INVALID_PARAM,
+            ?: return err(request, ErrorCode.ERR_INVALID_PARAM,
                 "putString 缺 value 字段或 value 不是字符串",
             )
-        return try {
+        return run {
             settings.putString(key, value.v)
-            ResponseLite.Ok(request.id, "true")
-        } catch (e: AutojsException) {
-            ResponseLite.err(request.id, e.error, e.message)
+            ok(request, "true")
         }
     }
 
-    private fun putInt(request: BridgeRequestLite): ResponseLite {
-        val fields = try {
-            request.decodeObject()
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val key = try {
-            keyOf(request, fields)
-        } catch (e: IllegalArgumentException) {
-            return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
+    private fun putInt(request: BridgeRequest): BridgeResponse {
+        val fields = request.decodeObject()
+        val key = keyOf(request, fields)
         val n = fields["value"] as? DomainJson.Value.N
-            ?: return ResponseLite.err(
-                request.id,
-                ErrorCode.ERR_INVALID_PARAM,
+            ?: return err(request, ErrorCode.ERR_INVALID_PARAM,
                 "putInt 缺 value 字段或 value 不是数字",
             )
         val raw = n.raw.toLongOrNull()
-            ?: return ResponseLite.err(
-                request.id,
-                ErrorCode.ERR_INVALID_PARAM,
+            ?: return err(request, ErrorCode.ERR_INVALID_PARAM,
                 "putInt value 必须是整数: ${n.raw}",
             )
         if (raw < Int.MIN_VALUE || raw > Int.MAX_VALUE) {
-            return ResponseLite.err(
-                request.id,
-                ErrorCode.ERR_INVALID_PARAM,
+            return err(request, ErrorCode.ERR_INVALID_PARAM,
                 "putInt value 超出 Int 范围: ${n.raw}",
             )
         }
-        return try {
+        return run {
             settings.putInt(key, raw.toInt())
-            ResponseLite.Ok(request.id, "true")
-        } catch (e: AutojsException) {
-            ResponseLite.err(request.id, e.error, e.message)
+            ok(request, "true")
         }
     }
 
     /** 解 payload 取 key；缺 payload/缺 key/空白 key 抛 [IllegalArgumentException]（调用方折叠）。 */
-    private fun readKey(request: BridgeRequestLite): String = keyOf(request, request.decodeObject())
+    private fun readKey(request: BridgeRequest): String = keyOf(request, request.decodeObject())
 
     /** 取 `key` 字段并拒空白；缺/非串/空白抛 [IllegalArgumentException]。 */
     private fun keyOf(
-        request: BridgeRequestLite,
+        request: BridgeRequest,
         fields: Map<String, DomainJson.Value>,
     ): String {
         val key = request.requiredStr(fields, "key")
