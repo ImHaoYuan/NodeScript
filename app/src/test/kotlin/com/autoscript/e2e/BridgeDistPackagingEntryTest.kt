@@ -70,7 +70,7 @@ class BridgeDistPackagingEntryTest {
 
     private fun readDist(): Map<String, ByteArray> {
         val dist = repoRoot().resolve("bridge/js/dist")
-        assertTrue(Files.isDirectory(dist), "bridge/js/dist 缺件（git 跟踪的 tsc 产物，缺 = 仓库破损）")
+        assertTrue(Files.isDirectory(dist), "bridge/js/dist 缺件（tsc 构建产物：npm --prefix bridge/js run build；CI jvm-tests 已前置）")
         return Files.list(dist).use { s ->
             s.filter { Files.isRegularFile(it) }.toList().associate {
                 it.fileName.toString() to Files.readAllBytes(it)

@@ -10,10 +10,11 @@ import java.io.File
 val bridgeDistAssetsDir = layout.buildDirectory.dir("generated/bridgeDistAssets/bridge-dist")
 
 // ── facade dist 随包（§12.4 资产交付轨）──────────────────────────────────────
-// `bridge/js/dist` 是 git 跟踪的 tsc 产物（CI 无 npm build 也在 —— 与 E2E 对 dist 的
-// 同一条判据：缺 = 仓库破损）。构建期拷进 assets/bridge-dist/，装配期由
-// BridgeDistDeploy 落位到 filesDir/node_modules/auto（require('auto') 的解析点）。
-// 不走 npm build 依赖：随包的是**已提交**的 dist，tsc 只在改 src 时由开发者重跑。
+// `bridge/js/dist` 是 **tsc 构建产物**（2026-09-30 审查步骤 7 起出库、不再 git 跟踪）：
+// CI jvm-tests job 前置 `npm --prefix bridge/js ci && run build`，本机先
+// `npm --prefix bridge/js run build` —— 缺件 = 没跑 npm build，不是仓库破损。
+// 构建期拷进 assets/bridge-dist/，装配期由 BridgeDistDeploy 落位到
+// filesDir/node_modules/auto（require('auto') 的解析点）。
 val prepareBridgeDistAssets = tasks.register("prepareBridgeDistAssets") {
     val srcDist = rootProject.layout.projectDirectory.dir("bridge/js/dist")
     inputs.dir(srcDist)
@@ -30,8 +31,10 @@ val prepareBridgeDistAssets = tasks.register("prepareBridgeDistAssets") {
             }
         }
         // 空 dist 不落盘（与 BridgeDistDeploy 的空字节防线同精神：0 个文件的 assets
-        // 目录 = "没货"，部署侧如实空报告 —— 但这里更该红：dist 缺件是仓库破损）。
-        require(copied > 0) { "bridge/js/dist 无文件可随包（仓库破损？srcDist=$srcDist）" }
+        // 目录 = "没货"，部署侧如实空报告 —— 但这里更该红：没跑过 npm build）。
+        require(copied > 0) {
+            "bridge/js/dist 无文件可随包（构建产物缺失：npm --prefix bridge/js run build；srcDist=$srcDist）"
+        }
         require(File(out, "bootstrap.js").isFile) {
             "dist 缺 bootstrap.js（attachNative 打包入口的落点，§12.4）"
         }

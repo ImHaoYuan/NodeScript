@@ -341,7 +341,7 @@ class AutojsError extends Error {
 > `droppedData` 前账 → attach 结算 → 心跳负 id 不撞在途）。
 >
 > **facade dist 随包 + 打包入口 `attachNative` 接线已落（2026-09-24，资产交付轨）**：
-> `prepareBridgeDistAssets`（`:app` 构建任务）把 **git 跟踪的** `bridge/js/dist`
+> `prepareBridgeDistAssets`（`:app` 构建任务）把 **npm build 产物**（步骤 7 出库，CI jvm-tests 前置构建）`bridge/js/dist`
 > 拷成 `assets/bridge-dist/`（srcDir 取**父目录** —— 资产键 = `bridge-dist/<file>`，
 > 指成子目录会拍平到 assets 根、`list("bridge-dist")` 恒空且**没有报错**）→
 > `AppShellApplication` 全量读成扁平 map（枚举/任一读失败 = **整体空**：宁可这次不落，
