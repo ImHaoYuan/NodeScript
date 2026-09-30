@@ -244,6 +244,11 @@ int main() {
                 chk(miss.x == 0 && miss.y == 0 && miss.c == 0.0, "case6b 未命中字段全 0");
                 imgnative_release(o6);
             }
+            // 高阈值差分（相位门 floor 随 thr 走）：thr=0.99 时带宽 0.84、
+            // floor=0.89 —— 静态 0.8 的旧门在这里会放行够不着带宽的模板。
+            // 平滑纹理相位分高应仍走粗筛；两条路径必须同解。
+            const MR hi = dual_match(s6, t6, 0.99);
+            chk(hi.rc == 0 && hi.m == 1, "case6 高阈值 0.99 仍命中且差分一致");
             imgnative_release(s6);
             imgnative_release(t6);
         }

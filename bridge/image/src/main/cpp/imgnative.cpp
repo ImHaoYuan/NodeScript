@@ -62,11 +62,14 @@ std::mutex g_mu;
 std::unordered_map<int64_t, cv::Mat> g_frames;
 
 // 仅缓存“模板端”的粗筛准备结果。模板帧也是不可变的；A2/重复匹配场景里，
-// 每次重做 cvtColor + resize + scale-cycle 自检没有信息增量。独立 cache 锁避免
+// 每次重做 cvtColor + resize + 相位探针没有信息增量。独立 cache 锁避免
 // 为了这几个毫秒把 g_mu 的匹配段重新变成长锁。release 时同步清掉对应 ref。
+// phase_worst = 相位探针分数（与 thr 无关的量）；**按 thr 比候选带宽留在每调用**，
+// 这样换阈值不会让缓存失效。
 struct NeedlePrep {
     double sc = 1.0;
     cv::Mat small;
+    double phase_worst = -1.0;
 };
 std::mutex g_match_cache_mu;
 std::unordered_map<int64_t, NeedlePrep> g_needle_prep;
@@ -135,15 +138,17 @@ struct MatchHit {
 };
 
 // 可调常数：进程起始读环境变量，缺省与原 constexpr 逐字相同 —— **imgbench 调参口**：
-// 云手机上扫这三个数不该重编 so（评审 2026-09-30 第 4 条：原常数是在合成屏上
+// 云手机上扫这几个数不该重编 so（评审 2026-09-30 第 4 条：原常数是在合成屏上
 // 每档 6 个样本调出来的，真机 sweep 比那组数字更有信息量）。
 //   AUTOSCRIPT_MATCH_MIN_TEMPL_SIDE=48    模板短边低于此值 → 精确路径
 //   AUTOSCRIPT_MATCH_MARGIN=0.10          粗筛候选带宽：提出 conf ≥ thr−margin 的峰
-//   AUTOSCRIPT_MATCH_MAX_CANDIDATES=8     粗筛最多精配几个候选（NMS 压重复后）
+//   AUTOSCRIPT_MATCH_MAX_CANDIDATES=8     精配候选数下限（自适应 K 的地板，见 kKMax）
+//   AUTOSCRIPT_MATCH_HEADROOM=0.05        相位门余量：floor = 带宽 + headroom（安全/速度旋钮）
 struct MatchTune {
     int min_templ_side;
     double margin;
     int max_candidates;
+    double headroom;
 };
 
 int env_int(const char* key, int dflt) {
@@ -167,8 +172,14 @@ const MatchTune& match_tune() {
         env_int("AUTOSCRIPT_MATCH_MIN_TEMPL_SIDE", 48),
         env_double("AUTOSCRIPT_MATCH_MARGIN", 0.10),
         env_int("AUTOSCRIPT_MATCH_MAX_CANDIDATES", 8),
+        env_double("AUTOSCRIPT_MATCH_HEADROOM", 0.05),
     };
     return t;
+}
+
+/** 某粗筛尺度下的候选带宽 —— 提名门与相位 floor 必须用同一个数（单源）。 */
+double coarse_margin_of(double sc) {
+    return match_tune().margin + (sc <= 0.25 ? 0.05 : 0.0);
 }
 
 // 粗筛层模板短边最低对应 12px（再小的模板继续走精确路径）；模板灰度 std 低于 12 =
@@ -178,9 +189,19 @@ const MatchTune& match_tune() {
 // 粗筛；最终答案仍由原图精配，正确性门仍由 scale-cycle gate + differential test 守住。
 constexpr double kMinCoarseSide = 12.0;
 constexpr double kMinTemplStd = 12.0;
-// 频率门阈值：模板「缩小→放大」自检互相关下限。0.8 卡在两簇之间（平滑 UI
-// ~0.95+ / 白噪声 ~0.5）；差分门 2026-09-30 的 case6 就是被它从假 miss 里捞回来的。
-constexpr double kMinScaleCycle = 0.8;
+// 相位探针参数（评审二轮，替掉静态 scale-cycle 门 0.8）：
+//   B        反射填充边宽（毫像素模板的一圈“假邻域”，让粗图带上下文）
+//   floor    = min(thr − 候选带宽 + headroom, 0.97) —— 门限**绑带宽**：静态 0.8 与
+//             thr 脱钩，脚本传高阈值（如 0.99）时带宽可到 0.84 > 门 → 放行了够不着
+//             带宽的模板 = 假漏检；相位分数按 thr 现比，这个洞就闭了。
+//   为什么测相位：假 miss 的机制是**子像素栅格相位错位**（i.i.d. 案例），对齐的
+//   「缩小→放大」自检测不出来；探针取各相位最差分 = 真位置的最坏粗分下界。
+constexpr int kPhaseBorder = 12;
+// 自适应 K（评审二轮）：精配总像素预算固定，窗面积小 → 放更多候选（≤kKMax）。
+// 对症重复峰：K=8 时 12 枚等价图标的真峰排第 9 就出局；窗小的时候多提名几乎免费。
+constexpr double kRefineBudget = 8.0 * 96 * 398;
+constexpr int kKMax = 32;
+constexpr int kPadk = 3;   // 精配窗 pad = ceil(1/sc)·3+2（比 2 多留一档量化余量）
 
 /** 精确路径 = 原行为原语义（全图 TM_CCOEFF_NORMED + 取最大）。h 可以是 ROI 视图。 */
 MatchHit match_exact(const cv::Mat& h, const cv::Mat& n, double thr) {
@@ -191,6 +212,37 @@ MatchHit match_exact(const cv::Mat& h, const cv::Mat& n, double thr) {
     cv::minMaxLoc(r, nullptr, &mx, nullptr, &loc);
     // 「≥ 阈值即命中」与旧实现的 `maxv < threshold → 未命中` 同一判据。
     return {mx >= thr, loc, mx};
+}
+
+/**
+ * 相位探针（评审二轮）：模板按粗筛栅格的各相位做反射填充 → 缩小 → 与模板自身的
+ * 粗图互打，取真位置 ±2 窗内峰值的**各相位最小值**。0.25× 扫 {1,2,3}² 九个相位
+ * （覆盖 0.25/0.5/0.75 三种错位），0.5× 只有半格相位。单次成本 = 模板尺寸量级
+ * （370×80 九相位 ~几 ms），进 NeedlePrep 缓存后每模板只算一次。
+ */
+double phase_probe(const cv::Mat& gray, const cv::Mat& ns, double sc) {
+    const int np = (sc <= 0.25) ? 3 : 1;
+    double worst = 1.0;
+    for (int dx = 1; dx <= np; ++dx) {
+        for (int dy = 1; dy <= np; ++dy) {
+            cv::Mat c;
+            cv::copyMakeBorder(gray, c, kPhaseBorder + dy, kPhaseBorder - dy + 4,
+                               kPhaseBorder + dx, kPhaseBorder - dx + 4, cv::BORDER_REFLECT);
+            cv::Mat cs;
+            cv::resize(c, cs, cv::Size(), sc, sc, cv::INTER_AREA);
+            cv::Mat r;
+            cv::matchTemplate(cs, ns, r, cv::TM_CCOEFF_NORMED);
+            const int tx = static_cast<int>(std::lround((kPhaseBorder + dx) * sc));
+            const int ty = static_cast<int>(std::lround((kPhaseBorder + dy) * sc));
+            const int x0 = std::max(tx - 2, 0), x1 = std::min(tx + 3, r.cols);
+            const int y0 = std::max(ty - 2, 0), y1 = std::min(ty + 3, r.rows);
+            if (x1 <= x0 || y1 <= y0) continue;
+            double mx = 0.0;
+            cv::minMaxLoc(r(cv::Rect(x0, y0, x1 - x0, y1 - y0)), nullptr, &mx, nullptr, nullptr);
+            if (mx < worst) worst = mx;
+        }
+    }
+    return worst;
 }
 
 /** 金字塔缩放：0.25×（首选，省 16× 像素）/ 0.5×（模板短边撑不起 0.25 时）/ 1.0 = 不走粗筛。 */
@@ -219,18 +271,10 @@ NeedlePrep build_needle_prep(const cv::Mat& n) {
         return out;
     }
 
-    // 频率门：模板先过一遍“缩小→放大”自检，自己都认不出的模板不进粗筛。
-    cv::Mat back;
+    // 相位探针：算「真位置在最坏栅格相位下能拿的粗分」（与 thr 无关 → 可缓存）；
+    // 按 thr 比带宽的落地判断在 imgnative_match 每调用做（NaN 即精确路径）。
     cv::resize(gray, out.small, cv::Size(), sc, sc, cv::INTER_AREA);
-    cv::resize(out.small, back, gray.size(), 0, 0, cv::INTER_LINEAR);
-    cv::Mat rt;
-    cv::matchTemplate(gray, back, rt, cv::TM_CCOEFF_NORMED);
-    double rt_conf = 0.0;
-    cv::minMaxLoc(rt, nullptr, &rt_conf, nullptr, nullptr);
-    if (!(rt_conf >= kMinScaleCycle)) {
-        out.small.release();
-        return out;  // NaN 也落精确路径
-    }
+    out.phase_worst = phase_probe(gray, out.small, sc);
     out.sc = sc;
     // 只保留粗筛真正需要的缩小模板；灰度原图不需要跨调用保存。
     return out;
@@ -278,15 +322,25 @@ MatchHit match_pyramid(const cv::Mat& h, const cv::Mat& n, double thr, const Nee
     cv::Mat r;
     cv::matchTemplate(hs, ns, r, cv::TM_CCOEFF_NORMED);
 
+    // 精配窗：粗坐标除以缩放比映回原图（截断误差 < 1/sc 原图像素 + resize 舍入），
+    // pad 取 ceil(1/sc)·kPadk+2 盖住这两项（kPadk=3 比 2 多留一档量化余量）。
+    // 窗是视图不拷像素；裁边后宽度恒 ≥ 模板边（左右对称收缩），不会触发断言。
+    const int pad = static_cast<int>(std::ceil(1.0 / sc)) * kPadk + 2;
+
     // Top-K + NMS：迭代取全局峰 → 局部窗置 −1 → 取下一个（重复 UI 行/图标格
-    // 会给出一排近等高峰，NMS 不压则 K 个名额被同一个小区域占满）。
-    // 0.25× 时模板只有 12px 短边，量化/插值会更明显地压低 coarse conf；多放
-    // 0.05 的候选带宽只会增加少量精配候选，不改变最终原图判定。
-    const double coarse_margin = t.margin + (sc <= 0.25 ? 0.05 : 0.0);
+    // 会给出一排近等高峰，NMS 不压则名额被同一个小区域占满）。K 按精配预算自适应
+    // （评审二轮）：窗小（小模板）→ 放到 kKMax；总精配像素量恒 ≤ kRefineBudget。
+    // 0.25× 时量化/插值会压低 coarse conf；多放 0.05 的候选带宽只会增加少量精配
+    // 候选，不改变最终原图判定。
+    const double coarse_margin = coarse_margin_of(sc);
+    const double win_area = static_cast<double>(n.cols + 2 * pad) * (n.rows + 2 * pad);
+    const int K = std::min(kKMax,
+                           std::max(t.max_candidates,
+                                    static_cast<int>(std::lround(kRefineBudget / win_area))));
     std::vector<cv::Point> cands;
     const int supp = std::max(ns.cols, ns.rows) / 2 + 1;
     const cv::Rect bounds(0, 0, r.cols, r.rows);
-    for (int k = 0; k < t.max_candidates; ++k) {
+    for (int k = 0; k < K; ++k) {
         double mx = 0.0;
         cv::Point loc;
         cv::minMaxLoc(r, nullptr, &mx, nullptr, &loc);
@@ -296,10 +350,6 @@ MatchHit match_pyramid(const cv::Mat& h, const cv::Mat& n, double thr, const Nee
             .setTo(-1.0f);
     }
 
-    // 精配窗：粗坐标除以缩放比映回原图（截断误差 < 1/sc 原图像素 + resize 舍入），
-    // pad 取 ceil(1/sc)·2+2 盖住这两项。窗是视图不拷像素；裁边后宽度恒 ≥ 模板边
-    // （左右对称收缩），不会触发 matchTemplate 的尺寸断言。
-    const int pad = static_cast<int>(std::ceil(1.0 / sc)) * 2 + 2;
     const cv::Rect frame(0, 0, h.cols, h.rows);
     MatchHit best{false, {0, 0}, -1.0};
     for (const cv::Point& c : cands) {
@@ -484,9 +534,18 @@ int imgnative_match(int64_t haystack, int64_t needle, double threshold,
 
         const bool force_exact = g_force_exact.load(std::memory_order_relaxed);
         const NeedlePrep prep = force_exact ? NeedlePrep{} : get_needle_prep(needle, n);
-        const MatchHit hit = (!force_exact && prep.sc < 1.0)
-                                  ? match_pyramid(h, n, threshold, prep)
-                                  : match_exact(h, n, threshold);
+        // 相位门按 thr 落地（分数已在缓存，这里只是一次比较；NaN → 精确路径）：
+        // floor = min(thr − 候选带宽 + headroom, 0.97) —— 门限绑带宽，静态 0.8
+        // 在高阈值下会放行够不着带宽的模板（假漏检），这里按调用方的 thr 现比。
+        bool use_pyramid = false;
+        if (!force_exact && prep.sc < 1.0) {
+            const MatchTune& tune = match_tune();
+            const double floor =
+                std::min(threshold - coarse_margin_of(prep.sc) + tune.headroom, 0.97);
+            use_pyramid = prep.phase_worst >= floor;
+        }
+        const MatchHit hit = use_pyramid ? match_pyramid(h, n, threshold, prep)
+                                         : match_exact(h, n, threshold);
         if (!hit.found) {
             *out_match = 0;
             *out_x = *out_y = *out_w = *out_h = 0;
