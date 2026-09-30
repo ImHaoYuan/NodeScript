@@ -8,6 +8,7 @@ import com.autoscript.domain.npm.InstallEvent
 import com.autoscript.domain.npm.InstallFlags
 import com.autoscript.domain.npm.PackageSpec
 import com.autoscript.domain.scripts.ScriptPaths
+import com.autoscript.domain.json.DomainJson
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -55,7 +56,7 @@ class NpmEventDrainTest {
     private fun req(method: String, payload: String?) =
         BridgeRequest(id = 1, namespace = "npm", method = method, payload = payload, ttlMillis = 10_000)
 
-    private fun json(vararg kv: Pair<String, Any?>): String = NpmBridgeJson.encode(mapOf(*kv))
+    private fun json(vararg kv: Pair<String, Any?>): String = DomainJson.encode(mapOf(*kv))
 
     // ═══ 环（与 A11yEventRing 同纪律） ═══
 

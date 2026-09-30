@@ -5,6 +5,7 @@ import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.bridge.NamespaceHandler
 import com.autoscript.domain.bridge.RpcNamespaceHandler
 import com.autoscript.domain.core.ErrorCode
+import com.autoscript.domain.json.DomainJson
 
 /**
  * `npm` 命名空间桥处理器（docs §10.8 / §12.3 `auto.npm` 的 Kotlin 对偶）。
@@ -55,19 +56,19 @@ class NpmBridgeHandler(private val facade: com.autoscript.domain.npm.PackageMana
     override suspend fun dispatch(request: BridgeRequest): BridgeResponse = ok(request, payload(request))
 
     private suspend fun payload(request: BridgeRequest): String? {
-        val f = NpmBridgeJson.decodeObject(requirePayload(request))
+        val f = DomainJson.decodeObject(requirePayload(request))
         val projectId = when (val v = f["projectId"]) {
-            null, is NpmBridgeJson.Value.Null -> DEFAULT_PROJECT_ID
-            is NpmBridgeJson.Value.S -> v.v.takeIf { it.isNotBlank() }
+            null, is DomainJson.Value.Null -> DEFAULT_PROJECT_ID
+            is DomainJson.Value.S -> v.v.takeIf { it.isNotBlank() }
                 ?: throw IllegalArgumentException("projectId 不得为空串")
             else -> throw IllegalArgumentException("projectId 必须是字符串")
         }
         return when (request.method) {
             "install" -> {
-                val spec = NpmBridgeJson.reqStr(f, "spec")
-                val save = NpmBridgeJson.optBool(f, "save") ?: true
-                val offline = NpmBridgeJson.optBool(f, "offline") ?: false
-                val timeout = NpmBridgeJson.optLong(f, "timeout") ?: 60_000L
+                val spec = DomainJson.reqStr(f, "spec")
+                val save = DomainJson.optBool(f, "save") ?: true
+                val offline = DomainJson.optBool(f, "offline") ?: false
+                val timeout = DomainJson.optLong(f, "timeout") ?: 60_000L
                 val (name, version) = parseSpec(spec)
                 val handle = facade.install(
                     projectId,
@@ -77,7 +78,7 @@ class NpmBridgeHandler(private val facade: com.autoscript.domain.npm.PackageMana
                 // 上桥的是 :domain 的 InstallHandle 本身，不是 `true` 也不是包体：
                 // 门面此刻只知道「这个句柄已入队」，装出什么要等解析。handleId 同时是
                 // progress 流事件的关联键（脚本靠它把事件对回自己这次调用）。
-                NpmBridgeJson.encode(
+                DomainJson.encode(
                     mapOf(
                         "handleId" to handle.id,
                         "projectId" to handle.projectId,
@@ -86,35 +87,35 @@ class NpmBridgeHandler(private val facade: com.autoscript.domain.npm.PackageMana
                 )
             }
             "remove" -> {
-                val spec = NpmBridgeJson.reqStr(f, "spec")
+                val spec = DomainJson.reqStr(f, "spec")
                 val (name, _) = parseSpec(spec)
                 facade.uninstall(projectId, name)
                 null
             }
             "ci" -> {
-                val offline = NpmBridgeJson.optBool(f, "offline") ?: true
+                val offline = DomainJson.optBool(f, "offline") ?: true
                 facade.ci(projectId, offline)
                 null
             }
             "list" -> {
-                val depth = (NpmBridgeJson.optLong(f, "depth") ?: 0L).toInt()
+                val depth = (DomainJson.optLong(f, "depth") ?: 0L).toInt()
                 // 不发 sizeBytes：list 直读 lockfile，量不到尺寸（恒 0）。发一个永远是 0
                 // 的字节数 = 声称「这个包占 0 字节」，比不给这个字段更糟——脚本会拿它算
                 // 「还要下多少」然后得到 0。尺寸的两条真来源：offlineGap（缺失清单）、
                 // storage（node_modules 目录实测）。
-                NpmBridgeJson.encode(facade.list(projectId, depth).map {
+                DomainJson.encode(facade.list(projectId, depth).map {
                     mapOf("name" to it.name, "version" to it.version)
                 })
             }
             "prune" -> { facade.prune(projectId); null }
             "dedupe" -> { facade.dedupe(projectId); null }
-            "offlineGap" -> NpmBridgeJson.encode(
+            "offlineGap" -> DomainJson.encode(
                 facade.offlineGap(projectId).map { mapOf("name" to it.name, "version" to it.version, "size" to it.sizeBytes) },
             )
             "audit" -> {
-                val offline = NpmBridgeJson.optBool(f, "offline") ?: true
+                val offline = DomainJson.optBool(f, "offline") ?: true
                 val r = facade.audit(projectId, offline)
-                NpmBridgeJson.encode(
+                DomainJson.encode(
                     mapOf(
                         // 键名 vulns：JS facade 的 AuditReport.vulns 直接读它，§10.8 文档同形。
                         // 回 vulnerabilities 会让 report.vulns 恒 undefined（与 a11y.waitFor
@@ -128,28 +129,28 @@ class NpmBridgeHandler(private val facade: com.autoscript.domain.npm.PackageMana
                 )
             }
             "setRegistry" -> {
-                val registry = NpmBridgeJson.reqStr(f, "registry")
+                val registry = DomainJson.reqStr(f, "registry")
                 // scope（@my）→ npmrc 的 `<scope>:registry` 键（§10.2 registry 配置三层）。
                 // JS facade 的 setRegistry(registry, {scope}) 会带此字段；不认就是静默丢弃
                 // 用户显式声明的作用域（比报错更糟），故在此如实落地而非忽略。
-                val scope = NpmBridgeJson.optStr(f, "scope")?.takeIf { it.isNotBlank() }
+                val scope = DomainJson.optStr(f, "scope")?.takeIf { it.isNotBlank() }
                 facade.config(projectId, com.autoscript.domain.npm.NpmConfigKey.REGISTRY, registry, scope)
                 null
             }
             "importOfflineBundle" -> {
-                facade.importOfflineBundle(projectId, NpmBridgeJson.reqStr(f, "uri"))
+                facade.importOfflineBundle(projectId, DomainJson.reqStr(f, "uri"))
                 null
             }
             "importTarball" -> {
-                facade.importTarball(projectId, NpmBridgeJson.reqStr(f, "path"))
+                facade.importTarball(projectId, DomainJson.reqStr(f, "path"))
                 null
             }
             "events" -> {
-                val sinceSeq = NpmBridgeJson.optLong(f, "sinceSeq") ?: 0L
-                val batch = (NpmBridgeJson.optLong(f, "batch") ?: 32L).toInt()
+                val sinceSeq = DomainJson.optLong(f, "sinceSeq") ?: 0L
+                val batch = (DomainJson.optLong(f, "batch") ?: 32L).toInt()
                 if (batch <= 0) throw IllegalArgumentException("batch 必须 > 0")
                 val got = facade.drainEvents(projectId, sinceSeq, batch)
-                NpmBridgeJson.encode(
+                DomainJson.encode(
                     mapOf(
                         "first" to got.firstSeq,
                         "last" to got.lastSeq,
@@ -158,11 +159,11 @@ class NpmBridgeHandler(private val facade: com.autoscript.domain.npm.PackageMana
                 )
             }
             "approvals" -> {
-                val sinceSeq = NpmBridgeJson.optLong(f, "sinceSeq") ?: 0L
-                val batch = (NpmBridgeJson.optLong(f, "batch") ?: 32L).toInt()
+                val sinceSeq = DomainJson.optLong(f, "sinceSeq") ?: 0L
+                val batch = (DomainJson.optLong(f, "batch") ?: 32L).toInt()
                 if (batch <= 0) throw IllegalArgumentException("batch 必须 > 0")
                 val got = facade.drainApprovals(projectId, sinceSeq, batch)
-                NpmBridgeJson.encode(
+                DomainJson.encode(
                     mapOf(
                         "first" to got.firstSeq,
                         "last" to got.lastSeq,
@@ -181,19 +182,19 @@ class NpmBridgeHandler(private val facade: com.autoscript.domain.npm.PackageMana
                 )
             }
             "requestApprove" -> {
-                val pkg = NpmBridgeJson.reqStr(f, "pkg")
-                val versionHash = NpmBridgeJson.optStr(f, "versionHash") ?: ""
+                val pkg = DomainJson.reqStr(f, "pkg")
+                val versionHash = DomainJson.optStr(f, "versionHash") ?: ""
                 // scripts：JS facade 的 requestApprove(pkg, {scripts}) 一直带着它（§10.8）。
                 // 宿主既不校验也不回 = 静默丢弃用户显式声明，与 setRegistry 的 scope 同罪；
                 // 形态不对就 ERR_INVALID_PARAM（响亮失败），对得上才回显「宿主收到了」。
-                val scripts = NpmBridgeJson.optStrList(f, "scripts")
-                val action = when (NpmBridgeJson.optStr(f, "action")?.lowercase()) {
+                val scripts = DomainJson.optStrList(f, "scripts")
+                val action = when (DomainJson.optStr(f, "action")?.lowercase()) {
                     "run_script", "runscript" -> com.autoscript.domain.npm.ApprovalAction.RUN_SCRIPT
                     "exec" -> com.autoscript.domain.npm.ApprovalAction.EXEC
                     else -> com.autoscript.domain.npm.ApprovalAction.INSTALL_SCRIPT
                 }
                 val t = facade.requestApprove(projectId, pkg, versionHash, action)
-                NpmBridgeJson.encode(
+                DomainJson.encode(
                     mapOf(
                         "requestId" to t.requestId,
                         "status" to t.status.name.lowercase(),

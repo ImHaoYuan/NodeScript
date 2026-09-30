@@ -40,6 +40,49 @@ object DomainJson {
 
     fun encode(v: Any?): String = buildString { appendValue(v) }
 
+    // ── 字段读取（步骤 3 合入：原 NpmBridgeJson/WmJson 的 reqStr 一族）──────────────
+    // 与 `bridge.Decode` 的 `BridgeRequest` 扩展同口径（那套挂 request 只为 decodeObject
+    // 调用面顺手；没有 request 可挂的 persist/handler 内部函数走这里）。缺键/类型错一律
+    // 抛 IAE —— 由 `RpcNamespaceHandler` 统一折 ERR_INVALID_PARAM。
+
+    fun reqStr(o: Map<String, Value>, key: String): String =
+        (o[key] as? Value.S)?.v ?: throw IllegalArgumentException("缺字符串字段 $key")
+
+    fun reqObj(o: Map<String, Value>, key: String): Map<String, Value> =
+        (o[key] as? Value.Obj)?.fields ?: throw IllegalArgumentException("缺对象字段 $key")
+
+    fun optStr(o: Map<String, Value>, key: String): String? = when (val v = o[key]) {
+        null, is Value.Null -> null
+        is Value.S -> v.v
+        else -> throw IllegalArgumentException("字段 $key 必须是字符串")
+    }
+
+    fun optLong(o: Map<String, Value>, key: String): Long? = when (val v = o[key]) {
+        null, is Value.Null -> null
+        is Value.N -> v.raw.toLongOrNull() ?: throw IllegalArgumentException("字段 $key 必须是整数")
+        else -> throw IllegalArgumentException("字段 $key 必须是数字")
+    }
+
+    fun optBool(o: Map<String, Value>, key: String): Boolean? = when (val v = o[key]) {
+        null, is Value.Null -> null
+        is Value.B -> v.v
+        else -> throw IllegalArgumentException("字段 $key 必须是布尔")
+    }
+
+    /**
+     * 可选字符串数组（缺省/显式 `null` → 空表）。
+     *
+     * 为什么不是「丢了就当没有」：宿主不认的字段会被静默丢弃，而调用方已经显式声明过它
+     * （如 `requestApprove` 的 `scripts`）——静默丢比报错更糟。故数组形态不对即抛。
+     */
+    fun optStrList(o: Map<String, Value>, key: String): List<String> = when (val v = o[key]) {
+        null, is Value.Null -> emptyList()
+        is Value.Arr -> v.items.map {
+            (it as? Value.S)?.v ?: throw IllegalArgumentException("字段 $key 数组元素必须是字符串")
+        }
+        else -> throw IllegalArgumentException("字段 $key 必须是数组")
+    }
+
     /**
      * 把已解析的 [Value] 树编回 JSON 文本（datastore `put` 的 value 子树专用）。
      * 与 [encode] 的分工：这里处理的是**已解析树** —— 数字走 [Value.N.raw] 原文

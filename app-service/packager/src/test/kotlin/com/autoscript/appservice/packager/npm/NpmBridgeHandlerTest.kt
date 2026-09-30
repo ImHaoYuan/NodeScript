@@ -4,6 +4,7 @@ import com.autoscript.domain.scripts.ScriptPaths
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.core.ErrorCode
 import com.autoscript.domain.npm.PackageSpec
+import com.autoscript.domain.json.DomainJson
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
@@ -57,7 +58,7 @@ class NpmBridgeHandlerTest {
     private fun req(method: String, payload: String?) =
         BridgeRequest(id = 1, namespace = "npm", method = method, payload = payload, ttlMillis = 10_000)
 
-    private fun json(vararg kv: Pair<String, Any?>): String = NpmBridgeJson.encode(mapOf(*kv))
+    private fun json(vararg kv: Pair<String, Any?>): String = DomainJson.encode(mapOf(*kv))
 
     @Test
     fun `install 路由到 install 并透传 spec 拆分`() = runBlocking {
