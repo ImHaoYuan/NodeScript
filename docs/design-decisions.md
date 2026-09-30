@@ -54,6 +54,15 @@
      内容双门拦截恒精确 948ms，如实 ❌，region 16.9ms 推荐）。数字见 §7.7 三次实测块。
    - needle prep 缓存（`g_match_cache_mu` 独立锁）随 patch 一并采纳：模板端准备
      <1ms/次、真机不可测，账在代码评审面（锁序 `g_mu→cache_mu` 已核无反转）。
+   - **同日第四次实测后追加（相位探针门，commit `0ec6ef4`，PR #12）**：附护栏
+     「频率门 0.8 静态值」被**相位探针门**替换 —— 按粗筛栅格相位反射填充互打取
+     真位置 ±2 窗最差分，每调用 `floor = min(thr − 粗带宽 + headroom, 0.97)` 绑
+     带宽（静态 0.8 与 thr 脱钩，高阈值下会放行够不着候选带宽的模板 = 假漏；
+     子像素相位错位是静态对齐自检测不到的塌陷源）。方向仍保守（拦错只损失速度）。
+     另加自适应 K（精配预算定容 8×96×398，窗小 K 升 32）+ 新 knob `HEADROOM`
+     （0.05），候选带宽/地板单源 `coarse_margin_of(sc)`。真机 A/B 归因干净
+     （A4 25.37ms / A2 95.43ms，B ≈ 三次 B），**判据转绿口径与 48×48 ❌ 形态均
+     不变**。数字见 §7.7 第四次实测块。
 
 12. **wire 面单一事实来源 = `bridge/schema/wire.schema.json`；与 §12.4 的 d.ts 分工**：
     - **schema 管 wire 面**（每 ns 的方法表 + aliases + dynamicSinks + facade 归属），`generate.mjs` 双发射 `bridge/js/src/generated/wire-types.ts` 与 `:domain` `WireMethods.kt`（生成物入库、`--check` + CI `git diff --exit-code` 双门）；19 个 handler 的 `methods()` 申报单源指 `BY_NS.getValue(ns)` —— 表不手抄，杜绝「申报与 `when` 两份手抄互相漂移」。对账三门分工：`wire-schema.test.cjs` 四向（生成物同步 / facade→schema / register↔schema / 申报↔schema + 死分支 aliases 真伪）、`wiring-table.test.cjs` 表↔schema、`pull-wire`/`event-wire`/`err-catalog` 各管自己的拉取环与错误目录。
