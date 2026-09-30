@@ -38,7 +38,9 @@ import com.autoscript.domain.core.ErrorCode
  * 2026-09-25 已落，消费方已到，同批开）。阈值键**统一叫 `threshold`**（[matchTemplate] 与
  * [findImage] 同一个 opencv 概念，facade 曾一个发 `tolerance` 一个发 `threshold`，
  * 两侧 mock 各自自洽所以漂移没被抓到）；域 `[0,1]`，越界 → `ERR_INVALID_PARAM` 且
- * **一次 SPI 调用都不发**。
+ * **一次 SPI 调用都不发**。两匹配方法另有**可选 `region`**（缺键/JSON null = 全帧；
+ * 给了必须 `[x,y,w,h]` 四元组，与 findColor 同键同判据；命中坐标恒**全帧口径**，
+ * region 比模板小由 SPI/native 判 `ERR_IO`）。
  *
  * **帧句柄：发号侧归一到 [ImageAnalyzer]（§18 第 8 项 (b)，2026-09-25 拍板）**。
  * 本 handler **不再自管帧表**（曾经有 `ids`/`live`/`sizes` 三张本地图 —— 与 SPI 的
@@ -122,9 +124,13 @@ class ImagesNamespaceHandler(
         val fields = request.decodeObject()
         val refs: Pair<HandleRef, HandleRef>
         val threshold: Double
+        val region: List<Int>?
         run {
             refs = request.requiredRef(fields, "haystack") to request.requiredRef(fields, "needle")
             threshold = request.requiredDouble(fields, "threshold")
+            // region 可选：缺键/JSON null = 全帧；给了就必须四元组（不是参数错）——
+            // 与 findColor 是**同一个键、同一条判据**（两张表分写就是漂移面）。
+            region = request.optIntList(fields, "region")
         }
         // 域 [0,1]：域外阈值在任何实现上都命中不了/恒命中，先拒（不发 SPI 调用）。
         if (threshold < 0.0 || threshold > 1.0) {
@@ -132,15 +138,22 @@ class ImagesNamespaceHandler(
                 "images $method 的 threshold 必须在 [0,1]，实际 $threshold",
             )
         }
+        region?.let { box ->
+            if (box.size != 4) {
+                return err(request, ErrorCode.ERR_INVALID_PARAM,
+                    "images $method 的 region 必须 x,y,w,h 四元组，实际 $box",
+                )
+            }
+        }
         val (haystack, needle) = refs
         // 在场性不在这层判（§18-8(b)：帧表唯一事实源是 SPI）—— 任一帧已死由 SPI 抛
         // ERR_STALE_HANDLE，这里 catch 后原码透传；这样"截屏帧"与"decode 帧"都由
         // 同一张表回答，不存在 handler 的表认识、SPI 的表不认识的分岔。
         val hit = run {
             if (method == "matchTemplate") {
-                analyzer.matchTemplate(haystack, needle, threshold)
+                analyzer.matchTemplate(haystack, needle, threshold, region)
             } else {
-                analyzer.findImage(haystack, needle, threshold)
+                analyzer.findImage(haystack, needle, threshold, region)
             }
         }
         return ok(request, matchPayload(hit))

@@ -115,25 +115,32 @@ class NativeImageAnalyzer(
         haystack: HandleRef,
         needle: HandleRef,
         threshold: Double,
-    ): ImageMatch? = match("matchTemplate", haystack, needle, threshold)
+        region: List<Int>?,
+    ): ImageMatch? = match("matchTemplate", haystack, needle, threshold, region)
 
     override suspend fun findImage(
         haystack: HandleRef,
         needle: HandleRef,
         threshold: Double,
-    ): ImageMatch? = match("findImage", haystack, needle, threshold)
+        region: List<Int>?,
+    ): ImageMatch? = match("findImage", haystack, needle, threshold, region)
 
     /**
      * 两方法同一个实现（契约：`findImage` 是 `matchTemplate` 的调用侧别名，
-     * 阈值语义同）：把两个 refId 换成本机帧号，一次 native 匹配。
-     * 域校验归桥面 handler（此处按契约假定已在 [0,1]）。
+     * 阈值/region 语义同）：把两个 refId 换成本机帧号，一次 native 匹配。
+     * 域校验归桥面 handler（此处按契约假定已在 [0,1]；region 形状与 findColor
+     * 同款再兜一次 —— 两条判据若漂移，宁可这层炸也不让脏参数进 native）。
      */
     private suspend fun match(
         methodName: String,
         haystack: HandleRef,
         needle: HandleRef,
         threshold: Double,
+        region: List<Int>?,
     ): ImageMatch? = withContext(Dispatchers.IO) {
+        region?.let {
+            require(it.size == 4) { "region 必须 x,y,w,h 四元组，实际 ${it.size}" }
+        }
         val native = synchronized(guard) {
             val h = frames[haystack.refId]
             val n = frames[needle.refId]
@@ -146,7 +153,7 @@ class NativeImageAnalyzer(
             h to n
         }
         val status = IntArray(1)
-        val hit = ops.match(native.first, native.second, threshold, status)
+        val hit = ops.match(native.first, native.second, threshold, region?.toIntArray(), status)
         val rc = status[0]
         when {
             hit != null -> hit
@@ -314,6 +321,8 @@ class NativeImageAnalyzer(
         fun ingest(rgba: ByteArray, width: Int, height: Int, status: IntArray): Triple<Long, Int, Int>?
 
         /**
+         * @param region 可选 `[x,y,w,h]` 搜索范围（null = 全帧）；越界/比模板小
+         *   由 native 判（INVALID_PARAM / IO），本层只透传。
          * @return 命中五元组；**未命中** null + `status[0] == 0`（答案）；
          * 分类失败 null + status 非 0。
          */
@@ -321,6 +330,7 @@ class NativeImageAnalyzer(
             haystack: Long,
             needle: Long,
             threshold: Double,
+            region: IntArray?,
             status: IntArray,
         ): ImageMatch?
 
@@ -419,6 +429,7 @@ class JniOps : NativeImageAnalyzer.Ops {
         haystack: Long,
         needle: Long,
         threshold: Double,
+        region: IntArray?,
         status: IntArray,
     ): DoubleArray?
 
@@ -461,9 +472,10 @@ class JniOps : NativeImageAnalyzer.Ops {
         haystack: Long,
         needle: Long,
         threshold: Double,
+        region: IntArray?,
         status: IntArray,
     ): ImageMatch? {
-        val r = matchNative(haystack, needle, threshold, status)
+        val r = matchNative(haystack, needle, threshold, region, status)
         // 长度 5 = 命中；长度 0 = 未命中（答案）；null = native 自身失败（status 非 0）
         return when {
             r == null -> null

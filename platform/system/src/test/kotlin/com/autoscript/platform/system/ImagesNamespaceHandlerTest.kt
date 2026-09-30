@@ -24,7 +24,8 @@ import org.junit.jupiter.api.assertThrows
  *
  * 判据七件（与 `:domain` `ImageAnalyzer` KDoc 逐条对齐）：
  * 1. **wire 形状**：`decode` 发 `{path}` → `{ref,width,height}`（宽高是文件真值）；
- *    `matchTemplate`/`findImage` 发 `{haystack,needle,threshold}` → `{x,y,width,height,confidence}`
+ *    `matchTemplate`/`findImage` 发 `{haystack,needle,threshold}`（+ 可选 `region`
+ *    四元组，缺键/JSON null = 全帧 —— 与 findColor 同键同判据）→ `{x,y,width,height,confidence}`
  *    或裸 `null`；`release` 发 `{ref}` → `true`；
  * 2. **阈值一个键**：两方法都叫 `threshold`（facade 曾一个发 `tolerance` 一个发 `threshold`，
  *    同一 opencv 概念两个键名 = 两侧 mock 各自自洽的漂移面）；
@@ -52,7 +53,14 @@ class ImagesNamespaceHandlerTest {
     private class FakeAnalyzer : ImageAnalyzer {
         val decoded = mutableListOf<String>()
         val released = mutableListOf<HandleRef>()
-        val matches = mutableListOf<Triple<HandleRef, HandleRef, Double>>()
+        class MatchCall(
+            val haystack: HandleRef,
+            val needle: HandleRef,
+            val threshold: Double,
+            val region: List<Int>?,
+        )
+
+        val matches = mutableListOf<MatchCall>()
         var nextWidth = 1080
         var nextHeight = 2400
         var decodeFail: AutojsException? = null
@@ -96,10 +104,11 @@ class ImagesNamespaceHandlerTest {
             haystack: HandleRef,
             needle: HandleRef,
             threshold: Double,
+            region: List<Int>?,
         ): ImageMatch? {
             requireLive(haystack)
             requireLive(needle)
-            matches += Triple(haystack, needle, threshold)
+            matches += MatchCall(haystack, needle, threshold, region)
             return matchResult
         }
 
@@ -107,10 +116,11 @@ class ImagesNamespaceHandlerTest {
             haystack: HandleRef,
             needle: HandleRef,
             threshold: Double,
+            region: List<Int>?,
         ): ImageMatch? {
             requireLive(haystack)
             requireLive(needle)
-            matches += Triple(haystack, needle, threshold)
+            matches += MatchCall(haystack, needle, threshold, region)
             return matchResult
         }
 
@@ -230,9 +240,12 @@ class ImagesNamespaceHandlerTest {
     private fun refJson(ref: HandleRef): String =
         """{"ref":{"refId":${ref.refId},"generation":${ref.generation}}}"""
 
-    /** 匹配载荷（`haystack`/`needle` 各持一个 ref 信封 + 统一键 `threshold`）。 */
-    private fun matchJson(haystack: HandleRef, needle: HandleRef, threshold: String): String =
-        """{"haystack":{"refId":${haystack.refId},"generation":${haystack.generation}},"needle":{"refId":${needle.refId},"generation":${needle.generation}},"threshold":$threshold}"""
+    /** 匹配载荷（`haystack`/`needle` 各持一个 ref 信封 + 统一键 `threshold` + 可选
+     *  `region` 尾巴 —— 语义同 findColorJson 的：null = 不发键，"null" 字面量 = 发 JSON null）。 */
+    private fun matchJson(haystack: HandleRef, needle: HandleRef, threshold: String, region: String? = null): String {
+        val tail = if (region == null) "" else ",\"region\":$region"
+        return """{"haystack":{"refId":${haystack.refId},"generation":${haystack.generation}},"needle":{"refId":${needle.refId},"generation":${needle.generation}},"threshold":$threshold$tail}"""
+    }
 
     /** 找色载荷：`haystack` ref 信封 + 目标色 `color` + 容差 `tolerance` + 可选 `region`。
      *  `region` 形参传 Kotlin `null` = **不发这个键**，传 `"null"` = 发 JSON null
@@ -276,10 +289,10 @@ class ImagesNamespaceHandlerTest {
         assertEquals(a, b, "两个方法同一个 wire 形状（facade 曾一个发 tolerance 一个发 threshold）")
 
         assertEquals(2, fake.matches.size)
-        val (h, n, t) = fake.matches.last()
-        assertEquals(haystack, h)
-        assertEquals(needle, n)
-        assertEquals(0.9, t, 0.0)
+        val last = fake.matches.last()
+        assertEquals(haystack, last.haystack)
+        assertEquals(needle, last.needle)
+        assertEquals(0.9, last.threshold, 0.0)
         val o = DomainJson.decodeObject(a)
         assertEquals("10", (o["x"] as DomainJson.Value.N).raw)
         assertEquals("20", (o["y"] as DomainJson.Value.N).raw)
@@ -441,6 +454,40 @@ class ImagesNamespaceHandlerTest {
         assertEquals(null, fake.colorCalls[0].region, "缺 region 键 = null（native 按全帧扫）")
         assertEquals(null, fake.colorCalls[1].region, "region:null 与缺键同义，不是参数错")
         assertEquals(listOf(10, 20, 30, 40), fake.colorCalls[2].region, "给了就原样四元组到 SPI")
+        Unit
+    }
+
+    @Test
+    fun `match 的 region 可选：缺键与 JSON null 都等于全帧，给了原样到 SPI`() = runBlocking {
+        fake.matchResult = ImageMatch(10, 20, 100, 50, 0.93)
+        val haystack = decodeFrame("/sdcard/screen.png")
+        val needle = decodeFrame("/sdcard/icon.png")
+
+        ok(call("matchTemplate", matchJson(haystack, needle, "0.9", null)))
+        ok(call("findImage", matchJson(haystack, needle, "0.9", "null")))
+        ok(call("matchTemplate", matchJson(haystack, needle, "0.9", "[10,20,30,40]")))
+
+        assertEquals(3, fake.matches.size, "三次都该到 SPI：$fake.matches")
+        assertEquals(null, fake.matches[0].region, "缺 region 键 = null（native 按全帧找）")
+        assertEquals(null, fake.matches[1].region, "region:null 与缺键同义，不是参数错")
+        assertEquals(listOf(10, 20, 30, 40), fake.matches[2].region, "给了就原样四元组到 SPI")
+        Unit
+    }
+
+    @Test
+    fun `match 的 region 非四元组先拒且不碰 SPI`() = runBlocking {
+        fake.matchResult = ImageMatch(10, 20, 100, 50, 0.93)
+        val haystack = decodeFrame("/sdcard/screen.png")
+        val needle = decodeFrame("/sdcard/icon.png")
+
+        val bad = listOf(
+            "region 三元组" to matchJson(haystack, needle, "0.9", "[1,2,3]"),
+            "region 五元组" to matchJson(haystack, needle, "0.9", "[1,2,3,4,5]"),
+        )
+        for ((why, payload) in bad) {
+            assertEquals("ERR_INVALID_PARAM", errCode(call("matchTemplate", payload)), why)
+        }
+        assertTrue(fake.matches.isEmpty(), "region 形状错一次 SPI 调用都不发")
         Unit
     }
 

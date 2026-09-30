@@ -401,7 +401,16 @@ int imgnative_decode(const char* path, int64_t* out_ref, int32_t* out_w, int32_t
 // 直接全图 TM_CCOEFF_NORMED 是 933ms（§7.7 实测），粗筛把像素量降 16×；报出
 // 去的坐标/置信度全部回原图 4 通道小窗重算，阈值与置信度语义一字不动。
 // kill switch = AUTOSCRIPT_MATCH_FORCE_EXACT=1（现场回退阀）/ g_force_exact。
+//
+// **region 可选搜索范围（2026-09-30 评审第 2 条）**：nullptr = 全帧；给了 =
+// [x,y,w,h] 复用 findColor/crop 的 resolve_region 判据（越界 → IMG_ERR_INVALID_PARAM，
+// 不静默裁剪）。两条错误码分界：region 形状/越界 = 参数错（4）；**region 比模板小
+// = IMG_ERR_IO(3)** —— 与"模板比画面大"同属"参数关系不成立"（§7.7 已记）。
+// 命中坐标恒**全帧口径**（区域只是搜索范围不是坐标系，与 findColor 的
+// roi.x + p.x 同一条）。小模板（48×48 这类进不了粗筛的）的提速出路就是它：
+// 搜索窗缩到 300×150 后，全图 2.6M 像素的频谱开销按窗面积缩水。
 int imgnative_match(int64_t haystack, int64_t needle, double threshold,
+                    const int32_t* region,
                     int32_t* out_x, int32_t* out_y,
                     int32_t* out_w, int32_t* out_h,
                     double* out_conf, int32_t* out_match) {
@@ -417,8 +426,16 @@ int imgnative_match(int64_t haystack, int64_t needle, double threshold,
             n = *np;
         }
 
-        // 模板比画面大：opencv matchTemplate 会直接断言失败，先一步按 IO 错答
-        // （这是"参数关系不成立"，不是"图上没有"）。
+        cv::Point origin(0, 0);
+        if (region != nullptr) {
+            cv::Rect roi;
+            if (!resolve_region(h, region, &roi)) return IMG_ERR_INVALID_PARAM;
+            h = h(roi);          // 浅视图，不拷像素
+            origin = roi.tl();   // 命中坐标加回全帧口径
+        }
+
+        // 模板比画面（或所选 region）大：opencv matchTemplate 会直接断言失败，
+        // 先一步按 IO 错答（这是"参数关系不成立"，不是"图上没有"）。
         if (n.cols > h.cols || n.rows > h.rows) return IMG_ERR_IO;
 
         const double sc = g_force_exact.load(std::memory_order_relaxed)
@@ -433,8 +450,8 @@ int imgnative_match(int64_t haystack, int64_t needle, double threshold,
             return IMG_OK;
         }
         *out_match = 1;
-        *out_x = hit.pos.x;
-        *out_y = hit.pos.y;
+        *out_x = hit.pos.x + origin.x;   // 全帧坐标（region 只是搜索范围）
+        *out_y = hit.pos.y + origin.y;
         *out_w = n.cols;   // 模板在画面里被匹配上的区域尺寸（= 模板尺寸）
         *out_h = n.rows;
         *out_conf = hit.conf;

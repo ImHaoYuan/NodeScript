@@ -40,6 +40,31 @@
 
 ## 流水（最新在上）
 
+### 2026-09-30 —— `images` 匹配提速：金字塔粗筛 + `region` + 计算出锁（评审拍板案，两提交）
+- **背景**：A2–A4 实测 ❌（A4 933.6ms / A2 1912.8ms，见下条）之后的出路裁决 ——
+  评审否掉「帧内缓存频谱」（同帧**同**模板才免费、频谱不可跨调用复用）与「灰度直配」
+  （阈值/置信度语义会漂），拍板四件套全文见 `design-decisions.md` **第 13 项**；
+  §7.7 出路块与 matchTemplate 行同批追加（原选项原文不动，只追加）。
+- **commit 1（ABI 不动）**：金字塔粗筛 —— 灰度 0.25×/0.5× 只提名 ≤K 候选（thr−margin
+  带宽 + NMS），坐标/置信度回**原 4 通道**小窗重算，语义一字不动；计算出锁（`g_mu`
+  只盖帧表查找，帧入表后不可变、浅拷贝出锁安全）；**频率门**（模板「缩小→放大」自检
+  <0.8 → 精确路径 —— 差分门首跑抓到的 i.i.d. 噪声假 miss 的修法）；
+  `AUTOSCRIPT_MATCH_FORCE_EXACT=1` 回退阀 + `MIN_TEMPL_SIDE`/`MARGIN`/`MAX_CANDIDATES`
+  环境变量调参口（imgbench 真机扫参免重编，缺省与原 constexpr 逐字相同）。
+- **commit 2（本条所在）**：`region` 五层穿透 —— `imgnative.cpp` → `images_jni.cc` →
+  `NativeImageAnalyzer` → `:domain` `ImageAnalyzer` SPI → `ImagesNamespaceHandler` →
+  `images.ts`（判据复用 findColor 的 `resolve_region`：越界 → `ERR_INVALID_PARAM`、
+  **region 比模板小 → `ERR_IO`**、命中坐标恒全帧口径）+ §7.7 region 契约句 +
+  imgbench 决定性行（48×48 @ region 300×150，小模板出路就是缩窗）。
+- **验证**：host 语义门 9 文件 **361 检查 0 失败**（match 文件 82 检查：差分双跑 ——
+  强制精确 vs 金字塔同位置 + 置信度 ≤2e-3 或同未命中；高频反例锁；12 枚等价图标格
+  >K=8 压 NMS；region 四态含粗筛×ROI×全帧坐标）；`npm test` 192 例 0 失败（1 例
+  env 门禁 skip = CI 同跳）；`gen:wire` diff 空；gradle 13 任务同源行 BUILD SUCCESSFUL
+  （含 archUnit / ModuleGraphTest / TestGuard）；NDK arm64 `-fsyntax-only` 双文件过。
+- **未完（下一次真机）**：A4 / A4-region / A2 复测 —— image-native CI 产物推设备 +
+  imgbench 新行 + `FORCE_EXACT` A/B + 三常数扫参。**判据 <40ms 不改**（拍板项），
+  region 数字回来再谈口径。
+
 ### 2026-09-30 —— A2–A4 真机性能实测（恢复自挂起；云手机 Android 13/API 33/arm64/4KB，OpenCV 4.14）
 
 恢复点「下载 artifact → 推设备 → 跑 imgbench」按挂起注记原样执行：image-native **228ab11**

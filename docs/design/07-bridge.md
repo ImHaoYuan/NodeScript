@@ -74,7 +74,7 @@ class AutojsError extends Error {
 | 无障碍 `find → click` | 200ms 内 p60 / ~10ms 树读 | 紧凑索引树 + 按需属性 + 句柄（不全量序列化） |
 | `captureScreen → findImage` | < 1s 且一次截图两次匹配 < 700ms | 屏幕帧→native 0 拷贝，模板匹配在 `libopencv.so`；**链路已通**（§18 第 8 项 (b) 2026-09-26 落地：截屏帧经 `ImageAnalyzer.ingest` 进 `images` 同一张帧表，"帧不通用"取消）—— 数字仍是**待实测**的验收口径（真机未量） |
 | `findColor`（单人独立子图 1080p） | < 10ms | native 遍历（`cv::inRange` 逐分量包含 + `findNonZero` 取首个；ROI 是浅视图不拷像素；kleidicv 覆盖 `inRange` 面） |
-| `matchTemplate` 1080p | < 40ms | OpenCV TM_CCOEFF_NORMED（实测它、不是早前写的 CCORR：见下注）|
+| `matchTemplate` 1080p | < 40ms | OpenCV TM_CCOEFF_NORMED（实测它、不是早前写的 CCORR：见下注）；2026-09-30 起**金字塔粗筛 + 原像素精配**（灰度缩小图只提名候选、坐标与置信度回原 4 通道小窗重算，语义一字不动）+ 两匹配方法可选 `region` 缩窗（机制与错误码见下注、方案裁决见 `design-decisions.md` 第 13 项；判据不改，region 数字待真机复测）|
 | 紧凑树构建/传输 | < 15ms / 数十 KB | 预聚合属性，代价解析放"取用即取" |
 
 > **2026-09-30 真机实测回填（A2–A4；云手机 Android 13 / arm64 + OpenCV 4.14 `libopencv.so`
@@ -93,6 +93,25 @@ class AutojsError extends Error {
 >   正中 A2 形态，实现落点在 `imgnative.cpp` 帧表侧；② 预筛收缩搜索窗（findColor/金字塔粗定位
 >   后再小窗精确 match）；③ 判据改口径 —— 把 <40ms 定义到「预筛后小窗」而非全图搜索（拍板项）。
 >   数字出处、方法与 driver 缺陷修正见 `design-status.md` 流水 2026-09-30「A2–A4 真机性能实测」条。
+>
+> **2026-09-30 出路落定（只追加，上列选项原文不动；裁决全文见 `design-decisions.md` 第 13 项）**：
+>   ① 帧内缓存频谱**被评审否掉** —— bench 的 A2 是同帧**同**模板 match×2 看着免费，
+>   真实脚本多半是同帧**不同**模板（零收益），且 `cv::matchTemplate` 的图像频谱不暴露、
+>   不可跨调用复用（要真缓存得手写 DFT 相关 + 积分图，数值风险另算）；
+>   ② 已落地（**金字塔变体**）：灰度 0.25×/0.5× 上只提名 ≤K 候选（thr−margin 带宽 +
+>   NMS），坐标/置信度全部回**原 4 通道**小窗重算 —— 阈值与置信度语义一字不动；
+>   差分双跑门（`host_match_test`）每 case 强制精确 vs 金字塔对拍（同位置 + 置信度
+>   ≤2e-3 或同未命中），`AUTOSCRIPT_MATCH_FORCE_EXACT=1` 是现场回退阀。护栏一枚：
+>   **频率门** —— 模板「缩小→放大」自检互相关 <0.8 即落精确路径（i.i.d. 噪声在
+>   0.25× 混叠后粗峰值欠估 → 假 miss，差分门首跑抓到的真红，正是它修的）。
+>   **region 契约（两匹配方法，2026-09-30 新增）**：缺省 null = 全帧；给了 =
+>   `[x,y,w,h]` 复用 `resolve_region` 判据 —— 越界 → `ERR_INVALID_PARAM`（不静默
+>   裁剪）、**region 比模板小 → `ERR_IO`**（与「模板比画面大」同属参数关系不成立）；
+>   命中坐标恒**全帧口径**（区域只是搜索范围不是坐标系，与 findColor 同一条）。
+>   小模板（短边 <80px 进不了粗筛）的出路就是缩窗。③ 判据 <40ms **不改** ——
+>   等 region 实测数字回来再谈口径（拍板动作，不在实现里偷改）。
+>   计算段锁口径同步收窄：`g_mu` 只盖**帧表段**（查找/发号/擦除），match 计算出锁
+>   （帧入表后不可变、浅拷贝即安全）—— 见本卷 §7.4 与 `imgnative.cpp` 注释。
 >
 > **`TM_CCOEFF_NORMED` 而不是 `TM_CCORR_NORMED`（2026-09-25 实测改口径，非抄来的）**：
 > `imgnative_match` 一直用 CCOEFF，早前本表与 `:domain` KDoc 两处写成 CCORR —— 名字漂移

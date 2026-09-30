@@ -37,6 +37,7 @@
 extern "C" {
 int imgnative_decode(const char* path, int64_t* out_ref, int32_t* out_w, int32_t* out_h);
 int imgnative_match(int64_t haystack, int64_t needle, double threshold,
+                    const int32_t* region,
                     int32_t* out_x, int32_t* out_y,
                     int32_t* out_w, int32_t* out_h,
                     double* out_conf, int32_t* out_match);
@@ -60,9 +61,9 @@ static int64_t dec(const std::string& p, const cv::Mat& m) {
 
 /** 一次 imgnative_match 的完整返回面（差分双跑要逐字段比）。 */
 struct MR { int rc; int32_t x, y, w, h, m; double c; };
-static MR call_match(int64_t hh, int64_t nn, double thr) {
+static MR call_match(int64_t hh, int64_t nn, double thr, const int32_t* region = nullptr) {
     MR r{-1, -1, -1, -1, -1, -1, -1.0};
-    r.rc = imgnative_match(hh, nn, thr, &r.x, &r.y, &r.w, &r.h, &r.c, &r.m);
+    r.rc = imgnative_match(hh, nn, thr, region, &r.x, &r.y, &r.w, &r.h, &r.c, &r.m);
     return r;
 }
 
@@ -170,12 +171,12 @@ int main() {
         const int32_t m = d.m;
         chk(m == 1, "第 1 条先确认命中，取其置信度 " + std::to_string(exact) + " 作边界");
         int32_t mx = -1, my = -1, mw = -1, mh = -1, mm = -1; double mc = -1;
-        chk(imgnative_match(h_ref, n_ref, exact, &mx, &my, &mw, &mh, &mc, &mm) == 0, "等值阈值可用");
+        chk(imgnative_match(h_ref, n_ref, exact, nullptr, &mx, &my, &mw, &mh, &mc, &mm) == 0, "等值阈值可用");
         chk(mm == 1, "maxv == threshold 判命中（≥ 不是 >）");
         chk(mx == 2 && my == 3, "等值阈值下坐标不变（实际 " + std::to_string(mx) + "," + std::to_string(my) + "）");
         const double just_above = exact + 1e-6;
         int32_t ax = -1, ay = -1, aw = -1, ah = -1, am = -1; double ac = -1;
-        chk(imgnative_match(h_ref, n_ref, just_above, &ax, &ay, &aw, &ah, &ac, &am) == 0, "略高阈值可用");
+        chk(imgnative_match(h_ref, n_ref, just_above, nullptr, &ax, &ay, &aw, &ah, &ac, &am) == 0, "略高阈值可用");
         chk(am == 0, "阈值略高于 maxv 即未命中（严格小于才落未命中）");
     }
 
@@ -188,7 +189,7 @@ int main() {
         const int64_t big_ref = dec(d + "/huge.png", hugeNeedle);
         chk(big_ref > h_ref, "新帧号大于旧帧号（帧表单调，旁证没有顶掉 big 的帧）");
         int32_t x = -1, y = -1, w = -1, h = -1, m = -1; double c = -1;
-        const int rc = imgnative_match(h_ref, big_ref, 0.5, &x, &y, &w, &h, &c, &m);
+        const int rc = imgnative_match(h_ref, big_ref, 0.5, nullptr, &x, &y, &w, &h, &c, &m);
         chk(rc == 3, "模板比画面大 → ERR_IO(3)（实际 rc=" + std::to_string(rc) + "）");
         chk(m == -1, "拒收是**早退**：out_match 一个字节都不碰（调用方预置的 -1 原样留着）"
                     "实际 m=" + std::to_string(m) + "）");
@@ -203,9 +204,9 @@ int main() {
     {
         int32_t x = -1, y = -1, w = -1, h = -1, m = -1; double c = -1;
         chk(imgnative_release(n_ref) == 0, "先放 needle");
-        chk(imgnative_match(h_ref, n_ref, 0.5, &x, &y, &w, &h, &c, &m) == 1,
+        chk(imgnative_match(h_ref, n_ref, 0.5, nullptr, &x, &y, &w, &h, &c, &m) == 1,
             "needle 已释放 → ERR_STALE_HANDLE(1)");
-        chk(imgnative_match(n_ref, h_ref, 0.5, &x, &y, &w, &h, &c, &m) == 1,
+        chk(imgnative_match(n_ref, h_ref, 0.5, nullptr, &x, &y, &w, &h, &c, &m) == 1,
             "haystack 已释放同样 STALE（两个方向都钉）");
         imgnative_release(h_ref);
     }
@@ -299,6 +300,68 @@ int main() {
             chk(r.c > 0.99, "case7 置信度 >0.99（实际 " + std::to_string(r.c) + "）");
             imgnative_release(s7);
             imgnative_release(t7);
+        }
+    }
+
+    // 8) **region 搜索范围**（2026-09-30 评审第 2 条）：错误码分界 + 全帧坐标 +
+    //    粗筛在 ROI 视图上照常。判据与 findColor/crop 同一条 resolve_region。
+    {
+        // case 5 已把 h_ref/n_ref 放掉 —— 这里重新落帧（夹具 Mat 还在，直接复用）。
+        const int64_t h8 = dec(d + "/big8.png", big);
+        const int64_t n8 = dec(d + "/needle8.png", needle);
+        if (h8 < 0 || n8 < 0) { std::printf("\nchecks=%d failures=%d\n", checks, fails); return fails == 0 ? 0 : 1; }
+        // 8a) 坐标全帧口径：needle 在 (2,3)，region 给半帧 → 命中仍报 (2,3)。
+        {
+            const int32_t reg[4] = {0, 0, 5, 8};
+            const MR r = call_match(h8, n8, 0.5, reg);
+            chk(r.rc == 0 && r.m == 1, "8a region 半帧内命中");
+            chk(r.x == 2 && r.y == 3, "8a 命中坐标是全帧口径 (2,3)（实际 " +
+                std::to_string(r.x) + "," + std::to_string(r.y) + "）");
+            chk(r.w == 3 && r.h == 2, "8a w/h 仍是模板尺寸");
+        }
+        // 8b) region 不含模板内容 → 未命中是答案（status=OK、字段全 0）。
+        {
+            const int32_t reg[4] = {4, 0, 4, 4};
+            const MR r = call_match(h8, n8, 0.5, reg);
+            chk(r.rc == 0 && r.m == 0, "8b region 内无模板 = 未命中（答案）");
+            chk(r.x == 0 && r.y == 0 && r.c == 0.0, "8b 未命中字段全 0");
+        }
+        // 8c) region 比模板小 → ERR_IO（"参数关系不成立"，与"模板比画面大"同码）。
+        {
+            const int32_t reg[4] = {0, 0, 2, 2};   // 2×2 < 模板 3×2
+            int32_t x = -1, y = -1, w = -1, h = -1, m = -1; double c = -1;
+            const int rc = imgnative_match(h8, n8, 0.5, reg, &x, &y, &w, &h, &c, &m);
+            chk(rc == 3, "region 比模板小 → ERR_IO(3)（实际 rc=" + std::to_string(rc) + "）");
+            chk(m == -1, "8c 早退不碰出参");
+        }
+        // 8d) region 越界 → ERR_INVALID_PARAM（不静默裁剪），出参同样不碰。
+        {
+            const int32_t reg[4] = {0, 0, 9, 9};   // 9 > 8×8 帧宽高
+            int32_t x = -1, y = -1, w = -1, h = -1, m = -1; double c = -1;
+            const int rc = imgnative_match(h8, n8, 0.5, reg, &x, &y, &w, &h, &c, &m);
+            chk(rc == 4, "region 越界 → ERR_INVALID_PARAM(4)（实际 rc=" + std::to_string(rc) + "）");
+            chk(m == -1, "8d 早退不碰出参");
+        }
+        // 8e) **粗筛 × ROI × 全帧坐标**：平滑屏（金字塔真开动）上给一个刚好装下
+        //     模板的窗 —— ROI 内粗筛/精配/origin 回加三件事一次钉住（差分双跑）。
+        {
+            cv::Mat base(60, 80, CV_8UC4);
+            rng.fill(base, cv::RNG::UNIFORM, 0, 256);
+            cv::Mat scr;
+            cv::resize(base, scr, cv::Size(640, 480), 0, 0, cv::INTER_LINEAR);
+            cv::Mat tpl = scr(cv::Rect(301, 177, 128, 96)).clone();
+            const int64_t s8 = dec(d + "/scr8.png", scr);
+            const int64_t t8 = dec(d + "/tpl8.png", tpl);
+            if (s8 >= 0 && t8 >= 0) {
+                const int32_t reg[4] = {280, 160, 180, 130};   // 含 (301,177) 的窗
+                const MR r = call_match(s8, t8, 0.9, reg);
+                chk(r.rc == 0 && r.m == 1, "8e ROI 内命中");
+                chk(r.x == 301 && r.y == 177, "8e 全帧坐标 (301,177)（实际 " +
+                    std::to_string(r.x) + "," + std::to_string(r.y) + "）");
+                chk(r.c > 0.99, "8e 置信度 >0.99（实际 " + std::to_string(r.c) + "）");
+                imgnative_release(s8);
+                imgnative_release(t8);
+            }
         }
     }
 
