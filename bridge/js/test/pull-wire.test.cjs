@@ -33,8 +33,8 @@ const ROOT = (() => {
 function read(rel) {
   return fs.readFileSync(path.join(ROOT, rel), 'utf8')
 }
-const A11Y_KT = read('platform/capabilities/src/main/kotlin/com/autoscript/platform/capabilities/A11yNamespaceHandler.kt')
-const SENSORS_KT = read('platform/capabilities/src/main/kotlin/com/autoscript/platform/capabilities/SensorsNamespaceHandler.kt')
+const A11Y_KT = read('platform/capabilities/src/main/kotlin/com/autoscript/platform/capabilities/a11y/A11yNamespaceHandler.kt')  // 步骤 6b 子包重组
+const SENSORS_KT = read('platform/system/src/main/kotlin/com/autoscript/platform/system/SensorsNamespaceHandler.kt')  // 步骤 6b 迁 :platform:system
 const A11Y_TS = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'a11y.ts'), 'utf8')
 const SENSORS_TS = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'sensors.ts'), 'utf8')
 
