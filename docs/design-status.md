@@ -40,6 +40,22 @@
 
 ## 流水（最新在上）
 
+### 2026-09-30 —— 相位探针门 + 自适应 K（评审二轮原型移植，commit `0ec6ef4`，PR #12）
+- **过程**：Python 原型（相位探针 + 自适应 K + 覆盖率脚本）评审通过后按老流程 ——
+  真机模板 host 诊断（门值实测）→ `imgnative.cpp` 五处改造 → host **377 检查全绿**
+  （新增 case6 高阈值 0.99 差分锁）→ NDK 双过 → 临时分支 `verify/phase-gate` +
+  image-native CI 出 so（sha256 `d1962315…`，strings 含 HEADROOM 调参口）→ 真机
+  A/B 两跑。PR #10 同日已合（`da63759`），本改动随后续 docs 提交进 PR #12。
+- **数字（A=相位门默认 / B=FORCE_EXACT，对照三次实测）**：A4 370×80 全帧 24.47 →
+  **25.37ms**（B 887.60 ≈ 三次 B 888.97，**归因干净**）✅；A2 94.61 → **95.43ms** ✅；
+  region 两行 16.53 / 10.64 稳 ✅；A3 ROI 0.905 不变 ✅；A4-small 855.6ms 恒精确
+  （std 6.29<12 + phase 0.794 双拦，同判 ❌，出路 region 不变）；探针 conf=1.0000。
+- **门值与旋钮**：370×80 `phase=0.846 ≥ floor 0.800` 过门保形态；48×48 `phase=0.794`
+  拦。`floor = min(thr − 粗带宽 + headroom, 0.97)` 绑带宽，闭静态 0.8 门高阈值洞；
+  新 knob `AUTOSCRIPT_MATCH_HEADROOM`（0.05）。候选带宽/地板单源 `coarse_margin_of`。
+- §7.7 第四次实测块 + decisions 第 13 项追加同批（只追加）。
+
+
 ### 2026-09-30 —— 评审 patch 验证轮 → 采纳（commit `852fb45`；粗筛下限 48px + kMinCoarseSide 12 + needle 缓存）
 - **过程**：外部 `vision-optimized.patch` 按「先只验证不落地」裁定走完整验证链 ——
   套用 → host 372 检查绿 → NDK 双过 → 临时分支 `verify/vision-opt` + image-native CI
