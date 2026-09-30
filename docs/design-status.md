@@ -40,6 +40,18 @@
 
 ## 流水（最新在上）
 
+### 2026-09-30 —— 外部审查整改·步骤 7：单一 schema 生成契约 + dist 出库
+
+（wire 面单源 + 双发射 + 三门换基 + CI/dist/过时配置；五提交推进）
+
+- **7a（3424cbe）schema 单源**：`bridge/schema/wire.schema.json` —— 19 ns × 97 方法 + 2 aliases（带理由）+ 1 dynamicSinks + 逐 ns facade；底稿 = 步骤 4 后各 handler `when` 标签全量提取 + register 站点核对（19↔19），JS 侧预对账零偏差。`generate.mjs`（零依赖，`--check` 模式）双发射 `wire-types.ts`（`WIRE`/`WireMethodOf<N>`/aliases/sinks）与 `:domain` `WireMethods.kt`（BY_NS/ALIASES），生成物入库。package.json：`gen:wire`/`gen:wire:check` + 过时配置三件（删空 `workspaces`、`UNLICENSED`→`MIT`、`@types/node` ^22→^24）。
+- **7b（777ab89）handler 显式申报**：`NamespaceHandler`（fun interface）加缺省 `methods() = emptySet()`（未申报 = 对账层按未接入处理），`RpcNamespaceHandler` 撤重复声明；19 个 handler（18 Rpc + `ConsoleCollector`）逐个 `override fun methods() = WireMethods.BY_NS.getValue("<ns>")` —— 申报只接线不抄表。
+- **7c（f642565）新门并行**：`wire-schema.test.cjs` 9 例上线（生成物 --check、facade→schema、register↔schema 双向、申报↔schema 双向、死分支/aliases 真伪、facade 在场、解析自检），与旧门同跑 195 tests 全绿。
+- **7d（d2e6073）旧门退役**：删 `wire-reconcile.test.cjs`（163 行，正则啃 `when` 块）；`wiring-table.test.cjs` 换表↔schema 基（facade 列与 schema `facade` 字段一致、行覆盖↔schema 键双向、状态列「已挂」∈ schema；register 解析器移交 wire-schema）。`jni-names`/`docs-surface` 保留。§12.2 门禁说明段与 event-wire 注释同批改。
+- **7e（2ba5aea）dist 出库 + CI**：`.gitignore` + `git rm -r --cached`（38 文件）；ci.yml 三处 —— js-tests 加 `npm run gen:wire && git diff --exit-code`（git diff 在仓根跑）、两 job node 22→24、jvm-tests 加 setup-node + `npm --prefix bridge/js ci && run build` 前置；四处「git 跟踪」文案改「构建产物」（build-logic require、BridgeDistPackagingEntryTest、NodeProcessSpawnE2ETest 注释、§12.4 随包段）；CLAUDE.md 模块行与 CI 段补前置句。
+- **验证**：npm test 190 tests 全绿（189 pass / 1 env-gated skip）；`gen:wire` 重生成后两份产物零 diff；13 任务 BUILD SUCCESSFUL（收尾同批）。
+
+
 ### 2026-09-30 —— 外部审查整改·步骤 6：platform 按能力重组 + Wm/Power 移出 `:app`（零新模块，模块表 15 不动）
 
 （§6 模块表两行 + §12.2 接线表与两段散文 + §8.7 位置声明；ModuleGraphTest allowed **零改** 是本方案选型收益 —— 「每能力一模块」方案因要动 settings/allowed/§6/CI/计数五处且与 §6「薄模块已合并」口径冲突，明确否，见 design-decisions）。四个子步各自一提交：

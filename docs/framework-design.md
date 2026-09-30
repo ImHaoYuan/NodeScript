@@ -1152,6 +1152,8 @@ offQe();
 ### 12.4 typings 工程
 `:bridge:js` 产出全套 `.d.ts`（@types/auto），IDE 补全不依赖文档站点；d.ts 作为 API 契约的单一事实来源，API 评审以 d.ts diff 为准。
 
+**与 `bridge/schema/wire.schema.json` 的分工**（2026-09-30 审查步骤 7 拍板）：d.ts 管**对外 API 形状**（参数/返回/重载，脚本作者看得见的 TS 面），schema 管**桥线 wire 名**（每 ns 方法表 + aliases + dynamicSinks + facade 归属，双发射 `wire-types.ts`/`WireMethods.kt`）—— 两份各司其职、各自入库、各有一道门，不合并（理由见 [`design-decisions.md`](design-decisions.md) 第 12 项）。对账门在 §12.2 门禁说明段。
+
 ---
 
 ## 13. 设计模式应用总表（架构落地位置）
