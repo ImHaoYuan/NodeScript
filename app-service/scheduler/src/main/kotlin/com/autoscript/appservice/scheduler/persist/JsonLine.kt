@@ -1,122 +1,55 @@
 package com.autoscript.appservice.scheduler.persist
 
+import com.autoscript.domain.json.DomainJson
 import java.io.IOException
 
 /**
- * jsonl 行级极简解析/转义（persist 包内共享）。
+ * jsonl 行级解析/转义（persist 包内共享）—— 审查步骤 3 合一后的薄件。
  *
- * 服务的是"冻结行格式"：键为字符串，值为字符串/整数/null/字符串数组四种。不引入 JSON 库
- * 是刻意的 —— persist 层零第三方依赖（只有 :domain + JDK），单测与生产同一份解析，
- * 格式漂移在编译期可见而非运行时爆炸。
+ * 服务的是"冻结行格式"：键为字符串，值为字符串/整数/null/字符串数组四种。
+ * codec 走 `:domain` [DomainJson]（仓内唯一 codec），本文件只留两件 persist 专属的事：
+ *
+ * 1. **值域裁剪**：[parse] 逐值 unwrap 到四型，布尔/嵌套对象照旧响亮拒绝 ——
+ *    冻结行格式的值域是协议，不是 codec 的事；
+ * 2. **错误类型保型**：codec 抛 IllegalArgumentException，persist 层契约是
+ *    IOException（"行损坏"，消费方 try/catch 口径与单测断言面不变）—— 一律包一层。
+ *
+ * 单测与生产同一份解析，格式漂移在编译期可见而非运行时爆炸。persist 层零第三方依赖
+ * （只有 :domain + JDK）的口径不破。
+ *
+ * 兼容边（步骤 3 记入 design-status）：老 quote 不转义控制字符，含裸控制符的存量行会被
+ * DomainJson 拒（"未转义控制字符"）—— 落在 IOException 保型内，表现仍是"行损坏"响亮失败。
  */
 internal object JsonLine {
 
     /** 解析一行 `{...}` 为字段表（值仅为 String/Long/null/字符串数组 四种）。 */
     fun parse(line: String): Map<String, Any?> {
-        val m = Parser(line)
-        m.expect('{')
-        val fields = HashMap<String, Any?>()
-        var nFields = 0
-        while (true) {
-            m.ws()
-            if (m.peek() == '}') { m.pos++; break }
-            if (nFields > 0) {
-                m.expect(',')
-                m.ws()
+        val m = try {
+            DomainJson.decodeObject(line)
+        } catch (e: IllegalArgumentException) {
+            throw IOException("journal 行损坏：${e.message}", e)
+        }
+        val fields = LinkedHashMap<String, Any?>(m.size)
+        for ((k, v) in m) {
+            fields[k] = when (v) {
+                is DomainJson.Value.S -> v.v
+                is DomainJson.Value.N -> v.raw.toLongOrNull()
+                    ?: throw IOException("journal 行损坏：字段 $k 非整数（${v.raw}）")
+                DomainJson.Value.Null -> null
+                is DomainJson.Value.Arr -> v.items.map {
+                    (it as? DomainJson.Value.S)?.v
+                        ?: throw IOException("journal 行损坏：字段 $k 数组含非字符串")
+                }
+                else -> throw IOException("journal 行损坏：字段 $k 值型越界（仅 字符串/整数/null/字符串数组）")
             }
-            val key = m.string()
-            nFields++
-            m.ws(); m.expect(':'); m.ws()
-            val v: Any? = when {
-                m.peek() == '"' -> m.string()
-                m.peek() == '[' -> m.stringArray()
-                m.peek() == 'n' -> { m.expectLit("null"); null }
-                else -> m.number()
-            }
-            fields[key] = v
-            m.ws()
         }
         return fields
     }
 
     /** 字符串数组编码（args 等列表字段；空列表 = `[]`）。 */
-    fun quoteAll(items: List<String>): String = items.joinToString(",", "[", "]") { quote(it) }
+    fun quoteAll(items: List<String>): String = DomainJson.encode(items)
 
-    fun quote(s: String): String = buildString(s.length + 2) {
-        append('"')
-        for (c in s) {
-            when (c) {
-                '"' -> append("\\\"")
-                '\\' -> append("\\\\")
-                '\n' -> append("\\n")
-                '\r' -> append("\\r")
-                '\t' -> append("\\t")
-                else -> append(c)
-            }
-        }
-        append('"')
-    }
-
-    /** 递归下降解析器（仅服务本冻结行格式）。 */
-    private class Parser(val s: String) {
-        var pos = 0
-        fun peek(): Char {
-            if (pos >= s.length) throw IOException("journal 行损坏：行意外结束")
-            return s[pos]
-        }
-        fun ws() { while (pos < s.length && s[pos] == ' ') pos++ }
-        fun expect(c: Char) { if (pos >= s.length || s[pos] != c) throw IOException("journal 行损坏 @$pos 期望 $c"); pos++ }
-        fun expectLit(lit: String) { if (!s.startsWith(lit, pos)) throw IOException("journal 行损坏 @$pos 期望 $lit"); pos += lit.length }
-
-        fun string(): String {
-            expect('"')
-            val sb = StringBuilder()
-            while (true) {
-                if (pos >= s.length) throw IOException("journal 行损坏：串未闭合")
-                val c = s[pos++]
-                when (c) {
-                    '"' -> return sb.toString()
-                    '\\' -> {
-                        if (pos >= s.length) throw IOException("journal 行损坏：转义截断")
-                        when (val e = s[pos++]) {
-                            '"' -> sb.append('"')
-                            '\\' -> sb.append('\\')
-                            'n' -> sb.append('\n')
-                            'r' -> sb.append('\r')
-                            't' -> sb.append('\t')
-                            else -> throw IOException("journal 行损坏：未知转义 \\$e")
-                        }
-                    }
-                    else -> sb.append(c)
-                }
-            }
-        }
-
-        fun stringArray(): List<String> {
-            expect('[')
-            ws()
-            if (peek() == ']') { pos++; return emptyList() }
-            val out = ArrayList<String>()
-            while (true) {
-                ws()
-                out += string()
-                ws()
-                when (peek()) {
-                    ',' -> { pos++; }
-                    ']' -> { pos++; return out }
-                    else -> throw IOException("journal 行损坏 @$pos 期望 , 或 ]")
-                }
-            }
-        }
-
-        fun number(): Long {
-            val start = pos
-            if (pos < s.length && s[pos] == '-') pos++
-            while (pos < s.length && s[pos].isDigit()) pos++
-            if (start == pos) throw IOException("journal 行损坏 @$pos 期望数字")
-            return s.substring(start, pos).toLong()
-        }
-    }
+    fun quote(s: String): String = DomainJson.encode(s)
 }
 
 /** 字段表强类型读取（缺键/类型错 = 行损坏，响亮失败）。 */
