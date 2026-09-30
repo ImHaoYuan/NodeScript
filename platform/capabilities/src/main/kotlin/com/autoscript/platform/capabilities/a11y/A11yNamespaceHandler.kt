@@ -1,4 +1,5 @@
 package com.autoscript.platform.capabilities.a11y
+import com.autoscript.domain.bridge.generated.WireMethods
 
 import com.autoscript.domain.bridge.RpcNamespaceHandler
 import com.autoscript.domain.bridge.BridgeResponse
@@ -67,6 +68,10 @@ class A11yNamespaceHandler(
      */
     private val events: UiEventStream? = null,
 ) : RpcNamespaceHandler() {
+
+
+    /** 申报方法表（wire-schema 对账挂点）：单源指向生成物 [WireMethods.BY_NS]，不手抄。 */
+    override fun methods(): Set<String> = WireMethods.BY_NS.getValue("a11y")
 
     override suspend fun dispatch(request: BridgeRequest): BridgeResponse = when (request.method) {
         "findOne" -> findOne(request, single = true)

@@ -1,4 +1,5 @@
 package com.autoscript.platform.capabilities.screen
+import com.autoscript.domain.bridge.generated.WireMethods
 
 import com.autoscript.domain.bridge.RpcNamespaceHandler
 import com.autoscript.domain.bridge.BridgeResponse
@@ -38,6 +39,10 @@ import com.autoscript.platform.capabilities.CapabilityNamespaces
 class ScreenNamespaceHandler(
     private val source: FrameSource,
 ) : RpcNamespaceHandler() {
+
+
+    /** 申报方法表（wire-schema 对账挂点）：单源指向生成物 [WireMethods.BY_NS]，不手抄。 */
+    override fun methods(): Set<String> = WireMethods.BY_NS.getValue("screen")
 
     private val guard = Any()
     private val sessions = HashMap<Long, ScreenCaptureSession>()

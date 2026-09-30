@@ -1,4 +1,5 @@
 package com.autoscript.platform.capabilities.dialogs
+import com.autoscript.domain.bridge.generated.WireMethods
 
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
@@ -29,6 +30,10 @@ import com.autoscript.domain.system.DialogPromptRequest
 // ── dialogs（§9.4）──────────────────────────────────────────────────
 
 class DialogsNamespaceHandler(private val host: DialogHost) : RpcNamespaceHandler() {
+
+    /** 申报方法表（wire-schema 对账挂点）：单源指向生成物 [WireMethods.BY_NS]，不手抄。 */
+    override fun methods(): Set<String> = WireMethods.BY_NS.getValue("dialogs")
+
     override suspend fun dispatch(request: BridgeRequest): BridgeResponse = when (request.method) {
         "prompt" -> {
             val fields = request.decodeObject()

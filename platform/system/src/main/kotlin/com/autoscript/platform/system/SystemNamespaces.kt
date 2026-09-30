@@ -1,4 +1,5 @@
 package com.autoscript.platform.system
+import com.autoscript.domain.bridge.generated.WireMethods
 
 import com.autoscript.domain.bridge.decodeObject
 import com.autoscript.domain.bridge.requiredStr
@@ -48,6 +49,10 @@ class ShellNamespaceHandler(
     private val executor: ShellExecutor,
     private val defaultTimeoutMillis: Long = DEFAULT_SHELL_TIMEOUT_MILLIS,
 ) : RpcNamespaceHandler() {
+
+    /** 申报方法表（wire-schema 对账挂点）：单源指向生成物 [WireMethods.BY_NS]，不手抄。 */
+    override fun methods(): Set<String> = WireMethods.BY_NS.getValue("shell")
+
     override suspend fun dispatch(request: BridgeRequest): BridgeResponse = when (request.method) {
         "exec", "shell" -> exec(request)
         else -> err(request, ErrorCode.ERR_NOT_IMPLEMENTED, "未知 shell 方法: ${request.method}")
@@ -74,6 +79,10 @@ class ShellNamespaceHandler(
 // ── device（§9.6）───────────────────────────────────────────────────
 
 class DeviceNamespaceHandler(private val info: DeviceInfoProvider) : RpcNamespaceHandler() {
+
+    /** 申报方法表（wire-schema 对账挂点）：单源指向生成物 [WireMethods.BY_NS]，不手抄。 */
+    override fun methods(): Set<String> = WireMethods.BY_NS.getValue("device")
+
     override suspend fun dispatch(request: BridgeRequest): BridgeResponse = when (request.method) {
         "model" -> {
             val p = info.profile()   // 构造期已校验（空型号/SDK<1 即拒）
@@ -87,6 +96,10 @@ class DeviceNamespaceHandler(private val info: DeviceInfoProvider) : RpcNamespac
 // ── app（§9.3/§12.2）────────────────────────────────────────────────
 
 class AppNamespaceHandler(private val launcher: AppLauncher) : RpcNamespaceHandler() {
+
+    /** 申报方法表（wire-schema 对账挂点）：单源指向生成物 [WireMethods.BY_NS]，不手抄。 */
+    override fun methods(): Set<String> = WireMethods.BY_NS.getValue("app")
+
     override suspend fun dispatch(request: BridgeRequest): BridgeResponse = when (request.method) {
         "launch" -> {
             val fields = request.decodeObject()
@@ -107,6 +120,10 @@ class AppNamespaceHandler(private val launcher: AppLauncher) : RpcNamespaceHandl
 class FloatingWindowNamespaceHandler(
     private val host: FloatingWindowHost,
 ) : RpcNamespaceHandler() {
+
+    /** 申报方法表（wire-schema 对账挂点）：单源指向生成物 [WireMethods.BY_NS]，不手抄。 */
+    override fun methods(): Set<String> = WireMethods.BY_NS.getValue("floatingWindow")
+
     override suspend fun dispatch(request: BridgeRequest): BridgeResponse {
         return when (request.method) {
             "create" -> {

@@ -1,4 +1,5 @@
 package com.autoscript.bridge
+import com.autoscript.domain.bridge.generated.WireMethods
 
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
@@ -35,6 +36,10 @@ data class ConsoleLine(
 class ConsoleCollector(
     private val capacity: Int = DEFAULT_CAPACITY,
 ) : RequestHandler {
+
+
+    /** 申报方法表（wire-schema 对账挂点）：单源指向生成物 [WireMethods.BY_NS]，不手抄。 */
+    override fun methods(): Set<String> = WireMethods.BY_NS.getValue("console")
 
     private val seq = AtomicLong(1)
     private val lines = ConcurrentLinkedQueue<ConsoleLine>()

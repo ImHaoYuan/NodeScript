@@ -1,4 +1,5 @@
 package com.autoscript.appservice.scheduler
+import com.autoscript.domain.bridge.generated.WireMethods
 
 import com.autoscript.appservice.scheduler.core.CronTab
 import com.autoscript.appservice.scheduler.core.ScheduledTask
@@ -37,6 +38,10 @@ import java.time.ZoneId
  * - 未知方法 → ERR_NOT_IMPLEMENTED；非法载荷 → ERR_INVALID_PARAM。
  */
 class WorkManagerNamespaceHandler(private val scheduler: Scheduler) : RpcNamespaceHandler() {
+
+
+    /** 申报方法表（wire-schema 对账挂点）：单源指向生成物 [WireMethods.BY_NS]，不手抄。 */
+    override fun methods(): Set<String> = WireMethods.BY_NS.getValue("workManager")
 
     override suspend fun dispatch(request: BridgeRequest): BridgeResponse = ok(request, payload(request))
 

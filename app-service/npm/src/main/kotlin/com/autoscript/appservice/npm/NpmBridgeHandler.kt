@@ -1,4 +1,5 @@
 package com.autoscript.appservice.npm
+import com.autoscript.domain.bridge.generated.WireMethods
 
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
@@ -47,6 +48,10 @@ import com.autoscript.domain.json.DomainJson
  *   宿主不校验也不回就是静默丢用户显式声明——与 `setRegistry` 的 scope 同一类问题）。
  */
 class NpmBridgeHandler(private val facade: com.autoscript.domain.npm.PackageManagerFacade) : RpcNamespaceHandler() {
+
+
+    /** 申报方法表（wire-schema 对账挂点）：单源指向生成物 [WireMethods.BY_NS]，不手抄。 */
+    override fun methods(): Set<String> = WireMethods.BY_NS.getValue("npm")
 
     companion object {
         /** 单项目/IDE 直跑场景的缺省项目（多项目时 payload 必须显式带 projectId）。 */

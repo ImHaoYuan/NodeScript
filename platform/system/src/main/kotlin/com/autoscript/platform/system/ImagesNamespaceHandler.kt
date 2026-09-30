@@ -1,4 +1,5 @@
 package com.autoscript.platform.system
+import com.autoscript.domain.bridge.generated.WireMethods
 
 import com.autoscript.domain.bridge.decodeObject
 import com.autoscript.domain.bridge.requiredStr
@@ -68,6 +69,10 @@ import com.autoscript.domain.core.ErrorCode
 class ImagesNamespaceHandler(
     private val analyzer: ImageAnalyzer,
 ) : RpcNamespaceHandler() {
+
+    /** 申报方法表（wire-schema 对账挂点）：单源指向生成物 [WireMethods.BY_NS]，不手抄。 */
+    override fun methods(): Set<String> = WireMethods.BY_NS.getValue("images")
+
     /** 本类**无状态**：帧表（在场/发号/像素）全在 [analyzer] 里（§18-8(b) 发号侧归一）。 */
 
     override suspend fun dispatch(request: BridgeRequest): BridgeResponse = when (request.method) {

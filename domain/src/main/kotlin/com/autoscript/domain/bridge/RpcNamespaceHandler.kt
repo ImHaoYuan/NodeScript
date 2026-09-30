@@ -15,7 +15,7 @@ import com.autoscript.domain.core.ErrorCode
  * 未知方法不在这里兜：`dispatch` 的 `else` 分支按各自命名空间回
  * `ERR_NOT_IMPLEMENTED`（消息带方法名，§7.5 不猜别名）。
  *
- * [methods] 是步骤 7（schema 单源生成 Kotlin 方法表）的挂点，先留位。
+ * [methods] 挂点在 [NamespaceHandler]（步骤 7）：本基类不再重复声明，子类申报。
  */
 abstract class RpcNamespaceHandler : NamespaceHandler {
 
@@ -29,9 +29,6 @@ abstract class RpcNamespaceHandler : NamespaceHandler {
 
     /** 业务分发：`when (request.method)` + 业务 + 参数校验；错误处理不再出现在本函数。 */
     protected abstract suspend fun dispatch(request: BridgeRequest): BridgeResponse
-
-    /** 本命名空间申报的方法表（schema 对账挂点；缺省空 = 未申报，对账层按未接入处理）。 */
-    open fun methods(): Set<String> = emptySet()
 
     protected fun ok(request: BridgeRequest, payload: String?): BridgeResponse =
         BridgeResponse.Ok(request.id, payload)

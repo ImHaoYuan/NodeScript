@@ -1,4 +1,5 @@
 package com.autoscript.platform.system
+import com.autoscript.domain.bridge.generated.WireMethods
 
 import com.autoscript.domain.bridge.decodeObject
 import com.autoscript.domain.bridge.RpcNamespaceHandler
@@ -34,6 +35,10 @@ import com.autoscript.domain.core.ErrorCode
 class ClipboardNamespaceHandler(
     private val clipboard: Clipboard,
 ) : RpcNamespaceHandler() {
+
+    /** 申报方法表（wire-schema 对账挂点）：单源指向生成物 [WireMethods.BY_NS]，不手抄。 */
+    override fun methods(): Set<String> = WireMethods.BY_NS.getValue("clipboard")
+
     override suspend fun dispatch(request: BridgeRequest): BridgeResponse = when (request.method) {
         "getText" -> getText(request)
         "setText" -> setText(request)
