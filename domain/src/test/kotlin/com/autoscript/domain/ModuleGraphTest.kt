@@ -6,12 +6,13 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 /**
- * 全仓模块依赖图守护（docs/framework-design.md §4.1 依赖方向铁律 + §6 模块表 + §6 末「依赖方向无环」）。
+ * 全仓模块依赖图守护（docs §4.1 依赖方向铁律 + §6 模块表 + §6 末「依赖方向无环」）。
  *
  * 与各模块内 archUnit 测试的分工：
  * - **模块内 archUnit**：按字节码校验该模块的包没有 import 不该碰的包 —— 只对有 class 的模块有效；
- * - **本测试**：按构建脚本校验模块依赖边符合 §6「允许依赖」列且无环 —— 空模块（`:engine:sandbox`、
- *   `:bridge:image` 等尚无源码）同样被覆盖，且能拦住 Gradle 层反向依赖。
+ * - **本测试**：按构建脚本校验模块依赖边符合 §6「允许依赖」列且无环 —— 空模块（`:bridge:image`
+ *   等无 Kotlin 源码）同样被覆盖，且能拦住 Gradle 层反向依赖。`settings` 里注释掉的 include
+ *   不算声明（正则锚行首）——审查步骤 1 摘除 `:engine:sandbox` 空壳就靠这条。
  *
  * 两者缺一不可：字节码检查看不见 `implementation(project(...))` 这条边，
  * 构建脚本检查看不见「声明了 :domain 却 import 了 :bridge」这类越权。
@@ -24,7 +25,8 @@ class ModuleGraphTest {
     private val root: File = findRepoRoot()
 
     private val declaredModules: Set<String> =
-        Regex("""include\(\s*"(:[^"]+)"\s*\)""")
+        // 锚行首：`// include(":x")` 注释行不计（审查步骤 1 摘除空壳的机器口径）。
+        Regex("""(?m)^\s*include\(\s*"(:[^"]+)"\s*\)""")
             .findAll(File(root, "settings.gradle.kts").readText())
             .map { it.groupValues[1] }
             .toSet()
@@ -62,6 +64,7 @@ class ModuleGraphTest {
             ":app-service:script-repo",
             ":app-service:permission-center",
             ":app-service:packager",
+            ":app-service:npm",     // §6 审查步骤 5：npm 面自 packager 拆出
             ":domain",
             ":bridge:java",          // §6 包级例外一（shell 装配包挂 handler）
             ":platform:capabilities",// §6 包级例外二（shell 装配包生产装配，PlatformWiring）
@@ -76,6 +79,7 @@ class ModuleGraphTest {
         ":app-service:script-repo" to setOf(":domain"),
         ":app-service:permission-center" to setOf(":domain"),
         ":app-service:packager" to setOf(":domain"),
+        ":app-service:npm" to setOf(":domain"),
         ":domain" to emptySet(),
         ":bridge:java" to setOf(":domain"),
         ":bridge:native" to emptySet(),
@@ -83,7 +87,6 @@ class ModuleGraphTest {
         // :domain = ScriptEngine SPI 实现方向（domain KDoc「实现位于 :engine:node-process」的机器可读化）；
         // :bridge:native 是运行期 .so 装载（main.cpp dlopen），不是 Kotlin 源码边。
         ":engine:node-process" to setOf(":bridge:native", ":domain"),
-        ":engine:sandbox" to emptySet(),
         ":platform:capabilities" to setOf(":domain"),
         ":platform:system" to setOf(":domain"),
         // 呈现层只认 :domain（HostSummary 读口 + DTO）；反向依赖 :app 会成环。

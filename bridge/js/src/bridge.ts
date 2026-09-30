@@ -1,5 +1,5 @@
 /**
- * 桥信封类型（docs/framework-design.md §7.1/§7.5）。
+ * 桥信封类型（docs §7.1/§7.5）。
  * 与 :domain:bridge.BridgeRequest / BridgeResponse 对齐（JsonTransport 信封）：
  * 请求 {"t":"req","id":1,"ns":"a11y","m":"findOne","ttl":5000,"payload":<json>|null,"side":<long>|null}
  * 成功 {"t":"ok","id":1,"payload":<json>|null,"side":<long>|null}

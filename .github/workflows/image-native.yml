@@ -1,6 +1,6 @@
 name: image-native
 
-# libopencv.so 构建（docs/framework-design.md §9.2 / §16）
+# libopencv.so 构建（docs §9.2 / §16）
 #
 # 与 ci.yml 的分工：本文件**只**跑 OpenCV 静态链接 + 我们的桥面 C++ → 单个
 # libopencv.so（arm64-android26），跑 node-runtime-build/scripts/build-opencv.sh
@@ -69,8 +69,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends cmake ninja-build g++ git ccache
 
       # host OpenCV 静态库 5–10 分钟档：g++ 经 ccache 包调用，BUILD_DIR 复用即命中。
-      # run-host-tests.sh 的 BUILD 缺省 /tmp/ocvhostbuild（$OCV_HOST_BUILD 可覆写）——
-      # 这里覆写进 workspace 才能被 actions/cache 存走；commit 对表由脚本内 pin 源 verdict。
+      # run-host-tests.sh 的 BUILD 必填（$OCV_HOST_BUILD，审查步骤 1 起无缺省）——
+      # 这里显式指进 workspace 才能被 actions/cache 存走；commit 对表由脚本内 pin 源 verdict。
       - name: 缓存 host ccache（x86_64 OpenCV 静态库）
         uses: actions/cache@v4
         with:
@@ -155,9 +155,15 @@ jobs:
           DL="$WORK_DIR/dl"
           mkdir -p "$DL" "$WORK_DIR/ndk"
           ZIP="$DL/android-ndk-${NDK_VERSION}-linux.zip"
-          echo "下载 NDK $NDK_VERSION（约 $((NDK_ZIP_SIZE / 1024 / 1024))MB）…"
-          curl -fsS --retry 3 -o "$ZIP" \
-            "https://dl.google.com/android/repository/$(basename "$ZIP")"
+          # 与 node-slice 同一 skip 判断（下载层缓存命中即跳过，校验照跑）：
+          # 缺这层时命中缓存也白下 688MB。
+          if [ -f "$ZIP" ]; then
+            echo "[skip] NDK zip 已在（下载层缓存命中），跳过下载"
+          else
+            echo "下载 NDK $NDK_VERSION（约 $((NDK_ZIP_SIZE / 1024 / 1024))MB）…"
+            curl -fsS --retry 3 --retry-all-errors -o "$ZIP" \
+              "https://dl.google.com/android/repository/$(basename "$ZIP")"
+          fi
           echo "校验 size=$NDK_ZIP_SIZE sha1=${NDK_SHA1:0:16}…"
           actual_size=$(stat -c%s "$ZIP")
           [ "$actual_size" = "$NDK_ZIP_SIZE" ] || { echo "NDK zip 大小不符: $actual_size"; exit 1; }

@@ -5,7 +5,7 @@ import com.tngtech.archunit.junit.ArchTest
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses
 
 /**
- * 领域层架构门（docs/framework-design.md §4.1/§6 依赖规则）：
+ * 领域层架构门（docs §4.1/§6 依赖规则）：
  * :domain 零 Android / 零桌面 UI 依赖；纯 Kotlin，JVM 可测。
  */
 @AnalyzeClasses(packages = ["com.autoscript.domain"])

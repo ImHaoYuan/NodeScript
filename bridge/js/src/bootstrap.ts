@@ -6,7 +6,7 @@ import { AutojsError, ErrCode, errFromThrown } from './errors'
 import { runtimeBridge } from './runtime'
 
 /**
- * bootstrap loader（docs/framework-design.md §7.5 / §12.4）：
+ * bootstrap loader（docs §7.5 / §12.4）：
  * 把 [RuntimeBridgeImpl.install] 的投递回调和 [handleResponse] 结算接上真实传输。
  *
  * 两个接入面：

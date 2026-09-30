@@ -7,7 +7,7 @@ import java.nio.file.StandardOpenOption
 import java.util.UUID
 
 /**
- * 原子部署器（docs/framework-design.md §9.6）：
+ * 原子部署器（docs §9.6）：
  * stage（.stage/<nonce>/ 内写入 + sha256 登记）→ finalize（校验 + fsync + 同目录原子 rename）
  * → journal commit；任一步失败 abort（清理 + journal rollback）。
  *

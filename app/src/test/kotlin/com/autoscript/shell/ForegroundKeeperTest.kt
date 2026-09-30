@@ -5,6 +5,8 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import com.autoscript.platform.system.WakeLockLedger
+import com.autoscript.platform.system.WakeLockOps
 
 /**
  * 保活编排验证（§8.7 保活与电源）。
@@ -17,6 +19,13 @@ import org.junit.jupiter.api.Test
  * 走 [ForegroundOps] 缝 + [WakeLockOps] 缝，不碰 Android 框架对象。
  */
 class ForegroundKeeperTest {
+
+    @Test
+    fun `FRAMEWORK_TOKEN 字面量与 system 侧钉的同源`() {
+        // :platform:system 的 PowerManagerNamespaceHandlerTest 见不到本常量，按字面量
+        // "framework:keepalive" 占同一席 —— 任一侧单改先红（跨模块同源钉）。
+        assertEquals("framework:keepalive", ForegroundKeeper.FRAMEWORK_TOKEN)
+    }
 
     private class FakeForeground(
         var startOk: Boolean = true,

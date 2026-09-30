@@ -19,6 +19,9 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import com.autoscript.platform.system.PowerManagerNamespaceHandler
+import com.autoscript.platform.system.WakeLockLedger
+import com.autoscript.platform.system.WakeLockOps
 
 /**
  * 能力命名空间挂载缝验证（§4.1/§6 + `:app` ArchitectureTest「禁直连 :platform」）：
@@ -26,7 +29,7 @@ import org.junit.jupiter.api.Test
  *
  * 覆盖三件事：
  * 1. 注入 `a11y`/`screen`/`npm` 缝 → 请求可达真实逻辑（这里用内存假实现，等价于
- *    `:platform:capabilities` 的真实现与 `:app-service:packager` 的 npm 真实现）；
+ *    `:platform:capabilities` 的真实现与 `:app-service:npm` 的 npm 真实现）；
  * 2. 不注入 → 桥对 `a11y.*`/`screen.*`/`npm.*`/`clipboard.*`/`sensors.*`/`power_manager.*` 如实回 ERR_NOT_IMPLEMENTED（§7.5 Router 契约），
  *    **绝不伪造可用**；
  * 3. `console`/`engines` 与能力缝共存，互不抢占 namespace。
@@ -66,7 +69,7 @@ class AppShellCapabilityMountTest {
             sensorsHandler = map["sensors"],
             imagesHandler = map["images"],
             // S8.7: power_manager drives the ledger straight; tests feed a keeper on demand.
-            powerManagerHandler = keeper?.let { PowerManagerNamespaceHandler(it.wakeLocks(), it).mount() },
+            powerManagerHandler = keeper?.let { PowerManagerNamespaceHandler(it.wakeLocks(), it) },
         )
     }
 

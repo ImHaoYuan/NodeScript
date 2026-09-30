@@ -26,7 +26,7 @@ interface GrantLauncher {
 }
 
 /**
- * 权限三态门禁实现（docs/framework-design.md §9.5）：
+ * 权限三态门禁实现（docs §9.5）：
  * 唯一的权限入口——所有模块不得直接查 Settings/ActivityCompat，一律经此门禁（可 Mock）。
  *
  * - [state] 直读系统态；读取异常（ROM 奇异实现/查询崩溃）诚实降级为 DEGRADED

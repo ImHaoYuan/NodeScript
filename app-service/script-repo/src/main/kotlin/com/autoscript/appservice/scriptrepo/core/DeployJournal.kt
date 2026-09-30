@@ -6,7 +6,7 @@ import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 
 /**
- * 部署事务日记（docs/framework-design.md §9.6 原子部署 / §10 install.journal 精神）。
+ * 部署事务日记（docs §9.6 原子部署 / §10 install.journal 精神）。
  *
  * 记录行：`<nonce>US<relPath(enc)>US<sha256(enc)>US<state>（US = U+001F）`，state ∈ STAGED|COMMITTED|ROLLED_BACK。
  * 分隔符为 U+001F（ASCII Unit Separator）：路径/哈希中不可能出现的控制字符，避免空格分隔被

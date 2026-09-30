@@ -1,13 +1,13 @@
 package com.autoscript.domain.storage
 
 /**
- * `datastore` 领域契约（docs/framework-design.md §9.6）：SQLite-backed KV +
+ * `datastore` 领域契约（docs §9.6）：SQLite-backed KV +
  * serializer 适配（JSON / native 对象 / byte）、事务语义。
  *
  * 为什么住 `:domain`：真实现要碰 SQLite（Android），§6 要求 `:platform:*` 只依赖
  * `:domain`；把「问什么」（本文件）与「怎么存」（`:platform:system`）切开，
- * handler 才是纯 JVM 可测的 —— 与 [com.autoscript.domain.system.ShellExecutor] /
- * [com.autoscript.domain.system.FloatingWindowHost] 同一模式。
+ * handler 才是纯 JVM 可测的 —— 与 [com.autoscript.platform.system.ShellExecutor] /
+ * [com.autoscript.platform.system.FloatingWindowHost] 同一模式。
  *
  * **同步 importer 不进本 SPI**：铁律 2（跨进程/线程边界一律 Promise，禁同步变体）
  * 把同步写死死拦在边界外；「纯 JS datastore importer」只活在 JS 进程内的纯内存

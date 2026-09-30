@@ -1,5 +1,5 @@
 /**
- * 截图与图像命名空间（docs/framework-design.md §9.2 / §8.8 / §12.2）：
+ * 截图与图像命名空间（docs §9.2 / §8.8 / §12.2）：
  * screen.capture() → FrameSource 句柄（分类错误而非黑图：锁屏/FLAG_SECURE/
  * 无窗口/节流一律抛 ERR_*，见 Kotlin ScreenPolicy）；
  * images.decode/matchTemplate/findImage/findColor/release 走 native 分析面（§12.2 第七条独立缝，

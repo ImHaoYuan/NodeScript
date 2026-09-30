@@ -1,7 +1,7 @@
 package com.autoscript.domain.npm
 
 /**
- * npm 依赖管理契约（docs/framework-design.md §10.7 PackageManagerFacade）。
+ * npm 依赖管理契约（docs §10.7 PackageManagerFacade）。
  *
  * 定位：:domain 纯 Kotlin 接口（零 Android/零桥），由 :app-service 安装协调器实现；
  * 轻操作（list/config/storage/offlineGap）实现侧 Kotlin 直读，重操作（install/ci/…）

@@ -7,7 +7,7 @@ import java.io.ByteArrayInputStream
 import java.io.InputStream
 
 /**
- * 递归枚举的纯逻辑单测（docs/framework-design.md §9.6 assets → filesDir 原子部署）。
+ * 递归枚举的纯逻辑单测（docs §9.6 assets → filesDir 原子部署）。
  * 走 [AssetsWalk.walk] 接缝，不依赖 android.jar，故可在本机 JVM 上跑。
  */
 class AssetsWalkTest {

@@ -4,16 +4,23 @@ import android.content.Context
 import com.autoscript.domain.automation.ImageAnalyzer
 import com.autoscript.domain.bridge.NamespaceHandler
 import com.autoscript.domain.system.DialogHost
-import com.autoscript.platform.capabilities.AndroidDialogHost
-import com.autoscript.platform.capabilities.AndroidFrameProducer
-import com.autoscript.platform.capabilities.AndroidGestureInput
-import com.autoscript.platform.capabilities.AndroidUiTree
+import com.autoscript.platform.capabilities.dialogs.AndroidDialogHost
+import com.autoscript.platform.capabilities.screen.AndroidFrameProducer
+import com.autoscript.platform.capabilities.screen.AndroidGestureInput
+import com.autoscript.platform.capabilities.a11y.AndroidUiTree
 import com.autoscript.platform.capabilities.CapabilityNamespaces
-import com.autoscript.platform.capabilities.ScreenshotSource
+import com.autoscript.platform.capabilities.screen.ScreenshotSource
 import com.autoscript.platform.capabilities.device.SystemDialogOps
+import com.autoscript.platform.system.AndroidWakeLockOps
 import com.autoscript.platform.system.JniOps
 import com.autoscript.platform.system.NativeImageAnalyzer
+import com.autoscript.platform.system.SystemNamespaces
+import com.autoscript.platform.system.PowerManagerNamespaceHandler
 import com.autoscript.platform.system.SystemSpis
+import com.autoscript.platform.system.WakeLockLedger
+import com.autoscript.platform.capabilities.a11y.A11yEventRing
+import com.autoscript.platform.capabilities.a11y.InMemoryUiTree
+import com.autoscript.platform.capabilities.a11y.SystemA11yBridge
 
 /**
  * 生产能力装配：`SystemSpis` + `CapabilityNamespaces` → `AppShellKit.assemble` 的注入束
@@ -92,21 +99,21 @@ object PlatformWiring {
         systemHandlers = SystemHandlers(
             // 缺省 null（未提供）→ 如实 ERR_NOT_IMPLEMENTED；生产由 of() 传真宿主。
             dialogs = dialogs?.let { CapabilityNamespaces.dialogs(it) },
-            shell = CapabilityNamespaces.shell(spis.shell),
-            device = CapabilityNamespaces.device(spis.device),
-            app = CapabilityNamespaces.app(spis.app),
-            floatingWindow = CapabilityNamespaces.floatingWindow(spis.floatingWindow),
+            shell = SystemNamespaces.shell(spis.shell),
+            device = SystemNamespaces.device(spis.device),
+            app = SystemNamespaces.app(spis.app),
+            floatingWindow = SystemNamespaces.floatingWindow(spis.floatingWindow),
         ),
-        datastoreHandler = CapabilityNamespaces.datastore(spis.datastore),
-        zipHandler = CapabilityNamespaces.zip(spis.zip),
-        settingsHandler = CapabilityNamespaces.settings(spis.settings),
-        notificationHandler = CapabilityNamespaces.notification(spis.notification),
-        clipboardHandler = CapabilityNamespaces.clipboard(spis.clipboard),
-        sensorsHandler = CapabilityNamespaces.sensors(spis.sensors),
+        datastoreHandler = SystemNamespaces.datastore(spis.datastore),
+        zipHandler = SystemNamespaces.zip(spis.zip),
+        settingsHandler = SystemNamespaces.settings(spis.settings),
+        notificationHandler = SystemNamespaces.notification(spis.notification),
+        clipboardHandler = SystemNamespaces.clipboard(spis.clipboard),
+        sensorsHandler = SystemNamespaces.sensors(spis.sensors),
         // §9.2 图像面：生产侧由 [of] 喂 NativeImageAnalyzer（:bridge:image 的
         // libopencv.so 到位后）；单测/无 native 时不喂 —— 桥对 images.* 如实
         // ERR_NOT_IMPLEMENTED，绝不塞一个看不见像素的假分析器。
-        imagesHandler = images?.let { CapabilityNamespaces.images(it) },
+        imagesHandler = images?.let { SystemNamespaces.images(it) },
     )
 
     /** a11y 装配（[CapabilityNamespaces.a11y] 形状转接；实现在 :platform:capabilities）。 */
@@ -136,6 +143,23 @@ object PlatformWiring {
      * null → 图像面不注入（见 [Injection.imagesHandler]）。**默认值在装配期求值**，
      * 单测可传 null/替身绕过 native —— 同一函数真假可注入，不绑死构造。
      */
+    /**
+     * §8.7 唤醒锁账本的生产构造缝（审查步骤 6 起账本类住 `:platform:system`）。
+     * 根包 `AppShellApplication` 经此拿账本 —— 它不 import 任何
+     * `com.autoscript.platform..`（ArchitectureTest「平台实现只许装配包碰」看住）。
+     */
+    fun wakeLockLedger(context: Context): WakeLockLedger =
+        WakeLockLedger(AndroidWakeLockOps(context))
+
+    /**
+     * §8.7 脚本电源 handler 构造缝（`AppShell.assemble` 的 `powerManagerHandler` 独立缝）：
+     * 账本取 keeper 持有的**同一本账**（脚本锁与框架锁引用计数共存），keepalive 喂同一
+     * 实现 `KeepAliveRenew` 的实例（`:domain` 窄缝，见 `ForegroundKeeper`）。返回类型是
+     * `NamespaceHandler`（`:domain`）—— 根包调用处连平台类型名都不必提。
+     */
+    fun powerManagerHandler(keeper: ForegroundKeeper): NamespaceHandler =
+        PowerManagerNamespaceHandler(keeper.wakeLocks(), keeper)
+
     fun of(
         context: Context,
         overlayAvailable: () -> Boolean = { false },

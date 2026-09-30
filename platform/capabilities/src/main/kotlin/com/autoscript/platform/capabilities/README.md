@@ -1,6 +1,6 @@
 # :platform:capabilities —— 能力命名空间语义层
 
-> 设计章节：`docs/framework-design.md` §9.1–9.4 / §12.2 / §12.3
+> 设计章节：`docs/design/09-capabilities.md` §9.1–9.4 / `docs/design/12-js-api.md` §12.2 / §12.3
 > （§9.2 图像分析面 = `ImagesNamespaceHandler`，本模块第七个桥面）。
 > 本文件只记**本模块内部**的分层约定与「真实现怎么接」；跨模块契约以 `:domain` 为准。
 

@@ -1,29 +1,14 @@
 plugins {
-    alias(libs.plugins.android.library)
-    alias(libs.plugins.kotlin.android)
+    id("autoscript.android-library")
 }
 
+// 项目/资源/脚本库、assets→filesDir 原子部署（docs §9.6）。
+// 保留 android.library：AndroidAssetsSource 有 `import android.`（不入纯 JVM 转换名单）。
 android {
     namespace = "com.autoscript.appservice.scriptrepo"
-    compileSdk = libs.versions.compileSdk.get().toInt()
-    defaultConfig { minSdk = libs.versions.minSdk.get().toInt() }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-    kotlinOptions { jvmTarget = "17" }
-    testOptions {
-        unitTests {
-            all { it.useJUnitPlatform() }
-        }
-    }
 }
 
 dependencies {
     implementation(project(":domain"))
     implementation(libs.kotlinx.coroutines.core)
-
-    testImplementation(libs.junit.jupiter)
-    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
-    testImplementation(libs.archunit.junit5)
 }

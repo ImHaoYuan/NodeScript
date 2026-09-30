@@ -7,7 +7,7 @@ on:
 
 jobs:
   jvm-tests:
-    name: JVM 单测（domain / bridge:java / runtime / scheduler / script-repo / permission-center / packager / capabilities / platform:system / engine:node-process / ui / app）
+    name: JVM 单测（domain / bridge:java / runtime / scheduler / script-repo / permission-center / packager / npm / capabilities / platform:system / engine:node-process / ui / app）
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,13 +23,22 @@ jobs:
           yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
           "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
             "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: bridge/js/package-lock.json
+      - name: 构建 facade dist（dist 已出库 = 构建产物；bridgeDist 随包任务与 e2e 测试要它）
+        run: |
+          npm --prefix bridge/js ci
+          npm --prefix bridge/js run build
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"   # 与 AGP 8.5.2 匹配（≥8.7）；仓库已带 gradlew wrapper
       - name: JVM 单元测试
         run: |
-          ./gradlew :domain:test :bridge:java:test :app-service:runtime:test :app-service:scheduler:testDebugUnitTest :app-service:script-repo:testDebugUnitTest :app-service:permission-center:testDebugUnitTest :app-service:packager:testDebugUnitTest :platform:capabilities:testDebugUnitTest :platform:system:testDebugUnitTest :engine:node-process:testDebugUnitTest :ui:testDebugUnitTest :app:testDebugUnitTest --stacktrace -PskipNpmE2E
+          ./gradlew :domain:test :bridge:java:test :app-service:runtime:test :app-service:scheduler:test :app-service:script-repo:testDebugUnitTest :app-service:permission-center:test :app-service:packager:test :app-service:npm:test :platform:capabilities:testDebugUnitTest :platform:system:testDebugUnitTest :engine:node-process:testDebugUnitTest :ui:testDebugUnitTest :app:testDebugUnitTest --stacktrace -PskipNpmE2E
       - name: 上传测试报告
         if: always()
         uses: actions/upload-artifact@v4
@@ -45,9 +54,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"   # 对齐 node-runtime-build/VERSIONS.env 的 Node 24 口径（审查步骤 7：22→24）
           cache: npm
           cache-dependency-path: bridge/js/package-lock.json
+      - name: wire 生成物同步门（schema → wire-types.ts / WireMethods.kt，漂移即红）
+        # 生成器零依赖，不需要 npm ci；git diff 必须在仓库根跑（两份生成物跨模块）。
+        run: |
+          npm --prefix bridge/js run gen:wire
+          git diff --exit-code
       - name: facade 单元测试
         working-directory: bridge/js
         run: |

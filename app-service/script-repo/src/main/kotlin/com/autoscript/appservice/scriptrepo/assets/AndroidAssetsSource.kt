@@ -3,7 +3,7 @@ package com.autoscript.appservice.scriptrepo.assets
 import android.content.res.AssetManager
 
 /**
- * Android 资产源（docs/framework-design.md §9.6）：把 assets/scripts/<projectId>/ 下的
+ * Android 资产源（docs §9.6）：把 assets/scripts/<projectId>/ 下的
  * 原始资源读出为 Map<String, ByteArray>，交由 core 的 [ProjectDeployer] 原子部署。
  * 本类只做 read-only 的资产枚举；写路径全部在 core（纯 JVM），保证可单测。
  *

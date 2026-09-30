@@ -3,7 +3,6 @@ package com.autoscript.platform.system
 import android.content.Context
 import android.os.Build
 import android.provider.Settings
-import com.autoscript.domain.storage.SystemSettings
 
 /**
  * [AndroidSystemSettings.Ops] 的真机实现（docs §9.6）：唯一碰

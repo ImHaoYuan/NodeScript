@@ -1,7 +1,7 @@
 package com.autoscript.domain.engine
 
 /**
- * 四步 quiesce 计划模型（docs/framework-design.md §8.3）。
+ * 四步 quiesce 计划模型（docs §8.3）。
  * 纯逻辑：RuntimeController 逐步骤驱动：每步成功推进，超时中止并携带"部分完成"信息。
  * 顺序为契约：SUSPEND（暂停新请求）→ DRAIN_EVENTS（排空事件）→ SOFT_STOP_TIMEOUT（软停等待）→ DESTROY（销毁）。
  */

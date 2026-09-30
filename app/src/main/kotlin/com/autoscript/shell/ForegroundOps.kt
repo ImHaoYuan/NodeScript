@@ -11,6 +11,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
+import com.autoscript.platform.system.WakeLockLedger
 
 /**
  * 前台服务接触面（docs §8.7 保活）：唯一碰 `startForegroundService` /

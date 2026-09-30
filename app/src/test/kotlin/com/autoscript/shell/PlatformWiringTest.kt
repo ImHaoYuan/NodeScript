@@ -8,6 +8,8 @@ import com.autoscript.domain.automation.FeatureHit
 import com.autoscript.domain.automation.ImageAnalyzer
 import com.autoscript.domain.automation.ImageFrame
 import com.autoscript.domain.automation.ImageMatch
+import com.autoscript.domain.automation.ScreenSnapshot
+import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.bridge.HandleRef
@@ -21,23 +23,23 @@ import com.autoscript.domain.engine.KillCause
 import com.autoscript.domain.engine.ScriptEngine
 import com.autoscript.domain.engine.StopResult
 import com.autoscript.domain.storage.InMemoryDataStore
-import com.autoscript.domain.storage.SystemSettings
-import com.autoscript.domain.storage.ZipArchiver
-import com.autoscript.domain.system.AppLauncher
-import com.autoscript.domain.system.Clipboard
-import com.autoscript.domain.system.DeviceInfoProvider
-import com.autoscript.domain.system.DeviceProfile
+import com.autoscript.platform.system.SystemSettings
+import com.autoscript.platform.system.ZipArchiver
+import com.autoscript.platform.system.AppLauncher
+import com.autoscript.platform.system.Clipboard
+import com.autoscript.platform.system.DeviceInfoProvider
+import com.autoscript.platform.system.DeviceProfile
 import com.autoscript.domain.system.DialogHost
-import com.autoscript.domain.system.FloatingWindowHost
-import com.autoscript.domain.system.FloatingWindowSpec
-import com.autoscript.domain.system.NotificationPoster
-import com.autoscript.domain.system.NotificationSpec
-import com.autoscript.domain.system.SensorDelay
-import com.autoscript.domain.system.SensorEventBatch
-import com.autoscript.domain.system.SensorSource
-import com.autoscript.domain.system.ShellExecutor
-import com.autoscript.domain.system.ShellMode
-import com.autoscript.domain.system.ShellResult
+import com.autoscript.platform.system.FloatingWindowHost
+import com.autoscript.platform.system.FloatingWindowSpec
+import com.autoscript.platform.system.NotificationPoster
+import com.autoscript.platform.system.NotificationSpec
+import com.autoscript.platform.system.SensorDelay
+import com.autoscript.platform.system.SensorEventBatch
+import com.autoscript.platform.system.SensorSource
+import com.autoscript.platform.system.ShellExecutor
+import com.autoscript.platform.system.ShellMode
+import com.autoscript.platform.system.ShellResult
 import com.autoscript.platform.system.SystemSpis
 import java.nio.file.Path
 import kotlinx.coroutines.runBlocking
@@ -46,6 +48,14 @@ import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
+import com.autoscript.platform.system.SystemNamespaces
+import com.autoscript.platform.capabilities.CapabilityNamespaces
+import com.autoscript.platform.capabilities.a11y.AndroidUiTree
+import com.autoscript.platform.capabilities.a11y.SystemA11yBridge
+import com.autoscript.platform.capabilities.screen.AndroidFrameProducer
+import com.autoscript.platform.capabilities.screen.ProducedFrame
+import com.autoscript.platform.capabilities.screen.ScreenshotSource
 
 /**
  * 生产能力装配验证（§12.2 接线现状 + §6 包级例外二）。
@@ -285,7 +295,7 @@ class PlatformWiringTest {
     ): BridgeResponse = s.router.dispatch(BridgeRequest(1, ns, method, payload, 5_000))
 
     private fun okPayload(r: BridgeResponse): String =
-        assertInstanceOf(BridgeResponse.Ok::class.java, r).payload!!
+        assertInstanceOf(BridgeResponse.Ok::class.java, r, "响应须 Ok，实际：$r").payload!!
 
     private fun errCode(r: BridgeResponse): String =
         assertInstanceOf(BridgeResponse.Err::class.java, r).errorCode
@@ -464,6 +474,68 @@ class PlatformWiringTest {
                 "screen 同底（ScreenshotSource+AndroidFrameProducer 经 SystemA11yBridge）",
             )
         }
+        Unit
+    }
+
+    // ── 跨命名空间帧表（§18-8(b)；2026-09-30 自 capabilities ImagesNamespaceHandlerTest 迁入：
+    // images handler 已随步骤 6 迁 :platform:system，跨 system×capabilities 的互认测试只有
+    // 同时依赖两者的 :app 能住 —— 生产侧也正是 PlatformWiring 把同一个 analyzer 同时喂给两边) ──
+
+    private fun rgbaProducer(w: Int, h: Int): ScreenshotSource.FrameProducer =
+        object : ScreenshotSource.FrameProducer {
+            override suspend fun snapshot(): ScreenSnapshot =
+                ScreenSnapshot(locked = false, secureForeground = false, hasWindows = true)
+
+            override suspend fun produce(width: Int, height: Int): ProducedFrame =
+                ProducedFrame(ByteArray(w * h * 4), w, h)
+        }
+
+    private fun refJson(ref: HandleRef): String =
+        """{"ref":{"refId":${ref.refId},"generation":${ref.generation}}}"""
+
+    private fun matchJson(haystack: HandleRef, needle: HandleRef, threshold: String): String =
+        """{"haystack":{"refId":${haystack.refId},"generation":${haystack.generation}},"needle":{"refId":${needle.refId},"generation":${needle.generation}},"threshold":$threshold}"""
+
+    @Test
+    fun `截屏帧与 decode 帧同一张表——findImage 通、images 能放 screen 的帧`() = runBlocking {
+        val shared = FakeImageAnalyzer(hit = null)
+        val images = SystemNamespaces.images(shared)
+        // 可控时钟：capture 走 333ms 节流，别让用例撞在窗口上
+        var now = 1_000L
+        val screen = ScreenshotSource(rgbaProducer(4, 4), clock = { now }, analyzer = shared)
+
+        val shot = screen.capture()
+        assertEquals(1L, shot.handle.refId, "截屏帧进的是 images 那张表（号段从 1 起）")
+
+        val iconPayload = okPayload(images.handle(BridgeRequest(2, "images", "decode", """{"path":"/sdcard/icon.png"}""", 5_000)))
+        val iconFields = (DomainJson.decodeObject(iconPayload)["ref"] as DomainJson.Value.Obj).fields
+        val icon = HandleRef(
+            (iconFields["refId"] as DomainJson.Value.N).raw.toLong(),
+            (iconFields["generation"] as DomainJson.Value.N).raw.toLong(),
+        )
+        assertEquals(2L, icon.refId, "decode 接着截屏帧往下发号 —— 同一段，不是两张表")
+
+        // 互认的核心：截屏帧当 haystack 不是 ERR_STALE_HANDLE
+        val matched = okPayload(
+            images.handle(
+                BridgeRequest(3, "images", "findImage", matchJson(shot.handle, icon, "0.9"), 5_000),
+            ),
+        )
+        assertEquals("null", matched, "跨来源两帧都认得（fake 未设命中 → 裸 null，不是 STALE）")
+
+        // `images.release` 放得掉一帧截屏（曾经：这张表里根本没有它）
+        assertEquals("true", okPayload(images.handle(BridgeRequest(4, "images", "release", refJson(shot.handle), 5_000))))
+        assertEquals(
+            "ERR_STALE_HANDLE",
+            errCode(images.handle(BridgeRequest(5, "images", "release", refJson(shot.handle), 5_000))),
+            "放掉即离场：两边同一口径",
+        )
+        // screen 侧再 recycle 同一帧 → 同码（同一张表、同一个"已释放"事实）
+        val e = assertThrows<AutojsException> { runBlocking { screen.recycle(shot.handle) } }
+        assertEquals(ErrorCode.ERR_STALE_HANDLE, e.error)
+
+        // 截屏帧放掉后，decode 帧照常在场可放（两帧互不牵连）
+        assertEquals("true", okPayload(images.handle(BridgeRequest(6, "images", "release", refJson(icon), 5_000))))
         Unit
     }
 }

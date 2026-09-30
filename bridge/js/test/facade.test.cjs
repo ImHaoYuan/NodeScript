@@ -1,6 +1,6 @@
 'use strict'
 /**
- * facade 冒烟测试（docs/framework-design.md §12.4 契约面）：
+ * facade 冒烟测试（docs §12.4 契约面）：
  * - 信封/单例安装/选择器条件聚合
  * - 错误目录（ERR_* 与 :domain:core.ErrorCode 逐字对齐）
  * - workManager 排期（daily/once 的 nextFireAfter 唯一时序来源）

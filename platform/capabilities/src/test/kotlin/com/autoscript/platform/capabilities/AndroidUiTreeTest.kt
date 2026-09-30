@@ -1,5 +1,6 @@
 package com.autoscript.platform.capabilities
 
+import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.automation.GestureInput
 import com.autoscript.domain.automation.GesturePoint
 import com.autoscript.domain.automation.GestureStroke
@@ -18,6 +19,13 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import com.autoscript.platform.capabilities.a11y.A11yEventRing
+import com.autoscript.platform.capabilities.a11y.A11yNamespaceHandler
+import com.autoscript.platform.capabilities.a11y.A11yNodeSnap
+import com.autoscript.platform.capabilities.a11y.AndroidUiTree
+import com.autoscript.platform.capabilities.a11y.InMemoryUiTree
+import com.autoscript.platform.capabilities.device.AutoScriptAccessibilityService
+import com.autoscript.platform.capabilities.screen.AndroidGestureInput
 
 /**
  * [AndroidUiTree] + [AndroidGestureInput] 语义（假桥注入；设备面在
@@ -258,23 +266,23 @@ class AndroidUiTreeTest {
         val mem = InMemoryUiTree()
         val handler = A11yNamespaceHandler(tree = mem, actions = mem, input = input)
         val resp = runBlocking {
-            handler.handle(A11yNamespaceHandler.Request(1, "canPerformGestures", null))
+            handler.handle(a11yReq(1, "canPerformGestures", null))
         }
-        assertTrue(resp is A11yNamespaceHandler.Response.Err, "未连时 canPerformGestures 必须是 Err")
+        assertTrue(resp is BridgeResponse.Err, "未连时 canPerformGestures 必须是 Err")
         assertEquals(
             ErrorCode.ERR_SERVICE_DISABLED.code,
-            (resp as A11yNamespaceHandler.Response.Err).code,
+            (resp as BridgeResponse.Err).errorCode,
         )
         val g = runBlocking {
             handler.handle(
-                A11yNamespaceHandler.Request(
+                a11yReq(
                     2, "gesture",
                     """{"strokes":[{"points":[{"x":1,"y":1}]}]}""",
                 ),
             )
         }
-        assertTrue(g is A11yNamespaceHandler.Response.Err, "gesture 同折叠")
-        assertEquals(ErrorCode.ERR_SERVICE_DISABLED.code, (g as A11yNamespaceHandler.Response.Err).code)
+        assertTrue(g is BridgeResponse.Err, "gesture 同折叠")
+        assertEquals(ErrorCode.ERR_SERVICE_DISABLED.code, (g as BridgeResponse.Err).errorCode)
     }
 
     /** 断言辅助：materialized 里的根是否仍活（未回收）。 */

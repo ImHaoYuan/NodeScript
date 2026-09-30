@@ -104,7 +104,8 @@ class NodeProcessSpawnE2ETest {
 
     @Test
     fun `spawn 全链——console 与心跳经 unix 桥上送，档案 SUCCEEDED 双 id 关联`() = runBlocking {
-        // dist 是 git 跟踪的（CI 无 npm build 也在）：缺 = 仓库破损，该红不该 assume 跳。
+        // dist 是构建产物（步骤 7 出库；CI jvm-tests 前置 npm build，本机 npm run build）：
+        // 缺 = 没跑 npm build —— 该红不该 assume 跳（红了照报错文案跑一次 build 即可）。
         assertTrue(File(dist, "bootstrap.js").isFile && File(dist, "engines.js").isFile, "dist 缺件：$dist")
 
         // sun_path 上限 108B，且 Gradle 测试 tmpdir（build/tmp/workers/…）叠目录名易超 —— 固定 /tmp 短名。

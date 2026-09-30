@@ -2,9 +2,6 @@ package com.autoscript.platform.system
 
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
-import com.autoscript.domain.system.ShellExecutor
-import com.autoscript.domain.system.ShellMode
-import com.autoscript.domain.system.ShellResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope

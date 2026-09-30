@@ -3,10 +3,10 @@ package com.autoscript.domain.scripts
 import java.nio.file.Path
 
 /**
- * 脚本目录约定（docs/framework-design.md §9.6 / §10.2 的**单一事实来源**）。
+ * 脚本目录约定（docs §9.6 / §10.2 的**单一事实来源**）。
  *
  * 为什么这条约定必须住 `:domain` 而不是各模块各写一份：项目根这一个字符串被四个地方读
- * —— `:app-service:script-repo`（部署/索引）、`:app-service:packager`（npm 项目布局）、
+ * —— `:app-service:script-repo`（部署/索引）、`:app-service:npm`（npm 项目布局）、
  * `:app-service:scheduler`（恢复期补部署）、`:app` 装配层（目录落位与壳读口）。
  * 任一处写错（`files/script`、`files/scripts/`、`Files/scripts`）都不会编译失败，
  * 只会表现为"文件写进去但引擎读不到"这种**没有报错**的故障。放进契约层，拼错即编译期可见。

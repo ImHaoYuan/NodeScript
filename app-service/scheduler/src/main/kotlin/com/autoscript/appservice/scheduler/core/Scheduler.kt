@@ -8,7 +8,7 @@ import com.autoscript.domain.scripts.isTerminal
 import java.time.ZoneId
 
 /**
- * 定时任务模型（docs/framework-design.md §8.6 / §9.6 定时 API）：
+ * 定时任务模型（docs §8.6 / §9.6 定时 API）：
  * 一次登记 = 一个调度计划 + 投递参数 + 屏幕契约；每次触发生成新的 runNonce（意图日志幂等锚点）。
  */
 data class ScheduledTask(

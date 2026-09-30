@@ -16,7 +16,7 @@ enum class Capability {
 }
 
 /**
- * 三态门禁（docs/framework-design.md §9.5）。
+ * 三态门禁（docs §9.5）。
  * - GRANTED：系统授予且当前可用（含会话型 MediaProjection 已激活）；
  * - DEGRADED：可降级但受限（a11y 节流、无 root、BAL、电池未豁免…）；
  * - DENIED：被用户/系统拒绝 → 调用抛 ERR_PERMISSION_DENIED。

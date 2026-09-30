@@ -99,9 +99,17 @@ jobs:
           DL="$WORK_DIR/dl"
           mkdir -p "$DL" "$WORK_DIR/ndk"
           ZIP="$DL/android-ndk-${NDK_VERSION}-linux.zip"
-          echo "下载 NDK $NDK_VERSION（约 $((NDK_ZIP_SIZE / 1024 / 1024))MB）…"
-          curl -fsS -C - --retry 3 -o "$ZIP" \
-            "https://dl.google.com/android/repository/$(basename "$ZIP")"
+          # 与 fetch-and-build.sh §2 同一 skip 判断（原抄漏了这层）：下载层缓存命中时
+          # 文件已完整，无条件 `curl -C -` 会向 dl.google.com 发 Range 续传请求，
+          # 该端点对续传在 HTTP/2 上断流（curl exit 92 PROTOCOL_ERROR）——缓存命中的
+          # run 反而必红，重跑也红。命中即跳过，校验（下两行）照跑兜底。
+          if [ -f "$ZIP" ]; then
+            echo "[skip] NDK zip 已在（下载层缓存命中），跳过下载"
+          else
+            echo "下载 NDK $NDK_VERSION（约 $((NDK_ZIP_SIZE / 1024 / 1024))MB）…"
+            curl -fsS -C - --retry 3 --retry-all-errors -o "$ZIP" \
+              "https://dl.google.com/android/repository/$(basename "$ZIP")"
+          fi
           echo "校验 size=$NDK_ZIP_SIZE sha1=${NDK_SHA1:0:16}…"
           actual_size=$(stat -c%s "$ZIP")
           [ "$actual_size" = "$NDK_ZIP_SIZE" ] || { echo "NDK zip 大小不符: $actual_size"; exit 1; }

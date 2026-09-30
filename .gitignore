@@ -1,5 +1,8 @@
 # Android
 build/
+# 上面这条按目录名任意深度匹配 —— build-logic 的 Kotlin 包目录恰好叫 build
+# （com.autoscript.build：TestGuard/Catalogs），是源码不是产物，放行。
+!build-logic/src/main/kotlin/com/autoscript/build/
 .gradle/
 local.properties
 .idea/
@@ -9,6 +12,8 @@ captures/
 # Node
 node_modules/
 *.log
+# tsc 产物 = 构建产物（审查步骤 7 出库；CI jvm-tests 前置 npm build，本机 npm run build）
+bridge/js/dist/
 
 # node-runtime-build 构建产物（大体积二进制）
 node-runtime-build/work/

@@ -1,0 +1,215 @@
+{
+  "$note": "wire 面单一事实来源（SSOT，审查步骤 7）。每个命名空间的 facade 文件与宿主方法表在这里钉死；由 bridge/schema/generate.mjs 双发射生成 wire-types.ts / WireMethods.kt（生成物入库，漂移由 gen:wire --check + CI git diff 门看着）。对账门：bridge/js/test/wire-schema.test.cjs（JS invoke 字面量 ↔ 本表 ↔ handler 的 methods() ↔ register）。",
+  "namespaces": {
+    "a11y": {
+      "facade": "a11y.ts",
+      "methods": [
+        "bounds",
+        "canPerformGestures",
+        "children",
+        "click",
+        "copy",
+        "desc",
+        "dispose",
+        "events",
+        "findAll",
+        "findOne",
+        "findOneOrNull",
+        "gesture",
+        "longClick",
+        "parent",
+        "paste",
+        "scroll",
+        "setText",
+        "text",
+        "waitFor"
+      ]
+    },
+    "app": {
+      "facade": "extras.ts",
+      "methods": [
+        "currentPackage",
+        "launch"
+      ]
+    },
+    "clipboard": {
+      "facade": "clipboard.ts",
+      "methods": [
+        "getText",
+        "setText"
+      ]
+    },
+    "console": {
+      "facade": "console.ts",
+      "methods": [
+        "log"
+      ]
+    },
+    "datastore": {
+      "facade": "datastore.ts",
+      "methods": [
+        "clear",
+        "contains",
+        "get",
+        "keys",
+        "put",
+        "remove"
+      ]
+    },
+    "device": {
+      "facade": "extras.ts",
+      "methods": [
+        "model",
+        "sdkInt"
+      ]
+    },
+    "dialogs": {
+      "facade": "extras.ts",
+      "methods": [
+        "choose",
+        "prompt"
+      ]
+    },
+    "engines": {
+      "facade": "engines.ts",
+      "methods": [
+        "channel",
+        "channelClose",
+        "channelDrain",
+        "channelEmit",
+        "exec",
+        "heartbeat",
+        "poolStats",
+        "status",
+        "stop"
+      ]
+    },
+    "floatingWindow": {
+      "facade": "extras.ts",
+      "methods": [
+        "close",
+        "create"
+      ]
+    },
+    "images": {
+      "facade": "images.ts",
+      "methods": [
+        "crop",
+        "decode",
+        "findColor",
+        "findFeature",
+        "findImage",
+        "matchTemplate",
+        "release",
+        "resize",
+        "rotate",
+        "toGrayscale"
+      ]
+    },
+    "notification": {
+      "facade": "notification.ts",
+      "methods": [
+        "canPost",
+        "cancel",
+        "post"
+      ]
+    },
+    "npm": {
+      "facade": "npm.ts",
+      "methods": [
+        "approvals",
+        "audit",
+        "ci",
+        "dedupe",
+        "events",
+        "importOfflineBundle",
+        "importTarball",
+        "install",
+        "list",
+        "offlineGap",
+        "prune",
+        "remove",
+        "requestApprove",
+        "setRegistry"
+      ]
+    },
+    "power_manager": {
+      "facade": "power.ts",
+      "methods": [
+        "acquire",
+        "release",
+        "status"
+      ]
+    },
+    "screen": {
+      "facade": "images.ts",
+      "methods": [
+        "capture",
+        "closeSession",
+        "nextFrame",
+        "recycle",
+        "startCapturer"
+      ]
+    },
+    "sensors": {
+      "facade": "sensors.ts",
+      "methods": [
+        "drain",
+        "isSupported",
+        "register",
+        "unregister",
+        "unregisterAll"
+      ]
+    },
+    "settings": {
+      "facade": "settings.ts",
+      "methods": [
+        "canWrite",
+        "getInt",
+        "getString",
+        "putInt",
+        "putString"
+      ]
+    },
+    "shell": {
+      "facade": "extras.ts",
+      "methods": [
+        "exec",
+        "shell"
+      ]
+    },
+    "workManager": {
+      "facade": "workManager.ts",
+      "methods": [
+        "cancel",
+        "create",
+        "list"
+      ]
+    },
+    "zip": {
+      "facade": "zip.ts",
+      "methods": [
+        "compress",
+        "extract"
+      ]
+    }
+  },
+  "aliases": {
+    "findOneOrNull": {
+      "ns": "a11y",
+      "why": "宿主保留的同名分支；facade 实际发 findOne 并把 ERR_NOT_FOUND 本地折成 null（a11y.ts findOneOrNull），wire 上不会出现这个名字"
+    },
+    "shell": {
+      "ns": "shell",
+      "why": "extras.ts 的 shell.shell() 是 exec 的 JS 别名，wire 只发 exec（宿主 shell/exec 两个标签同体，方法名 shell 无人发）"
+    }
+  },
+  "dynamicSinks": [
+    {
+      "file": "a11y.ts",
+      "ns": "a11y",
+      "form": "call",
+      "why": "wrapUiObject 的代理把动作名当字面量传给 call(method, …)，不是第二个 invoke 实参（解析器按 form 映射正则）"
+    }
+  ]
+}

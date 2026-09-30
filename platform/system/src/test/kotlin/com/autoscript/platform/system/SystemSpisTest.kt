@@ -3,19 +3,6 @@ package com.autoscript.platform.system
 import com.autoscript.domain.bridge.HandleRef
 import com.autoscript.domain.storage.DataStore
 import com.autoscript.domain.storage.StoredEntry
-import com.autoscript.domain.storage.SystemSettings
-import com.autoscript.domain.storage.ZipArchiver
-import com.autoscript.domain.system.AppLauncher
-import com.autoscript.domain.system.Clipboard
-import com.autoscript.domain.system.DeviceInfoProvider
-import com.autoscript.domain.system.DeviceProfile
-import com.autoscript.domain.system.FloatingWindowHost
-import com.autoscript.domain.system.FloatingWindowSpec
-import com.autoscript.domain.system.NotificationPoster
-import com.autoscript.domain.system.SensorSource
-import com.autoscript.domain.system.ShellExecutor
-import com.autoscript.domain.system.ShellMode
-import com.autoscript.domain.system.ShellResult
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -101,16 +88,16 @@ class SystemSpisTest {
 
     private object FakeSensors : SensorSource {
         override fun isSupported(name: String): Boolean = false
-        override suspend fun register(name: String, delay: com.autoscript.domain.system.SensorDelay) = HandleRef(1, 1)
+        override suspend fun register(name: String, delay: SensorDelay) = HandleRef(1, 1)
         override suspend fun unregister(ref: HandleRef) = Unit
         override suspend fun unregisterAll() = Unit
         override suspend fun drain(ref: HandleRef, sinceSeq: Long, max: Int) =
-            com.autoscript.domain.system.SensorEventBatch(sinceSeq, sinceSeq, emptyList())
+            SensorEventBatch(sinceSeq, sinceSeq, emptyList())
     }
 
     private object FakeNotification : NotificationPoster {
         override fun canPost() = false
-        override fun post(spec: com.autoscript.domain.system.NotificationSpec) = Unit
+        override fun post(spec: NotificationSpec) = Unit
         override fun cancel(id: Int) = Unit
     }
 

@@ -3,9 +3,10 @@
 # CLAUDE.md：本机只做 C++ 交叉编译验证（AArch64 ELF）；APK/AGP assemble 仍走 CI。
 #
 # 用法:  engine/node-process/scripts/build-native.sh
-# env:   ANDROID_NDK_HOME（默认 /root/ndk/android-ndk-r28c）
-#        NODE_SRC（默认 /tmp/node24/node-v24.21.0，取 node_api.h 等三头文件）
-#        LIBNODE（默认 /tmp/nrb-out7/libnode.so，符号对表用）
+# env:   ANDROID_NDK_HOME（必填：NDK 路径；r28c 见 node-runtime-build/VERSIONS.env）
+#        NODE_SRC（必填：Node 源码树，取 node_api.h 等三头文件）
+#        LIBNODE（必填：libnode.so，符号对表用）
+#        —— 三者无缺省（审查步骤 1：机器路径不入脚本），缺即报错带 export 样例
 #        OUT_DIR（默认 engine/node-process/build/native-local，build/ 已 gitignore）
 #
 # 断言（任一失败即 exit 1）：
@@ -18,7 +19,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
-NDK="${ANDROID_NDK_HOME:-/root/ndk/android-ndk-r28c}"
+NDK="${ANDROID_NDK_HOME:-}"
 TRIPLE=aarch64-linux-android26
 TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
 CXX="$TOOLCHAIN/${TRIPLE}-clang++"
@@ -26,15 +27,18 @@ NM="$TOOLCHAIN/llvm-nm"
 READELF="$TOOLCHAIN/llvm-readelf"
 STRIP="$TOOLCHAIN/llvm-strip"
 
-NODE_SRC="${NODE_SRC:-/tmp/node24/node-v24.21.0}"
-LIBNODE="${LIBNODE:-/tmp/nrb-out7/libnode.so}"
+NODE_SRC="${NODE_SRC:-}"
+LIBNODE="${LIBNODE:-}"
 OUT="${OUT_DIR:-$ROOT/engine/node-process/build/native-local}"
 
 fail() { printf '\033[1;31m[NATIVE FAIL]\033[0m %s\n' "$*" >&2; exit 1; }
 step() { printf '\033[1;36m[native]\033[0m %s\n' "$*"; }
 
-[ -x "$CXX" ] || fail "缺 NDK 编译器 $CXX（export ANDROID_NDK_HOME=?）"
-[ -f "$NODE_SRC/src/node_api.h" ] || fail "缺 node_api.h（NODE_SRC=$NODE_SRC）"
+[ -n "$NDK" ] || fail "缺 ANDROID_NDK_HOME（export ANDROID_NDK_HOME=/path/to/android-ndk-r28c；r28c 见 node-runtime-build/VERSIONS.env）"
+[ -x "$CXX" ] || fail "缺 NDK 编译器 $CXX（ANDROID_NDK_HOME=$NDK 指错了？）"
+[ -n "$NODE_SRC" ] || fail "缺 NODE_SRC（export NODE_SRC=/path/to/node-v24.21.0 源码树）"
+[ -f "$NODE_SRC/src/node_api.h" ] || fail "缺 node_api.h（NODE_SRC=$NODE_SRC 不是 Node 源码树？）"
+[ -n "$LIBNODE" ] || fail "缺 LIBNODE（export LIBNODE=/path/to/libnode.so —— node-runtime-build 出口）"
 [ -f "$LIBNODE" ] || fail "缺 libnode.so（LIBNODE=$LIBNODE）"
 mkdir -p "$OUT"
 

@@ -7,7 +7,7 @@ import com.autoscript.appservice.scheduler.core.ScreenGuarantee
 import com.autoscript.appservice.scheduler.core.TriggerSource
 
 /**
- * 持久化意图日志（docs/framework-design.md §8.5 生产实现）：语义与 [InMemoryIntentLog] 严格一致，
+ * 持久化意图日志（docs §8.5 生产实现）：语义与 [InMemoryIntentLog] 严格一致，
  * 存储引擎由 [IntentStore] 注入（JVM=jsonl journal，Android=SQLiteDatabase）。
  *
  * 崩溃恢复路径（§8.5「启动即回放，恢复只跟随 COMMIT」）：

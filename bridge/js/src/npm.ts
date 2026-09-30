@@ -1,5 +1,5 @@
 /**
- * npm 依赖管理命名空间（docs/framework-design.md §10.8 / §12.3 auto.npm）。
+ * npm 依赖管理命名空间（docs §10.8 / §12.3 auto.npm）。
  * P0：install/remove/ci/list/prune/dedupe/offlineGap/audit、registry 配置、离线导入、
  * approval 只提交请求（人机分离：绝不脚本直调 approve）、progress/approval/warning/finished
  * 事件流。宿主没有主动推给脚本的通道（§7.5 入站面只有按 requestId 结算的 ok/err），

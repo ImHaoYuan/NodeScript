@@ -1,7 +1,7 @@
 package com.autoscript.domain.automation
 
 /**
- * 手势输入模型（docs/framework-design.md §9.1 `dispatchGesture` + §9.3 手势 DSL）。
+ * 手势输入模型（docs §9.1 `dispatchGesture` + §9.3 手势 DSL）。
  * 与 Android GestureDescription 语义对齐：多笔画，每笔画一起点 + 持续时长；
  * 坐标为逻辑像素（与 [UiBounds] 同口径）。
  *

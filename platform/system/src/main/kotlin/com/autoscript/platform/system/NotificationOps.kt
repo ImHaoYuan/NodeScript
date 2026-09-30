@@ -4,7 +4,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.os.Build
-import com.autoscript.domain.system.NotificationSpec
 
 /**
  * [AndroidNotificationPoster.Ops] 的真机实现（docs §12.2）：唯一碰

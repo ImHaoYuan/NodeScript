@@ -15,7 +15,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 /**
- * newline-delimited JSON frame 传输服务端（docs/framework-design.md §7.5）。
+ * newline-delimited JSON frame 传输服务端（docs §7.5）。
  *
  * 与 `bridge/js` 的 `SocketBootstrap` 双侧对齐：
  * - 一行一帧：请求 `{"t":"req",...}\n` → [BridgeRouter.dispatch] → 响应 `{"t":"ok"|"err",...}\n` 回写；

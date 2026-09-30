@@ -91,7 +91,7 @@ class JsonTransportTest {
     @Test
     fun `负 reqId 解码——kBootstrap 心跳的 -seq 命名空间`() {
         // kBootstrap 自动心跳用负 reqId（-seq），与 JS runtimeBridge 的正数 inflight 永不相撞
-        // （§7.8）；TinyJson 数字分支含 '-' 前缀，此处钉住"负 id 不被拒"。
+        // （§7.8）；DomainJson 数字分支含 '-' 前缀，此处钉住"负 id 不被拒"。
         val frame = """{"t":"req","id":-1,"ns":"engines","m":"heartbeat","ttl":2000,"payload":null,"side":null}"""
         val req = transport.decodeRequest(frame.toByteArray())
         assertEquals(-1L, req.id)
@@ -115,8 +115,8 @@ class JsonTransportTest {
 
     @Test
     fun `payload 裸嵌对象整帧拒绝——addon 必须字符串化`() {
-        // 修复前的坏形状：payload 直接嵌对象（无字符串化）。TinyJson readValue 无 '{' 分支
-        // → 抛"非法值" → NewlineFrameServer 丢帧。钉住宿主侧：这种帧到不了 handler。
+        // 修复前的坏形状：payload 直接嵌对象（无字符串化）→ 非法值 → NewlineFrameServer 丢帧。
+        // 钉住宿主侧：payloadOrNull 契约只收字符串/null，裸对象整帧 IAE，这种帧到不了 handler。
         val raw = """{"t":"req","id":-1,"ns":"engines","m":"heartbeat","ttl":2000,"payload":{"runId":7,"seq":1},"side":null}"""
         assertThrows(IllegalArgumentException::class.java) {
             transport.decodeRequest(raw.toByteArray())

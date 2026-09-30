@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AutoScript 16KB/ELF/平台/ABI 门禁（docs/framework-design.md §16 硬门禁；Android 官方 page-sizes 指南）
+# AutoScript 16KB/ELF/平台/ABI 门禁（docs §16 硬门禁；Android 官方 page-sizes 指南）
 # 用法: check-alignment.sh <llvm-objdump路径> <产物目录> [libc++_shared.so路径]
 #  （第三参给则对它跑同一条 16KB/同余断言 —— libnode 的传递依赖，2026-09-29 补）
 #  1) ELF 断言：每个 LOAD 段 align >= 2**14（0x4000，16KB），且至少解析到一个 LOAD 段；

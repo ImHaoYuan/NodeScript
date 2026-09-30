@@ -4,7 +4,6 @@ import android.content.Context
 import android.hardware.Sensor
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
-import com.autoscript.domain.system.SensorDelay
 
 /**
  * [AndroidSensorSource.Ops] 的真机实现（docs §12.2）：唯一碰

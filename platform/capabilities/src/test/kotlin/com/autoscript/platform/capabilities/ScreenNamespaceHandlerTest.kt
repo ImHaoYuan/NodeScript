@@ -1,5 +1,7 @@
 package com.autoscript.platform.capabilities
 
+import com.autoscript.domain.bridge.BridgeResponse
+import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.automation.ScreenSnapshot
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -7,6 +9,9 @@ import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import com.autoscript.platform.capabilities.screen.ProducedFrame
+import com.autoscript.platform.capabilities.screen.ScreenNamespaceHandler
+import com.autoscript.platform.capabilities.screen.ScreenshotSource
 
 class ScreenNamespaceHandlerTest {
 
@@ -32,13 +37,13 @@ class ScreenNamespaceHandlerTest {
     @Test
     fun `capture 回帧句柄三字段`() = runBlocking {
         val resp = assertInstanceOf(
-            ScreenNamespaceHandler.Response.Ok::class.java,
-            handler.handle(ScreenNamespaceHandler.Request(1, "capture", null)),
+            BridgeResponse.Ok::class.java,
+            handler.handle(screenReq(1, "capture", null)),
         )
-        val o = A11yBridgeJson.decodeObject(resp.payload!!)
-        val ref = (o["ref"] as A11yBridgeJson.Value.Obj).fields
-        assertEquals("1", (ref["refId"] as A11yBridgeJson.Value.N).raw)
-        assertTrue((o["width"] as A11yBridgeJson.Value.N).raw.toLong() > 0)
+        val o = DomainJson.decodeObject(resp.payload!!)
+        val ref = (o["ref"] as DomainJson.Value.Obj).fields
+        assertEquals("1", (ref["refId"] as DomainJson.Value.N).raw)
+        assertTrue((o["width"] as DomainJson.Value.N).raw.toLong() > 0)
     }
 
     @Test
@@ -47,63 +52,63 @@ class ScreenNamespaceHandlerTest {
             source(ScreenSnapshot(locked = true, secureForeground = false, hasWindows = true)),
         )
         val resp = assertInstanceOf(
-            ScreenNamespaceHandler.Response.Err::class.java,
-            h.handle(ScreenNamespaceHandler.Request(2, "capture", null)),
+            BridgeResponse.Err::class.java,
+            h.handle(screenReq(2, "capture", null)),
         )
-        assertEquals("ERR_SCREEN_LOCKED", resp.code)
+        assertEquals("ERR_SCREEN_LOCKED", resp.errorCode)
     }
 
     @Test
     fun `capture-recycle 全链路`() = runBlocking {
         val cap = assertInstanceOf(
-            ScreenNamespaceHandler.Response.Ok::class.java,
-            handler.handle(ScreenNamespaceHandler.Request(10, "capture", null)),
+            BridgeResponse.Ok::class.java,
+            handler.handle(screenReq(10, "capture", null)),
         )
-        val o = A11yBridgeJson.decodeObject(cap.payload!!)
-        val ref = (o["ref"] as A11yBridgeJson.Value.Obj).fields
+        val o = DomainJson.decodeObject(cap.payload!!)
+        val ref = (o["ref"] as DomainJson.Value.Obj).fields
         val refJson =
-            """{"refId":${(ref["refId"] as A11yBridgeJson.Value.N).raw},"generation":${(ref["generation"] as A11yBridgeJson.Value.N).raw}}"""
+            """{"refId":${(ref["refId"] as DomainJson.Value.N).raw},"generation":${(ref["generation"] as DomainJson.Value.N).raw}}"""
         val rec = assertInstanceOf(
-            ScreenNamespaceHandler.Response.Ok::class.java,
-            handler.handle(ScreenNamespaceHandler.Request(11, "recycle", """{"ref":$refJson}""")),
+            BridgeResponse.Ok::class.java,
+            handler.handle(screenReq(11, "recycle", """{"ref":$refJson}""")),
         )
         assertEquals("true", rec.payload)
         val stale = assertInstanceOf(
-            ScreenNamespaceHandler.Response.Err::class.java,
-            handler.handle(ScreenNamespaceHandler.Request(12, "recycle", """{"ref":{"refId":999,"generation":1}}""")),
+            BridgeResponse.Err::class.java,
+            handler.handle(screenReq(12, "recycle", """{"ref":{"refId":999,"generation":1}}""")),
         )
-        assertEquals("ERR_STALE_HANDLE", stale.code)
+        assertEquals("ERR_STALE_HANDLE", stale.errorCode)
     }
 
     @Test
     fun `会话 startCapturer-nextFrame-closeSession 全链路`() = runBlocking {
         val start = assertInstanceOf(
-            ScreenNamespaceHandler.Response.Ok::class.java,
-            handler.handle(ScreenNamespaceHandler.Request(20, "startCapturer", null)),
+            BridgeResponse.Ok::class.java,
+            handler.handle(screenReq(20, "startCapturer", null)),
         )
-        val sessionId = ((A11yBridgeJson.decodeObject(start.payload!!)["session"] as A11yBridgeJson.Value.Obj).fields["refId"] as A11yBridgeJson.Value.N).raw
+        val sessionId = ((DomainJson.decodeObject(start.payload!!)["session"] as DomainJson.Value.Obj).fields["refId"] as DomainJson.Value.N).raw
         val frame = assertInstanceOf(
-            ScreenNamespaceHandler.Response.Ok::class.java,
-            handler.handle(ScreenNamespaceHandler.Request(21, "nextFrame", """{"session":{"refId":$sessionId,"generation":1}}""")),
+            BridgeResponse.Ok::class.java,
+            handler.handle(screenReq(21, "nextFrame", """{"session":{"refId":$sessionId,"generation":1}}""")),
         )
         assertTrue(frame.payload!!.contains(""""width""""))
         val close = assertInstanceOf(
-            ScreenNamespaceHandler.Response.Ok::class.java,
-            handler.handle(ScreenNamespaceHandler.Request(22, "closeSession", """{"session":{"refId":$sessionId,"generation":1}}""")),
+            BridgeResponse.Ok::class.java,
+            handler.handle(screenReq(22, "closeSession", """{"session":{"refId":$sessionId,"generation":1}}""")),
         )
         assertEquals("true", close.payload)
         // 关闭后 nextFrame → 未知会话
         val gone = assertInstanceOf(
-            ScreenNamespaceHandler.Response.Err::class.java,
-            handler.handle(ScreenNamespaceHandler.Request(23, "nextFrame", """{"session":{"refId":$sessionId,"generation":1}}""")),
+            BridgeResponse.Err::class.java,
+            handler.handle(screenReq(23, "nextFrame", """{"session":{"refId":$sessionId,"generation":1}}""")),
         )
-        assertEquals("ERR_NOT_FOUND", gone.code)
+        assertEquals("ERR_NOT_FOUND", gone.errorCode)
         // 重复 close → 未知会话（幂等不适用会话：会话是连接态，二次关如实报失）
         val close2 = assertInstanceOf(
-            ScreenNamespaceHandler.Response.Err::class.java,
-            handler.handle(ScreenNamespaceHandler.Request(24, "closeSession", """{"session":{"refId":$sessionId,"generation":1}}""")),
+            BridgeResponse.Err::class.java,
+            handler.handle(screenReq(24, "closeSession", """{"session":{"refId":$sessionId,"generation":1}}""")),
         )
-        assertEquals("ERR_NOT_FOUND", close2.code)
+        assertEquals("ERR_NOT_FOUND", close2.errorCode)
     }
 
     @Test
@@ -112,24 +117,24 @@ class ScreenNamespaceHandlerTest {
             source(ScreenSnapshot(locked = true, secureForeground = false, hasWindows = true)),
         )
         val resp = assertInstanceOf(
-            ScreenNamespaceHandler.Response.Err::class.java,
-            h.handle(ScreenNamespaceHandler.Request(30, "startCapturer", null)),
+            BridgeResponse.Err::class.java,
+            h.handle(screenReq(30, "startCapturer", null)),
         )
-        assertEquals("ERR_SCREEN_LOCKED", resp.code)
+        assertEquals("ERR_SCREEN_LOCKED", resp.errorCode)
     }
 
     @Test
     fun `未知方法与非法载荷`() = runBlocking {
         val unknown = assertInstanceOf(
-            ScreenNamespaceHandler.Response.Err::class.java,
-            handler.handle(ScreenNamespaceHandler.Request(40, "rotate", null)),
+            BridgeResponse.Err::class.java,
+            handler.handle(screenReq(40, "rotate", null)),
         )
-        assertEquals("ERR_NOT_IMPLEMENTED", unknown.code)
+        assertEquals("ERR_NOT_IMPLEMENTED", unknown.errorCode)
         val bad = assertInstanceOf(
-            ScreenNamespaceHandler.Response.Err::class.java,
-            handler.handle(ScreenNamespaceHandler.Request(41, "recycle", """{"noref":1}""")),
+            BridgeResponse.Err::class.java,
+            handler.handle(screenReq(41, "recycle", """{"noref":1}""")),
         )
-        assertEquals("ERR_INVALID_PARAM", bad.code)
+        assertEquals("ERR_INVALID_PARAM", bad.errorCode)
     }
 
     @Test
@@ -147,27 +152,27 @@ class ScreenNamespaceHandlerTest {
             ),
         )
         val start = assertInstanceOf(
-            ScreenNamespaceHandler.Response.Ok::class.java,
-            h.handle(ScreenNamespaceHandler.Request(50, "startCapturer", """{"width":720,"height":1280}""")),
+            BridgeResponse.Ok::class.java,
+            h.handle(screenReq(50, "startCapturer", """{"width":720,"height":1280}""")),
         )
         assertTrue(!start.payload!!.contains("720"), "回包不带请求尺寸（带了就是把提示说成事实）")
-        val sessionId = ((A11yBridgeJson.decodeObject(start.payload!!)["session"] as A11yBridgeJson.Value.Obj).fields["refId"] as A11yBridgeJson.Value.N).raw
+        val sessionId = ((DomainJson.decodeObject(start.payload!!)["session"] as DomainJson.Value.Obj).fields["refId"] as DomainJson.Value.N).raw
         val frame = assertInstanceOf(
-            ScreenNamespaceHandler.Response.Ok::class.java,
-            h.handle(ScreenNamespaceHandler.Request(51, "nextFrame", """{"session":{"refId":$sessionId,"generation":1}}""")),
+            BridgeResponse.Ok::class.java,
+            h.handle(screenReq(51, "nextFrame", """{"session":{"refId":$sessionId,"generation":1}}""")),
         )
         assertEquals(listOf(720 to 1280), seen, "提示要走到生产者")
-        val o = A11yBridgeJson.decodeObject(frame.payload!!)
-        assertEquals("1080", (o["width"] as A11yBridgeJson.Value.N).raw, "帧尺寸恒为真实帧")
+        val o = DomainJson.decodeObject(frame.payload!!)
+        assertEquals("1080", (o["width"] as DomainJson.Value.N).raw, "帧尺寸恒为真实帧")
         Unit
     }
 
     @Test
     fun `startCapturer 尺寸非法一律 ERR_INVALID_PARAM（不静默套默认）`() = runBlocking {
         for (payload in listOf("""{"width":0}""", """{"height":-1}""", """{"width":"tall"}""", """{"width":720.5}""")) {
-            val resp = handler.handle(ScreenNamespaceHandler.Request(60, "startCapturer", payload))
-            val err = assertInstanceOf(ScreenNamespaceHandler.Response.Err::class.java, resp)
-            assertEquals("ERR_INVALID_PARAM", err.code, "非法尺寸要报，不替调用方改成默认：$payload")
+            val resp = handler.handle(screenReq(60, "startCapturer", payload))
+            val err = assertInstanceOf(BridgeResponse.Err::class.java, resp)
+            assertEquals("ERR_INVALID_PARAM", err.errorCode, "非法尺寸要报，不替调用方改成默认：$payload")
         }
         Unit
     }

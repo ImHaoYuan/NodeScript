@@ -1,21 +1,26 @@
 package com.autoscript.appservice.runtime
+import com.autoscript.domain.bridge.generated.WireMethods
 
+import com.autoscript.domain.bridge.BridgeRequest
+import com.autoscript.domain.bridge.BridgeResponse
+import com.autoscript.domain.bridge.RpcNamespaceHandler
 import com.autoscript.domain.core.ErrorCode
+import com.autoscript.domain.json.DomainJson
 
 /**
  * `engines` namespace 桥处理器（docs §8 / §12.3）：JS `engines.*` 面的 Kotlin 对偶。
  *
  * 归属说明：本类住在 `:app-service:runtime`（不是 `:bridge:java`），因为它直接驱动
- * [RuntimeController]/[EnginePool]；`:app` 装配层把它适配到 `BridgeRouter` 的
- * `RequestHandler`（两接口形状相同，薄转接，无逻辑）。
- * 载荷编解码用本模块内 [EngineBridgeJson]（见该文件注释：不碰 `:bridge:java` 的
- * internal TinyJson，架构门禁见 ArchitectureTest）。
+ * [RuntimeController]/[EnginePool]；本类即 `NamespaceHandler`（承 [RpcNamespaceHandler]），
+ * `:app` 装配层 `router.register("engines", it)` 直挂 `BridgeRouter`。
+ * 载荷编解码用 `:domain` 的 [DomainJson]（审查步骤 3 合一后的仓内唯一 codec ——
+ * 原 EngineBridgeJson 已删，不再有「各模块自带一份」的形状）。
  *
  * 方法表（与 `bridge/js` engines.ts 一一对应）：
  * - `exec`：payload `{projectId,scriptPath,args?,runNonce?,timeoutMillis?,waitTimeoutMillis?}` →
  *   [RuntimeController.start]；Started → Ok `{runId,handle:{refId,generation}}`，
  *   QueueTimeout → Err ERR_TIMEOUT，StartFailed → Err ERR_ENGINE_CRASHED；
- *   排队上限 = payload `waitTimeoutMillis` 优先，否则桥侧 [Request.ttlMillis]
+ *   排队上限 = payload `waitTimeoutMillis` 优先，否则桥侧 [BridgeRequest.ttlMillis]
  *   （§7.4 每次跨进程操作必有 TTL）——没有上限时满池即无限等，只能靠调用方取消兜底，
  *   那条路径无法诚实回 ERR_TIMEOUT，故必须把 TTL 递进池；
  * - `stop`：payload `{runId}` → StoppedClean → Ok `true`；
@@ -42,47 +47,33 @@ import com.autoscript.domain.core.ErrorCode
 class EnginesNamespaceHandler(
     private val controller: RuntimeController,
     private val channelCapacity: Int = DEFAULT_CHANNEL_CAPACITY,
-) {
-    data class Request(
-        val id: Long,
-        val method: String,
-        val payload: String?,
-        /** 请求侧 TTL（§7.4）：`exec` 据此推导排队上限；null = 不设上限（无限等）。 */
-        val ttlMillis: Long? = null,
-    )
-    sealed interface Response {
-        data class Ok(val id: Long, val payload: String?) : Response
-        data class Err(val id: Long, val code: String, val detail: String?) : Response
-    }
+) : RpcNamespaceHandler() {
 
-    suspend fun handle(request: Request): Response {
-        return when (request.method) {
-            "exec" -> exec(request)
-            "stop" -> stop(request)
-            "poolStats" -> ok(request.id, EngineBridgeJson.encode(poolStatsPayload()))
-            "status" -> status(request)
-            "heartbeat" -> heartbeat(request)
-            "channel" -> channel(request)
-            "channelEmit" -> channelEmit(request)
-            "channelDrain" -> channelDrain(request)
-            "channelClose" -> channelClose(request)
-            else -> err(request.id, ErrorCode.ERR_NOT_IMPLEMENTED, "未知 engines 方法: ${request.method}")
-        }
+    /** 申报方法表（wire-schema 对账挂点）：单源指向生成物 [WireMethods.BY_NS]，不手抄。 */
+    override fun methods(): Set<String> = WireMethods.BY_NS.getValue("engines")
+
+    override suspend fun dispatch(request: BridgeRequest): BridgeResponse = when (request.method) {
+        "exec" -> exec(request)
+        "stop" -> stop(request)
+        "poolStats" -> ok(request, DomainJson.encode(poolStatsPayload()))
+        "status" -> status(request)
+        "heartbeat" -> heartbeat(request)
+        "channel" -> channel(request)
+        "channelEmit" -> channelEmit(request)
+        "channelDrain" -> channelDrain(request)
+        "channelClose" -> channelClose(request)
+        else -> err(request, ErrorCode.ERR_NOT_IMPLEMENTED, "未知 engines 方法: ${request.method}")
     }
 
     // ── exec / stop / poolStats ──────────────────────────────────────────
 
-    private suspend fun exec(request: Request): Response {
-        val p = try {
-            parseExec(request.payload)
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
+    private suspend fun exec(request: BridgeRequest): BridgeResponse {
+        val p = parseExec(request.payload)
         val bounded = p.copy(waitTimeoutMillis = p.waitTimeoutMillis ?: request.ttlMillis)
         return when (val outcome = controller.start(bounded)) {
             is RuntimeController.StartOutcome.Started -> ok(
-                request.id,
-                EngineBridgeJson.encode(
+                request,
+                DomainJson.encode(
                     mapOf(
                         "runId" to outcome.runId,
                         // 会话句柄身份 = runId（单次 exec→stop 生命周期，无 re-acquire，
@@ -93,24 +84,20 @@ class EnginesNamespaceHandler(
                 ),
             )
             RuntimeController.StartOutcome.QueueTimeout ->
-                err(request.id, ErrorCode.ERR_TIMEOUT, "引擎池排队超时")
+                err(request, ErrorCode.ERR_TIMEOUT, "引擎池排队超时")
             is RuntimeController.StartOutcome.StartFailed ->
-                err(request.id, ErrorCode.ERR_ENGINE_CRASHED, outcome.message)
+                err(request, ErrorCode.ERR_ENGINE_CRASHED, outcome.message)
         }
     }
 
-    private suspend fun stop(request: Request): Response {
-        val runId = try {
-            requiredLong(decodePayload(request.payload), "runId")
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
+    private suspend fun stop(request: BridgeRequest): BridgeResponse {
+        val runId = requiredLong(decodePayload(request.payload), "runId")
         return when (val outcome = controller.stop(runId)) {
-            RuntimeController.StopOutcome.StoppedClean -> ok(request.id, "true")
+            RuntimeController.StopOutcome.StoppedClean -> ok(request, "true")
             is RuntimeController.StopOutcome.StoppedTimeout ->
-                err(request.id, ErrorCode.ERR_TIMEOUT, "软停超时(partial=${outcome.partial})，已 kill 兜底")
+                err(request, ErrorCode.ERR_TIMEOUT, "软停超时(partial=${outcome.partial})，已 kill 兜底")
             RuntimeController.StopOutcome.AlreadyGone ->
-                err(request.id, ErrorCode.ERR_NOT_FOUND, "未知 runId: $runId")
+                err(request, ErrorCode.ERR_NOT_FOUND, "未知 runId: $runId")
         }
     }
 
@@ -122,15 +109,11 @@ class EnginesNamespaceHandler(
      * 在本方法不区分：两者都意味着"没有可读的活状态"，调用方按"本次轮询无结果、
      * 下一轮再问"处理，不得把 null 翻译成任何终态。
      */
-    private suspend fun status(request: Request): Response {
-        val runId = try {
-            requiredLong(decodePayload(request.payload), "runId")
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
+    private suspend fun status(request: BridgeRequest): BridgeResponse {
+        val runId = requiredLong(decodePayload(request.payload), "runId")
         val st = controller.probeStatus(runId)
-            ?: return err(request.id, ErrorCode.ERR_NOT_FOUND, "未知 runId: $runId")
-        return ok(request.id, EngineBridgeJson.encode(st.name))
+            ?: return err(request, ErrorCode.ERR_NOT_FOUND, "未知 runId: $runId")
+        return ok(request, DomainJson.encode(st.name))
     }
 
     private fun poolStatsPayload(): Map<String, Any?> {
@@ -144,22 +127,12 @@ class EnginesNamespaceHandler(
      * 不在途 runId（已结算/从未存在）→ 同样 Ok `false` 且不记账（见
      * [RuntimeController.heartbeat]）：那不是调用方错误，但也不得伪装成有效心跳。
      */
-    private suspend fun heartbeat(request: Request): Response {
-        val o = try {
-            decodePayload(request.payload)
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val runId: Long
-        val seq: Long
-        try {
-            runId = requiredLong(o, "runId")
-            seq = requiredLong(o, "seq")
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
+    private suspend fun heartbeat(request: BridgeRequest): BridgeResponse {
+        val o = decodePayload(request.payload)
+        val runId = requiredLong(o, "runId")
+        val seq = requiredLong(o, "seq")
         val accepted = controller.heartbeat(runId, seq)
-        return ok(request.id, EngineBridgeJson.encode(accepted))
+        return ok(request, DomainJson.encode(accepted))
     }
 
     private fun parseExec(payload: String?): PoolAcquireRequest {
@@ -200,18 +173,10 @@ class EnginesNamespaceHandler(
     private var nextChannelId = 1L
     private val channelGuard = Any()
 
-    private fun channel(request: Request): Response {
-        val o = try {
-            decodePayload(request.payload)
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val name = try {
-            requiredStr(o, "name")
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        if (name.isBlank()) return err(request.id, ErrorCode.ERR_INVALID_PARAM, "通道名不得为空")
+    private fun channel(request: BridgeRequest): BridgeResponse {
+        val o = decodePayload(request.payload)
+        val name = requiredStr(o, "name")
+        if (name.isBlank()) return err(request, ErrorCode.ERR_INVALID_PARAM, "通道名不得为空")
         val id = synchronized(channelGuard) {
             val existing = byName[name]
             if (existing != null && channels[existing]?.closed == false) {
@@ -223,67 +188,45 @@ class EnginesNamespaceHandler(
                 nid
             }
         }
-        return ok(request.id, EngineBridgeJson.encode(mapOf("name" to name, "channelId" to id)))
+        return ok(request, DomainJson.encode(mapOf("name" to name, "channelId" to id)))
     }
 
-    private fun channelEmit(request: Request): Response {
-        val o = try {
-            decodePayload(request.payload)
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val channelId: Long
-        val event: String
-        val payload: String?
-        try {
-            channelId = requiredLong(o, "channelId")
-            event = requiredStr(o, "event")
-            payload = optStr(o, "payload")
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        if (event.isBlank()) return err(request.id, ErrorCode.ERR_INVALID_PARAM, "事件名不得为空")
+    private fun channelEmit(request: BridgeRequest): BridgeResponse {
+        val o = decodePayload(request.payload)
+        val channelId = requiredLong(o, "channelId")
+        val event = requiredStr(o, "event")
+        val payload = optStr(o, "payload")
+        if (event.isBlank()) return err(request, ErrorCode.ERR_INVALID_PARAM, "事件名不得为空")
         synchronized(channelGuard) {
             val state = channels[channelId]
-                ?: return err(request.id, ErrorCode.ERR_NOT_FOUND, "未知 channelId: $channelId")
-            if (state.closed) return err(request.id, ErrorCode.ERR_NOT_FOUND, "通道已关闭: $channelId")
+                ?: return err(request, ErrorCode.ERR_NOT_FOUND, "未知 channelId: $channelId")
+            if (state.closed) return err(request, ErrorCode.ERR_NOT_FOUND, "通道已关闭: $channelId")
             state.events.addLast(ChannelEvent(seq = state.nextSeq++, event = event, payload = payload))
             while (state.events.size > channelCapacity) {
                 state.events.removeFirst()
                 state.dropped++
             }
         }
-        return ok(request.id, null)
+        return ok(request, null)
     }
 
-    private fun channelDrain(request: Request): Response {
-        val o = try {
-            decodePayload(request.payload)
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
-        val channelId: Long
-        val sinceSeq: Long
-        val max: Int
-        try {
-            channelId = requiredLong(o, "channelId")
-            sinceSeq = optLong(o, "sinceSeq") ?: 0L
-            max = (optLong(o, "max") ?: 128L).toInt()
-            require(max > 0) { "max 必须 > 0" }
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
+    private fun channelDrain(request: BridgeRequest): BridgeResponse {
+        val o = decodePayload(request.payload)
+        val channelId = requiredLong(o, "channelId")
+        val sinceSeq = optLong(o, "sinceSeq") ?: 0L
+        val max = (optLong(o, "max") ?: 128L).toInt()
+        require(max > 0) { "max 必须 > 0" }
         val picked: List<ChannelEvent>
         var last = sinceSeq
         synchronized(channelGuard) {
             val state = channels[channelId]
-                ?: return err(request.id, ErrorCode.ERR_NOT_FOUND, "未知 channelId: $channelId")
+                ?: return err(request, ErrorCode.ERR_NOT_FOUND, "未知 channelId: $channelId")
             picked = state.events.filter { it.seq > sinceSeq }.take(max)
             for (e in picked) last = e.seq
         }
         return ok(
-            request.id,
-            EngineBridgeJson.encode(
+            request,
+            DomainJson.encode(
                 mapOf(
                     "last" to last,
                     "events" to picked.map {
@@ -294,61 +237,52 @@ class EnginesNamespaceHandler(
         )
     }
 
-    private fun channelClose(request: Request): Response {
-        val channelId = try {
-            requiredLong(decodePayload(request.payload), "channelId")
-        } catch (e: IllegalArgumentException) {
-            return err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
-        }
+    private fun channelClose(request: BridgeRequest): BridgeResponse {
+        val channelId = requiredLong(decodePayload(request.payload), "channelId")
         synchronized(channelGuard) {
             val state = channels.remove(channelId)
-                ?: return err(request.id, ErrorCode.ERR_NOT_FOUND, "未知 channelId: $channelId")
+                ?: return err(request, ErrorCode.ERR_NOT_FOUND, "未知 channelId: $channelId")
             state.closed = true
             byName.remove(state.name)
         }
-        return ok(request.id, "true")
+        return ok(request, "true")
     }
 
     // ── 载荷读取 ─────────────────────────────────────────────────────────
 
-    private fun decodePayload(payload: String?): Map<String, EngineBridgeJson.Value> {
+    private fun decodePayload(payload: String?): Map<String, DomainJson.Value> {
         if (payload == null) throw IllegalArgumentException("缺 payload")
-        return EngineBridgeJson.decodeObject(payload)
+        return DomainJson.decodeObject(payload)
     }
 
-    private fun requiredStr(o: Map<String, EngineBridgeJson.Value>, key: String): String =
-        (o[key] as? EngineBridgeJson.Value.S)?.v ?: throw IllegalArgumentException("缺字符串字段 $key")
+    private fun requiredStr(o: Map<String, DomainJson.Value>, key: String): String =
+        (o[key] as? DomainJson.Value.S)?.v ?: throw IllegalArgumentException("缺字符串字段 $key")
 
-    private fun optStr(o: Map<String, EngineBridgeJson.Value>, key: String): String? {
+    private fun optStr(o: Map<String, DomainJson.Value>, key: String): String? {
         val v = o[key] ?: return null
-        if (v is EngineBridgeJson.Value.Null) return null
-        return (v as? EngineBridgeJson.Value.S)?.v ?: throw IllegalArgumentException("字段 $key 必须是字符串")
+        if (v is DomainJson.Value.Null) return null
+        return (v as? DomainJson.Value.S)?.v ?: throw IllegalArgumentException("字段 $key 必须是字符串")
     }
 
-    private fun requiredLong(o: Map<String, EngineBridgeJson.Value>, key: String): Long =
-        (o[key] as? EngineBridgeJson.Value.N)?.raw?.toLongOrNull()
+    private fun requiredLong(o: Map<String, DomainJson.Value>, key: String): Long =
+        (o[key] as? DomainJson.Value.N)?.raw?.toLongOrNull()
             ?: throw IllegalArgumentException("缺数字字段 $key")
 
-    private fun optLong(o: Map<String, EngineBridgeJson.Value>, key: String): Long? {
+    private fun optLong(o: Map<String, DomainJson.Value>, key: String): Long? {
         val v = o[key] ?: return null
-        if (v is EngineBridgeJson.Value.Null) return null
-        return (v as? EngineBridgeJson.Value.N)?.raw?.toLongOrNull()
+        if (v is DomainJson.Value.Null) return null
+        return (v as? DomainJson.Value.N)?.raw?.toLongOrNull()
             ?: throw IllegalArgumentException("字段 $key 必须是数字")
     }
 
-    private fun optStrList(o: Map<String, EngineBridgeJson.Value>, key: String): List<String> {
+    private fun optStrList(o: Map<String, DomainJson.Value>, key: String): List<String> {
         val v = o[key] ?: return emptyList()
-        if (v is EngineBridgeJson.Value.Null) return emptyList()
-        if (v !is EngineBridgeJson.Value.Arr) throw IllegalArgumentException("字段 $key 必须是数组")
+        if (v is DomainJson.Value.Null) return emptyList()
+        if (v !is DomainJson.Value.Arr) throw IllegalArgumentException("字段 $key 必须是数组")
         return v.items.map {
-            (it as? EngineBridgeJson.Value.S)?.v ?: throw IllegalArgumentException("字段 $key 数组元素必须是字符串")
+            (it as? DomainJson.Value.S)?.v ?: throw IllegalArgumentException("字段 $key 数组元素必须是字符串")
         }
     }
-
-    private fun ok(id: Long, payload: String?): Response = Response.Ok(id, payload)
-
-    private fun err(id: Long, code: ErrorCode, detail: String?): Response =
-        Response.Err(id, code.code, detail)
 
     companion object {
         const val DEFAULT_CHANNEL_CAPACITY = 256

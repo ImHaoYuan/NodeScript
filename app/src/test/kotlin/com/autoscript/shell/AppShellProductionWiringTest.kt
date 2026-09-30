@@ -1,6 +1,6 @@
 package com.autoscript.shell
 
-import com.autoscript.appservice.packager.NpmShellKit
+import com.autoscript.appservice.npm.NpmShellKit
 import com.autoscript.appservice.scheduler.core.IntentLog
 import com.autoscript.appservice.scheduler.persist.FileRunArchive
 import com.autoscript.appservice.scheduler.core.RecoveryRecord

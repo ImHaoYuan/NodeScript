@@ -2,7 +2,7 @@ package com.autoscript.domain.engine
 
 import com.autoscript.domain.bridge.HandleRef
 
-/** :nodeN 引擎进程宿主 SPI（docs/framework-design.md §8）。实现位于 :engine:node-process。 */
+/** :nodeN 引擎进程宿主 SPI（docs §8）。实现位于 :engine:node-process。 */
 interface ScriptEngine {
     /** 进程标识（pool id 派生），用于归属日志/看门狗。 */
     val id: EngineId

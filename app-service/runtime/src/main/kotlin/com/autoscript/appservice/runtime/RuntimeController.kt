@@ -9,7 +9,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /**
- * 执行仲裁者（docs/framework-design.md §8 / §4.1 kill 权威）：
+ * 执行仲裁者（docs §8 / §4.1 kill 权威）：
  * 池 + 看门狗的唯一装配点，JS `engines.*` 面的 Kotlin 对偶。
  *
  * 职责：

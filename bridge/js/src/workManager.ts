@@ -1,5 +1,5 @@
 /**
- * 定时任务（docs/framework-design.md §8.6/§9.6 定时 API；对应 scheduler 的 TimedSchedule
+ * 定时任务（docs §8.6/§9.6 定时 API；对应 scheduler 的 TimedSchedule
  * + `:app` 的 `workManager` 桥命名空间）：
  * 「每日定点」+「一次性」+「cron 表达式」（5 字段 `分 时 日 月 周`，P1 已落地）：
  * 宿主侧解析/推进是调度器的 `CronTab`（唯一校验出处），本文件的 cron 镜像只做

@@ -3,10 +3,6 @@ package com.autoscript.platform.system
 import com.autoscript.domain.bridge.HandleRef
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
-import com.autoscript.domain.system.SensorDelay
-import com.autoscript.domain.system.SensorEvent
-import com.autoscript.domain.system.SensorEventBatch
-import com.autoscript.domain.system.SensorSource
 import java.util.concurrent.atomic.AtomicLong
 
 /**

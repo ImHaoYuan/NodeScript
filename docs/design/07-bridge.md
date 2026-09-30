@@ -1,0 +1,244 @@
+## 7. 桥接层设计（JS ↔ Native ↔ Android）
+
+### 7.1 调用链与分层
+
+```
+[JS 侧]
+api 包 (Promise/EventEmitter 封装)          ← TS facade，业务语义
+   │
+RuntimeBridge (单例)                        ← requestId 生成/关联、TTL、错误折叠
+   │  调用: bridge.invoke('a11y.find', {...}, {ttl: 200})
+   ▼
+[N-API addon @autojs/bridge-native]         ← 每 message 一个 job
+   dispatcher 单注册表（module → napi_function）
+   TSF per context (napi_threadsafe_function, nonblocking)
+   ▼  跨线程投递（不持锁）
+[JNI glue]  AttachCurrentThread(daemon) → 构造 Java 对象 → 投 :main Router
+   ▼
+[Kotlin Router]                             ← 在 :main 进程
+   ModuleRegistry (name → handler)
+   RequestRegistry (requestId → PendingRequest{ttl, cancel})
+   HandleRegistry (generation + tombstone)
+   → CapabilityManager / AccessibilityService / …（业务模块注册 handler）
+```
+
+### 7.2 同步变体禁令（含批判修正 F1）
+- **IPC 路径只有异步 Promise**，语法上不提供同步变体（不提供 `bridge.invokeSync`，避免 API 误用）。
+- 仅 JS 进程内的纯内存路径可有同步函数（如 `datastore` 的同步 importer、纯 JS 工具），因为无线程/进程边界，死锁面为零。
+- JS 侧所有面向用户的 API 都是 async：`await selector.findOne()`；对教育与新手友好性用明确命名（`findOne()` vs Pro 的同步习惯）并保留迁移垫片——垫片也是 Promise 包同步语义，**不绕过桥**。
+
+### 7.3 TSF 队列拆分（控制面 / 数据面）
+批判 3/9 指出的「一个 TSF 混装控制与日志可能丢控制消息」→ **每 context 两个队列**：
+- `tsf_control`：`stop/pause/resume/ack/evaluate/checkpoint/错误上报` —— **绝不丢弃、绝不降级**，高优先级。
+- `tsf_data`：console、事件流、传感器采样 —— 可丢包（丢包统计/背压，溢出时回调 JS 层 `queueError`）。数据面闲置自动 unref。
+两类消息都带 `ctxId + seq` 与 generation 校验。
+
+- **消费侧已落地（2026-09-24，控制台屏）**：Kotlin 侧 `ConsoleCollector`（有界 2000、容量满丢最老并计数、`drain(sinceSeq, max)` seq 游标**非破坏**拉取） → 读口 `HostSummary.console(sinceSeq, maxLines)`（DTO `ConsoleSnapshot` 住 `:domain`，拼装 `ConsoleRead` 住 `:app` 壳装配包、纯 JVM 可测）→ `:ui` 第四页签控制台屏。呈现纪律：**游标只进不退、行累积**（刷新 = 增量拉取不是重画；并发同游标按 seq 去重）、**读失败保留旧行与游标**（瞬时失败抹掉用户已看到的日志比报错更糟；失败只亮原因）、拉满标「可能还有」不假装到底、**丢包非零不藏**（`droppedTotal` 上屏 —— 显示的不是全部得说出来）、在途执行两端对照随快照带上（§8.3：宿主读不到如实说读不到、**不渲染成某个状态**；分歧标红，判据仍在 `RuntimeController` 不在呈现层）。刷新时机与能力中心/任务中心同构：回前台/切页签现取，页大小 256，读失败不自激。**停止操作面同批落地（2026-09-24）**：读口 `HostSummary.stopRun(runId)`（`:domain`）→ `AssembledShell.stopRun`（壳持有的在途表 `RuntimeController.stop` → 池四步 quiesce，`AlreadyGone` 如实 false 不抛）→ `AppShellApplication.stopRun`（壳未装配抛）→ `:ui` 控制台在途行每行一个「停止」按钮（`ConsoleState.stopError/stopNotice/stopInFlight` 与读账分开记账、刷新现取归零；回执措辞：true = 已请求停止、false = 已不在途；挂起中按钮禁用）。与 `Scheduler.stopLastRun` 的分工：那是调度单槽快捷口（恢复重投会覆盖），本口按 runId 精确命中在途表、不受覆盖影响。
+### 7.4 数据与对象生命周期
+- **payload 编码**：Kotlin DTO ↔ JSON（结构化小对象）；大二进制（Bitmap/像素）**不走 JSON**：直接 `ByteBuffer.allocateDirect` → `napi_create_external_arraybuffer` + `napi_adjust_external_memory`（0 拷贝，一次性 buf 生命周期绑定）。
+- **句柄（Handle）机制**：跨进程资源（UiObject/Image/MediaPlayer/Dialog）在 JS 侧是 `{gen, id}` 代理对象：
+  - 内核持有 `HandleRegistry`：`id → NativeResource{ref, generation, tombstone}`。
+  - 显式 `dispose()` + `FinalizationRegistry` 兜底；GC 时向内核发 `release(id, gen)`。
+  - 任何操作若 `gen` 不匹配 → `ERR_STALE_HANDLE`（防「旧引用操纵新资源」竞态）。
+  - 资源 `dispose` 后 tombstone 立即清除内核引用；销毁由内核单线程执行，杜绝并发 Dispose。
+- **引用计数对象**（Image/MediaPlayer）用弱引用 + finalize 兜底；`Image.recycle()` 比 GC 优先。
+- **帧的所有权：发号侧归一（§18 第 8 项 (b)，2026-09-26 落地）**：图像帧的在场性/发号/像素
+  **只由 `:domain` `ImageAnalyzer` 一家持有**（`decode` 与 `ingest` 同一个 `nextRefId`）。
+  `screen` 与 `images` 是**两个释放入口、一张表**：`frame.recycle()` 按来源各打各的
+  namespace，落进去是同一个"已释放"事实 —— 放过的帧任一侧再用都是 `ERR_STALE_HANDLE`。
+  handler 层不再自持第二张在场面表（曾是"两个计数器各自从 1 起"的隐式对齐，属漂移面）；
+  `analyzer == null`（so 缺位）时 `ScreenshotSource` 才退回本地表，而此时 `images`
+  命名空间未注册，两个号段结构上不可能相撞。
+
+### 7.5 进程间传输
+P0 起用 **unix domain socket**（同应用可持久连接、双向流、背压可控），JSON-RPC over newline-delimited frames；抽象为一个 `Transport` 接口，可替换成 binder（只改 `:bridge:java` 内的 Transport impl，不影响上层）。**不引入自制 RPC 编解码 excess**——送 pubsub/流用独立 channel。
+
+### 7.6 错误模型
+```ts
+class AutojsError extends Error {
+  code: AutojsErrCode            // 机器可判
+  module: string                 // 'a11y' | 'capability' | 'engine' | ...
+  method: string
+  javaClass?: string             // 源 Java 异常类（E.g. SecurityException）
+  javaStack?: string
+}
+```
+错误目录（前 20 个中最关键）：`ERR_TIMEOUT`、`ERR_STALE_HANDLE`、`ERR_PERMISSION_DENIED`（能力未授权/被降级）、`ERR_SERVICE_DISABLED`、`ERR_SCREEN_LOCKED`、`ERR_BLACK_FRAME`（FLAG_SECURE）、`ERR_CAPTURE_DENIED`、`ERR_ENGINE_STOPPED`、`ERR_ENGINE_CRASHED`（进程死）、`ERR_NOT_IMPLEMENTED`（本平台不支持，如 child_process）、`ERR_INVALID_PARAM`、`ERR_FILE_NOT_FOUND`、`ERR_FILE_EXISTS`（打包产物已存在等）、`ERR_DISK_FULL`、`ERR_NOT_FOUND`（UiSelector 未找到 → 可选 `NotFoundError` 对齐 Pro v9）。
+映射规则：`Java Exception → 分类 → AutojsError`，保留 `javaStack`，JS `instanceof` 可判。
+目录三处落字（`:domain` `core/Error.kt` 的 `ErrorCode`、`bridge/js/src/errors.ts` 的 `ErrCode` + `ERROR_CODES`、本文提及）由 `bridge/js/test/err-catalog.test.cjs` **三面对账**（Kotlin ⇄ JS 双向相等、同文件枚举 ⇄ 字面量表双向相等、文档提及必须两处都在；随 `npm test` 进 CI）——2026-09-26 首跑就抓到真漂移：`ERR_IO` 在宿主全线服役（zip/settings/images/spawn/打包），JS 目录独缺，脚本 `ERROR_CODES.includes('ERR_IO')` 为 false；已补码并被该门的「回潮」断言钉死。
+
+### 7.7 性能关键路径（数量级目标）
+| 链路 | 目标 | 设计 |
+|---|---|---|
+| 空 RPC（JS→:main→回） | p95 < 2ms | 直连 unix socket、零 JSON 二次解析、TSF 双队列 |
+| 无障碍 `find → click` | 200ms 内 p60 / ~10ms 树读 | 紧凑索引树 + 按需属性 + 句柄（不全量序列化） |
+| `captureScreen → findImage` | < 1s 且一次截图两次匹配 < 700ms | 屏幕帧→native 0 拷贝，模板匹配在 `libopencv.so`；**链路已通**（§18 第 8 项 (b) 2026-09-26 落地：截屏帧经 `ImageAnalyzer.ingest` 进 `images` 同一张帧表，"帧不通用"取消）—— 数字仍是**待实测**的验收口径（真机未量） |
+| `findColor`（单人独立子图 1080p） | < 10ms | native 遍历（`cv::inRange` 逐分量包含 + `findNonZero` 取首个；ROI 是浅视图不拷像素；kleidicv 覆盖 `inRange` 面） |
+| `matchTemplate` 1080p | < 40ms | OpenCV TM_CCOEFF_NORMED（实测它、不是早前写的 CCORR：见下注）|
+| 紧凑树构建/传输 | < 15ms / 数十 KB | 预聚合属性，代价解析放"取用即取" |
+
+> **`TM_CCOEFF_NORMED` 而不是 `TM_CCORR_NORMED`（2026-09-25 实测改口径，非抄来的）**：
+> `imgnative_match` 一直用 CCOEFF，早前本表与 `:domain` KDoc 两处写成 CCORR —— 名字漂移
+> 谁都没炸，因为真实纹理模板下两者都能拿 1.0。差别在**画面里没有模板**时（host 静态库实测）：
+> CCORR_NORMED 的 max 仍有 **+0.955**（阈值 0.9 直接误判命中），CCOEFF_NORMED 的 max 只有
+> **+0.599**（正确判未命中）。相关系数自带亮度归一，对抗画面里的均匀亮块伪阳性；
+> 这也是"两个匹配方法同一个阈值键"敢统一到 `[0,1]` 的前提。
+> 代价钉在这儿：CCOEFF 对**方差≈0 的模板**（纯色块）会给出恒 1.0 的结果面，实测 14651/14651
+> 个位置全满分 —— 那类请求的命中坐标稳定但不唯一，脚本要按 `threshold` 高就把结果当"就是这块"
+> 会踩空。这是 opencv 口径，不是我们能修的，先在契约里写明。
+
+### 7.8 :bridge:native 落地契约（v24.21.0 + NDK r28c 实证，CI 构建前置）
+
+> 本节是 `:bridge:native`（N-API addon 控制面）与 `:engine:node-process`
+> （:nodeN 宿主）的**契约先行**文档：C++/CMake 落地前先把符号面、线程铁律、
+> 传输对接钉死。符号面全部经 `llvm-nm -D /tmp/nrb-out7/libnode.so` 实证，
+> 非臆造。addon 控制面已落 `bridge/native/src/main/cpp/bridge_addon.cc`——含 §7.8
+> 点名的**起线程/TSF 接线**（`setSocketFd(fd>=0)` 首次注入拉起读线程；`setup(onFrame)`
+> 建 data 面 TSF；环境 cleanup hook 换代释 TSF）；宿主已落
+> `engine/node-process/src/main/cpp/main.cpp`（下述启动序 ①②③）。两者均经本机 NDK
+> r28c 交叉编译验证（`engine/node-process/scripts/build-native.sh`：AArch64 ELF、
+> `napi_register_module_v1` 导出、`node::Start` 声明↔dlsym 字面量↔libnode 导出三方
+> 对表、LOAD≥16KB）。**Kotlin spawn 半边已落地并本机验证**：`NodeProcessEngine`
+> （ProcessLauncher 缝 + env 合同 + pid 回执/状态语义，`:engine:node-process` 16 个
+> 单测含真 node spawn）；`:app` 垂直切片 E2E 全链（spawn → unix socket 桥 →
+> console/心跳上送 → `SUCCEEDED` 归档 + 双 id 关联）；spawn env 合同五键（下①与
+> `NodeProcessEngine` companion、main.cpp 头注释三处同名）——`AUTOSCRIPT_LIBNODE`
+> 必填 / `AUTOSCRIPT_BRIDGE_ADDON` 选填 / `AUTOSCRIPT_HOST_SOCKET` 选填（null=离线）/
+> `AUTOSCRIPT_RUN_ID` 恒注入（kBootstrap 据此 500ms 自动心跳，reqId 走 `-seq` 负数
+> 命名空间不撞 JS 正数 inflight）/ `AUTOSCRIPT_RUN_NONCE`（§8.5 幂等键，透传不消费）。
+> addon `invoke` 的帧 payload 按信封契约**字符串化转义**（信封里是 JSON 字符串，与
+> JS `JSON.stringify` 同形；金样钉 `JsonTransportTest`「addon 心跳帧金样」，host 编译
+> 烟测逐字比对；裸嵌对象会被宿主扁平解码整帧拒掉）。**生产桥监听已落**（§7.5）：
+> `BridgeSocketListener`（shell 装配包）= `LocalServerSocket(String)` abstract 绑定
+> （名按 uid 隔离，打包多实例不撞）+ accept 循环 + 对端 uid 门禁（fail-closed，与
+> main.cpp 客户端侧 `SO_PEERCRED` 对称）+ 每连接交 `NewlineFrameServer`；bind/门禁/
+> serve/关断全走缝（`BoundBridgeSocket`/`BridgeSocketBinder`），JVM 假缝单测覆盖，
+> `AppShellApplication` bind 赶在 assemble 前（`FixedEnginePool.init` eager）注入
+> `hostSocketName`、绑定失败 = 离线降级不注入（不触发 exit 3）。**addon 的 JS 消费面
+> 已落**（§12.4 接入面 1）：facade `attachNative()` / `NativeBootstrap` ——
+> `setup(onFrame)` 按在途 id 结算（负 id/未知 id 查不到即丢，kBootstrap `-seq` 心跳
+> 合同）、`addon.invoke` 直接作 `InvokeHandler` 注入、NAPI 抛错经 `errFromThrown`
+> 保留 `ERR_*` 真码（断链不折成参数错）；**不碰 `setSocketFd`**（fd 注入归宿主）。
+> mock 单测 6 例 + `AUTOSCRIPT_TEST_ADDON` 门禁的真 addon 全环（setup 前
+> `droppedData` 前账 → attach 结算 → 心跳负 id 不撞在途）。
+>
+> **facade dist 随包 + 打包入口 `attachNative` 接线已落（2026-09-24，资产交付轨）**：
+> `prepareBridgeDistAssets`（`:app` 构建任务）把 **npm build 产物**（步骤 7 出库，CI jvm-tests 前置构建）`bridge/js/dist`
+> 拷成 `assets/bridge-dist/`（srcDir 取**父目录** —— 资产键 = `bridge-dist/<file>`，
+> 指成子目录会拍平到 assets 根、`list("bridge-dist")` 恒空且**没有报错**）→
+> `AppShellApplication` 全量读成扁平 map（枚举/任一读失败 = **整体空**：宁可这次不落，
+> 不可半量落 —— 半量 + 孤儿清理会把"读失败那个文件"当旧版删掉）→
+> `BridgeDistDeploy`（`:app-service:script-repo`）落位 `ScriptPaths.autoModuleRoot`
+> = `filesDir/node_modules/auto`（Node 解析走位第 3 站：脚本目录 → `files/scripts/<id>/
+> node_modules` → `files/scripts/node_modules` → `files/node_modules`；**无 package.json
+> 走 index.js 缺省**）—— 覆盖语义与脚本补部署**相反**：应用自有资产，**字节即版本**
+> （异则原位替换 + 全量成功后清孤儿；任何失败不删孤儿，宁可留旧不可丢件）→
+> `NodeProcessEngine` 按 `bootstrap.js` 在位注入 `AUTOSCRIPT_BRIDGE_DIST`（与 addon
+> 同一条选填纪律：配置了没落位 = 不注入）→ main.cpp kBootstrap
+> `require($DIST/bootstrap.js).attachNative({addon: a})`（复用引导已 require 的同一
+> addon 实例；dist 缺/require 抛错 = stderr 点名、**脚本照跑** —— 选填件不杀执行；
+> addon 在而 dist env 不在时 main.cpp 额外打一行"facade 未接入，require('auto') 将失败"）。
+> 全链验证 = `BridgeDistPackagingEntryTest`（kBootstrap 从 main.cpp **现抽** —— 单一
+> 事实源不复制引导串；真 dist 落位 + 系统 node 起进程：`require('auto')` 解析、
+> `installed`、addon `setup` 三关，外加 env 缺席/坏 bootstrap 两条诚实分支）+
+> `BridgeDistDeployTest`（7 项）+ `AppShellBridgeDistTest` + 引擎 env 契约用例。
+>
+> **jniLibs 二进制交付 + `libc++_shared.so` 也已落（2026-09-24，同轨 §19）**：
+> `:app` 的 `prepareEngineNativeLibs` 把本机构建三件（`build-native.sh` 的 `noden`→
+> `libnoden.so`、`LIBNODE`/`node-runtime-build/out` 的 `libnode.so`、NDK sysroot 的
+> `libc++_shared.so` —— readelf 实证它是 libnode 的 NEEDED）拷进
+> `generated/engineNativeLibs/arm64-v8a/`（jniLibs.srcDir）；**三件齐才落包、半套红、
+> 全无警告**（来源不在 git，与 bridge/js/dist 的"缺=仓库破损"不同判据）。
+> `useLegacyPackaging = true`（merged manifest 实测 `extractNativeLibs="true"`）——
+> 默认不提取时 `nativeLibraryDir` 是空的，exec/预检都落空。addon 独立走
+> `assets/bridge-addon/bridge_native.node`（PM 只提取 `*.so`，`.node` 进不了
+> jniLibs；而 main.cpp 的 `require(env)` 只认 `.node` 扩展）→
+> `BridgeAddonDeploy` 落位 `ScriptPaths.bridgeAddonFile` = `filesDir/lib/
+> bridge_native.node`（单文件、字节即版本、不 claim 目录故无孤儿清理）→
+> `addonPath` 注入，引擎按文件在位降级（缺 = 不注入，脚本照跑）。
+> APK 实测三条 `lib/arm64-v8a/*` + `assets/bridge-addon/*` 齐在（debug ~40MB，
+> 含未 strip 的 libnode）。**真机台账（2026-09-29，非 root shell，Android 13/arm64）**：
+> exec + `dlopen` + `node::Start` 通（node v24.21.0，冷启 158ms），abstract socket +
+> `SO_PEERCRED` 通，facade→addon→桥→宿主全链 6 帧往返（生产布局 `lib/arm64-v8a/` +
+> 无 `LD_LIBRARY_PATH`）；失败形态按设计：addon 缺位 = 降级照跑，socket 给错 = exit 3。
+> **未覆盖**：16KB 页机（该机 PAGE_SIZE=4096）、非 root 的 SELinux enforcing 上下文、
+> `nativeLibraryDir` 提取路径、targetSdk36 的 app 数据区 exec 策略 —— 仍需 16KB 模拟器
+> 镜像或真机。`.so` strip 归 CI 打包管线。
+
+**符号面（动态 T，稳定 ABI）：**
+
+| 符号 | 来源 | 用途 |
+|---|---|---|
+| `_ZN4node5StartEiPPc`（`node::Start(int, char**)`） | libnode.so | :nodeN 单进程单 isolate 入口（§5.1 一进程一 Start） |
+| `_ZN4node4StopEPNS_11EnvironmentENS_9StopFlags5Flags` | libnode.so | quiesce 第④步后收尾（§5 推论 A：kill 必须归还槽位，Stop 即"正常死"的路径） |
+| `napi_create_threadsafe_function` / `napi_call_threadsafe_function` | libnode.so | TSF 双队列的创建/投递（§7.3，见下） |
+| `napi_module_register` / `napi_module_register_by_symbol` | libnode.so | addon 模块注册（`@autojs/bridge-native` 即一个 N-API 模块） |
+| 20562 个动态 T 符号（含 `napi_create_external_arraybuffer` 系） | libnode.so | §7.4 大二进制 0 拷贝（`allocateDirect` → external arraybuffer）的符号依据 |
+
+`NAPI_VERSION=10`（§67 选型表冻结）：addon 编译期 `-DNAPI_VERSION=10`，
+头文件取自建 Node 树 `src/node_api.h + js_native_api.h + node_api_types.h`
+（三文件自足，实证存在；`node_api_types.h:16` 有 `#if NAPI_VERSION >= 3` 门，
+版本宏由编译命令行注入）。
+
+**TSF 双队列 → 线程铁律映射（§5.3/§7.3）：**
+
+- `tsf_control`（stop/ack/evaluate/错误上报）：`napi_tsfn_nonblocking` 投递，
+  **绝不丢弃、绝不降级**；其队列满 = 背压信号向上游（看门狗/调度）报告，不静默吞。
+- `tsf_data`（console/事件流/传感器）：同为 nonblocking，**可丢包**（丢包计数 →
+  JS 层 `queueError`，`consoleSink.onQueueError` 对偶）；闲置 `napi_unref_threadsafe_function`
+  不保活事件循环（脚本跑完即退出，不靠 TSF 吊命）。
+- `async_work` 线程**不碰 JS**（N-API 约束）；需回 JS 的一律经 TSF。
+- 持有 Java lock 时**禁止**回调用 JS（死锁铁律）；回调在释锁后投递。
+- 原生入口只 `GetEnv` + 局部 attach，**绝不缓存 `JNIEnv*` 跨函数**（§5.2）。
+
+**addon ↔ Kotlin Router 对接（§7.5 信封，JsonTransport 已实证）：**
+
+- addon 内嵌 socket 客户端（与 `SocketBootstrap` 同语义）：请求
+  `{"t":"req","id","ns","m","ttl","payload","side"}\n` → 回复 `ok/err` 按 id 结算；
+  addon 不解释 payload（§7 只透传，CapabilityNamespaces 注释同纪律）。
+- JS→Java：addon 的 `invoke(ns, method, payloadJson, reqId, ttl)` 即
+  `RuntimeBridgeImpl.install` 的 handler 形（`bridge/js` 已用此形跑通 E2E）。
+- Java→JS：Kotlin 侧事件经 JNI 进 addon → 按 context 的 TSF 投递 → JS 事件循环；
+  TSF 每 context 一对（control+data），context 销毁时 pair 同生共死（§7.4 句柄
+  generation 语义在 native 侧的对偶：跨代 TSF 投递直接丢弃）。
+
+**宿主进程（:nodeN）最小启动序**（①②③已落 `main.cpp`，本机交叉编译验证；真机执行待 CI）：
+
+1. 连 `:main` unix socket（`AUTOSCRIPT_HOST_SOCKET` 同名 env，`SocketBootstrap` 语义）。
+   **地址双形态**（main.cpp `ConnectHostSocket` 判别式）：`/` 开头 = 文件系统路径
+   （桌面/CI/E2E），否则 = Linux abstract 名（设备：minSdk 26 无 `ServerSocketChannel`
+   unix API，`:main` 监听用 `LocalServerSocket(String)`）；双侧 `SO_PEERCRED` 校 uid
+   （abstract 名没有文件权限 → 防抢绑/冒名顶替，uid 不符即拒）。两种形态都缺 env =
+   离线模式（桥调用如实 `ERR_ENGINE_STOPPED`），env 给了连不上即硬失败 exit 3，不静默降级；
+   **宿主建连、经 `AUTOSCRIPT_SOCK_FD` 注入 addon**——addon 契约是「宿主注入已连 fd、
+   建连/重试/熔断归宿主」，不自连（§7.5 对接条 + addon 注释）；
+2. `dlopen libnode.so`（RTLD_NOW|RTLD_GLOBAL；宿主自身 **DT_NEEDED `libc++_shared.so`
+   + RUNPATH `$ORIGIN`**，用来满足 libnode 自己的传递依赖 —— bionic 的 RUNPATH 不作用于
+   被依赖库的传递依赖，2026-09-29 真机实证；16KB 门禁已过，PRODUCT 哈希 `3cadbcdf…`
+   见 `/tmp/nrb-out7/SHASUMS256`）。
+   **`napi_*` 的解析面不是这一步给的**（原口径"addon 的 `napi_*` 从 libnode 动态表解析"
+   已推翻，见 [`design-decisions.md`](../design-decisions.md#已推翻--已改口径)）：bionic 的
+   linker namespace **不把先做的 `dlopen(RTLD_GLOBAL)` 符号给后做的 `dlopen`**（glibc 会）。
+   addon 侧的解法是它自己 **DT_NEEDED `libnode.so`**（按 SONAME 命中已在进程内的那份，
+   与落位目录无关），宿主不必先加载 libnode；宿主保持 dlopen 形只为 exit 4 的失败语义与
+   "libnode 可被候选位替换"（见 `engine/node-process/scripts/build-native.sh` 的装载闭包断言）；
+3. `dlsym _ZN4node5StartEiPPc` → `node::Start` 单 isolate/context，argv =
+   `node -e BOOTSTRAP -- <script> [args…]`（无 addon 则直接跑 script）：BOOTSTRAP 预载
+   `@autojs/bridge-native` addon → `setSocketFd`（首次注入即拉起读线程）→ 读
+   `AUTOSCRIPT_RUN_ID` 起 500ms `engines.heartbeat` 自动打点（`setInterval().unref()`
+   不吊命事件循环；reqId `-seq` 负数命名空间；打点失败 try/catch 吞掉不炸脚本 ——
+   失联由看门 `noHeartbeat` 判，不是让心跳反过来杀脚本）→ require 真脚本
+   （`AUTOSCRIPT_RUN_NONCE` 随 env 透传给脚本做 §8.5 幂等键，本文件不消费）；
+   JS 侧 `setup(onFrame)` 建 data TSF 由 facade 接入时调 —— **已落**（facade
+   `attachNative()`：setup 结算 + `addon.invoke` 注入 runtimeBridge + `errFromThrown`
+   保留错误码；打包入口的调用已随资产交付轨落地 —— main.cpp kBootstrap 在
+   `AUTOSCRIPT_BRIDGE_DIST` 在位时调 `attachNative({addon})`，2026-09-24，
+   见 §12.4 切片路线）。未 attach 时响应帧计入 `droppedData()`
+   （诚实可查，不静默吞）。`console.log` 经 tsf_data → socket → `ConsoleCollector`
+   （E2E 已在 JVM+Node 双侧验证语义，待真机跑通即 §19 垂直切片闭环）；
+4. 停机走四步 quiesce（SINKING → generation 排空/超时斩杀 → 释 TSF/句柄——addon 侧
+   环境 cleanup hook 已接（换代 + 释 TSF，读线程先断源不再触已释放句柄）→
+   `node::Stop` + 回调归档），禁直接 kill（§5 推论 A）。
+
+---
+

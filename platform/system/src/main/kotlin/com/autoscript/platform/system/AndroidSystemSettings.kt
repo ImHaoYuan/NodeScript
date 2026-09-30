@@ -2,7 +2,6 @@ package com.autoscript.platform.system
 
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
-import com.autoscript.domain.storage.SystemSettings
 
 /**
  * `settings` 的 Android 实现（docs §9.6；SPI 见 `:domain` 的 [SystemSettings]，

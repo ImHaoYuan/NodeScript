@@ -1,7 +1,7 @@
 package com.autoscript.domain.core
 
 /**
- * 错误目录（草案，对齐 docs/framework-design.md §7.6）。
+ * 错误目录（草案，对齐 docs §7.6）。
  * 完整清单随各模块实现补充，补充需提交 + 更新 §7.6。
  */
 enum class ErrorCode(val code: String, val summary: String) {

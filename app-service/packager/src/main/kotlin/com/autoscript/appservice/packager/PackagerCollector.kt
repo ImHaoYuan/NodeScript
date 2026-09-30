@@ -14,7 +14,7 @@ import java.nio.file.Path
 import java.security.MessageDigest
 
 /**
- * 打包资产收集（docs/framework-design.md §14 P0 打包：模板 APK 资产注入）。
+ * 打包资产收集（docs §14 P0 打包：模板 APK 资产注入）。
  *
  * 遍历项目目录产出 [PackManifest]：`node_modules` 默认入包（§10.11 打包向导联动，
  * `includeNodeModules=false` 仅用于最小调试包）；[BuildIgnore] 规则 + 构建描述文件

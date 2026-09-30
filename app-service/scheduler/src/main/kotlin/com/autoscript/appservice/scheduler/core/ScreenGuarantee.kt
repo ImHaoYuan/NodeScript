@@ -1,7 +1,7 @@
 package com.autoscript.appservice.scheduler.core
 
 /**
- * 定时任务守时诚实契约（docs/framework-design.md §8.6）：
+ * 定时任务守时诚实契约（docs §8.6）：
  * 设备「亮屏 + 解锁」是保底；熄屏任务必须显式声明其一，未经声明不投递。
  */
 enum class ScreenGuarantee {

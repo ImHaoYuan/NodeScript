@@ -1,7 +1,7 @@
 package com.autoscript.domain.scripts
 
 /**
- * 引擎运行档案（docs/framework-design.md §8.2 归档 + §8.5 归档入口 + §14 Repository 模式）：
+ * 引擎运行档案（docs §8.2 归档 + §8.5 归档入口 + §14 Repository 模式）：
  * [RunRecord] 是「一次执行」在引擎侧的唯一事实源，任务中心/UI 只经此仓库读执行历史，
  * 不直连引擎池。
  *

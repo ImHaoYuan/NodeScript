@@ -1,7 +1,7 @@
 package com.autoscript.domain.bridge
 
 /**
- * 跨进程桥消息契约（docs/framework-design.md §7.4/§7.5）。
+ * 跨进程桥消息契约（docs §7.4/§7.5）。
  * 控制面：小对象走 JSON；大二进制（Bitmap/像素）走 §7.4 ByteBuffer 直传通道，不入本 payload。
  */
 data class BridgeRequest(
@@ -50,4 +50,15 @@ data class HandleRef(
  */
 fun interface NamespaceHandler {
     suspend fun handle(request: BridgeRequest): BridgeResponse
+
+    /**
+     * 本命名空间申报的方法表（审查步骤 7 的 wire-schema 对账挂点）。
+     *
+     * **缺省空 = 未申报**，对账层按未接入处理（`wire-schema.test.cjs` 会红，逼申报）；
+     * 正式申报写法 = 单源指向生成物：
+     * `override fun methods(): Set<String> = WireMethods.BY_NS.getValue("<ns>")`
+     * —— 表的唯一事实来源是 `bridge/schema/wire.schema.json`，本方法只做"这个
+     * handler 管哪个 ns 的哪张表"的接线，不手抄方法名（手抄必然与 `when` 漂移）。
+     */
+    fun methods(): Set<String> = emptySet()
 }

@@ -1,4 +1,4 @@
-// :nodeN 宿主进程 —— docs/framework-design.md §7.8「宿主进程（:nodeN）最小启动序」的 C++ 实现。
+// :nodeN 宿主进程 —— docs §7.8「宿主进程（:nodeN）最小启动序」的 C++ 实现。
 //
 // 用法:  noden [--] <script> [scriptArgs...]
 // env:

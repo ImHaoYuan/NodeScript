@@ -1,6 +1,5 @@
 plugins {
-    alias(libs.plugins.android.library)
-    alias(libs.plugins.kotlin.android)
+    id("autoscript.android-library")
     alias(libs.plugins.kotlin.compose)
 }
 
@@ -9,19 +8,7 @@ plugins {
 // 业务/装配知识留在 :app —— :ui 禁反向依赖 :app（ModuleGraphTest 允许集量化）。
 android {
     namespace = "com.autoscript.ui"
-    compileSdk = libs.versions.compileSdk.get().toInt()
-    defaultConfig { minSdk = libs.versions.minSdk.get().toInt() }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-    kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
-    testOptions {
-        unitTests {
-            all { it.useJUnitPlatform() }
-        }
-    }
 }
 
 dependencies {
@@ -31,7 +18,4 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.androidx.activity.compose)
     debugImplementation(libs.compose.ui.tooling)
-
-    testImplementation(libs.junit.jupiter)
-    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

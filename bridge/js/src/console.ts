@@ -1,5 +1,5 @@
 /**
- * console 回传（docs/framework-design.md §7.3 tsf_data / §14 P0 最小桥）。
+ * console 回传（docs §7.3 tsf_data / §14 P0 最小桥）。
  *
  * 数据面语义：可丢包（丢包统计/背压，溢出时回调 JS 层 `queueError`）。
  * 因此 log 系列调用永不抛错给脚本——发送失败（未安装/TTL/宿主拒绝）一律吞掉，

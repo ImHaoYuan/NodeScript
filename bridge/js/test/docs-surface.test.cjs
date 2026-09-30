@@ -30,7 +30,12 @@ const ROOT = (() => {
   throw new Error('找不到仓库根')
 })()
 
-const DOC = fs.readFileSync(path.join(ROOT, 'docs/framework-design.md'), 'utf8')
+const DOC = fs
+  .readdirSync(path.join(ROOT, 'docs', 'design'))
+  .filter((f) => f.endsWith('.md'))
+  .sort()
+  .map((f) => fs.readFileSync(path.join(ROOT, 'docs', 'design', f), 'utf8'))
+  .join('\n')
 const facadeModule = require(path.resolve(__dirname, '..', 'dist', 'index.js'))
 const auto = facadeModule.default
 

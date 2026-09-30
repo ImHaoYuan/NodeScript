@@ -1,5 +1,7 @@
 package com.autoscript.platform.capabilities
 
+import com.autoscript.domain.bridge.BridgeResponse
+import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.automation.GestureInput
 import com.autoscript.domain.automation.InputProvider
 import com.autoscript.domain.automation.UiActionExecutor
@@ -17,6 +19,9 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import com.autoscript.platform.capabilities.a11y.A11yNamespaceHandler
+import com.autoscript.platform.capabilities.a11y.InMemoryUiTree
+import com.autoscript.platform.capabilities.screen.InMemoryInputProvider
 
 /**
  * 接缝证明（§9.1）：[A11yNamespaceHandler] 只依赖 `:domain` 的三条 SPI，
@@ -125,12 +130,12 @@ class A11yNamespaceHandlerSeamTest {
     @Test
     fun `findOne 走 reader 缝命中`() = runBlocking {
         val resp = assertInstanceOf(
-            A11yNamespaceHandler.Response.Ok::class.java,
-            handler.handle(A11yNamespaceHandler.Request(1, "findOne", """{"conditions":{"text":"启动"}}""")),
+            BridgeResponse.Ok::class.java,
+            handler.handle(a11yReq(1, "findOne", """{"conditions":{"text":"启动"}}""")),
         )
-        val o = A11yBridgeJson.decodeObject(resp.payload!!)
-        val ref = (o["ref"] as A11yBridgeJson.Value.Obj).fields
-        assertEquals("1", (ref["refId"] as A11yBridgeJson.Value.N).raw)
+        val o = DomainJson.decodeObject(resp.payload!!)
+        val ref = (o["ref"] as DomainJson.Value.Obj).fields
+        assertEquals("1", (ref["refId"] as DomainJson.Value.N).raw)
         assertEquals(listOf("启动"), reader.finds, "选择器条件原样交给 reader，语义层不自己过滤")
         Unit
     }
@@ -138,9 +143,9 @@ class A11yNamespaceHandlerSeamTest {
     @Test
     fun `click 走 executor 缝而非 reader`() = runBlocking {
         val resp = assertInstanceOf(
-            A11yNamespaceHandler.Response.Ok::class.java,
+            BridgeResponse.Ok::class.java,
             handler.handle(
-                A11yNamespaceHandler.Request(
+                a11yReq(
                     2, "click",
                     """{"ref":{"refId":1,"generation":1}}""",
                 ),
@@ -155,23 +160,23 @@ class A11yNamespaceHandlerSeamTest {
     @Test
     fun `setText bounds children 都走 executor 缝`() = runBlocking {
         val set = assertInstanceOf(
-            A11yNamespaceHandler.Response.Ok::class.java,
+            BridgeResponse.Ok::class.java,
             handler.handle(
-                A11yNamespaceHandler.Request(3, "setText", """{"ref":{"refId":1,"generation":1},"text":"hi"}"""),
+                a11yReq(3, "setText", """{"ref":{"refId":1,"generation":1},"text":"hi"}"""),
             ),
         )
         assertEquals("true", set.payload)
         assertEquals(listOf("hi"), executor.texts)
 
         val bounds = assertInstanceOf(
-            A11yNamespaceHandler.Response.Ok::class.java,
-            handler.handle(A11yNamespaceHandler.Request(4, "bounds", """{"ref":{"refId":1,"generation":1}}""")),
+            BridgeResponse.Ok::class.java,
+            handler.handle(a11yReq(4, "bounds", """{"ref":{"refId":1,"generation":1}}""")),
         )
         assertEquals("""{"left":1,"top":2,"right":3,"bottom":4}""", bounds.payload)
 
         val kids = assertInstanceOf(
-            A11yNamespaceHandler.Response.Ok::class.java,
-            handler.handle(A11yNamespaceHandler.Request(5, "children", """{"ref":{"refId":1,"generation":1}}""")),
+            BridgeResponse.Ok::class.java,
+            handler.handle(a11yReq(5, "children", """{"ref":{"refId":1,"generation":1}}""")),
         )
         assertTrue(kids.payload!!.contains(""""refId":9"""), "子节点来自 executor：${kids.payload}")
         Unit
@@ -181,24 +186,24 @@ class A11yNamespaceHandlerSeamTest {
     fun `events 经 UiEventStream 缝取到实现自己的 seq`() = runBlocking {
         reader.emit("windowChanged")
         val resp = assertInstanceOf(
-            A11yNamespaceHandler.Response.Ok::class.java,
-            handler.handle(A11yNamespaceHandler.Request(6, "events", """{"sinceSeq":0,"batch":8}""")),
+            BridgeResponse.Ok::class.java,
+            handler.handle(a11yReq(6, "events", """{"sinceSeq":0,"batch":8}""")),
         )
-        val o = A11yBridgeJson.decodeObject(resp.payload!!)
-        val events = (o["events"] as A11yBridgeJson.Value.Arr).items
+        val o = DomainJson.decodeObject(resp.payload!!)
+        val events = (o["events"] as DomainJson.Value.Arr).items
         assertEquals(1, events.size)
-        val ev = (events[0] as A11yBridgeJson.Value.Obj).fields
-        assertEquals("windowChanged", (ev["type"] as A11yBridgeJson.Value.S).v)
-        assertEquals("1", (ev["seq"] as A11yBridgeJson.Value.N).raw)
+        val ev = (events[0] as DomainJson.Value.Obj).fields
+        assertEquals("windowChanged", (ev["type"] as DomainJson.Value.S).v)
+        assertEquals("1", (ev["seq"] as DomainJson.Value.N).raw)
         Unit
     }
 
     @Test
     fun `gesture 与 canPerformGestures 走 input 缝`() = runBlocking {
         val resp = assertInstanceOf(
-            A11yNamespaceHandler.Response.Ok::class.java,
+            BridgeResponse.Ok::class.java,
             handler.handle(
-                A11yNamespaceHandler.Request(
+                a11yReq(
                     7, "gesture",
                     """{"strokes":[{"points":[{"x":5,"y":6}],"durationMillis":50}]}""",
                 ),
@@ -209,8 +214,8 @@ class A11yNamespaceHandlerSeamTest {
         assertEquals(5, input.gestures.single().strokes.single().points.single().x)
 
         val gate = assertInstanceOf(
-            A11yNamespaceHandler.Response.Ok::class.java,
-            handler.handle(A11yNamespaceHandler.Request(8, "canPerformGestures", null)),
+            BridgeResponse.Ok::class.java,
+            handler.handle(a11yReq(8, "canPerformGestures", null)),
         )
         assertEquals("true", gate.payload)
         Unit
@@ -219,8 +224,8 @@ class A11yNamespaceHandlerSeamTest {
     @Test
     fun `dispose 走 executor 缝`() = runBlocking {
         val resp = assertInstanceOf(
-            A11yNamespaceHandler.Response.Ok::class.java,
-            handler.handle(A11yNamespaceHandler.Request(9, "dispose", """{"ref":{"refId":1,"generation":1}}""")),
+            BridgeResponse.Ok::class.java,
+            handler.handle(a11yReq(9, "dispose", """{"ref":{"refId":1,"generation":1}}""")),
         )
         assertEquals("true", resp.payload)
         assertEquals(listOf(HandleRef(1L, 1L)), executor.disposed)

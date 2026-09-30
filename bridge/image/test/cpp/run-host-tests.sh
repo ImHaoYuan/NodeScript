@@ -6,15 +6,28 @@
 # "译反了照样出结论"的判读（Vec4b 通道序、ROI 偏移回加、扫过 vs 扫过 0 像素）,
 # 只有真跑像素才能证伪。真机红测仍是最后一关，但"等上设备才发现"太贵。
 #
-# 用法：bash bridge/image/test/cpp/run-host-tests.sh [opencv 源码目录]
-#   不给目录 = $OCV_SRC 环境变量，再没有则 /tmp/ocvpin（本机惯位）
+# 用法：bash bridge/image/test/cpp/run-host-tests.sh <opencv 源码目录>
+#   目录可用第一个参数或 $OCV_SRC 传（两者必填其一）；$OCV_HOST_BUILD 必填（host
+#   静态库构建位）。均无缺省（审查步骤 1：机器路径不入脚本），缺即 usage 报错。
 # OpenCV 的 commit pin 见 node-runtime-build/VERSIONS.env 的 OPENCV_COMMIT ——
 # 与 build-opencv.sh 拉的是同一个 SHA，不是"本机随便哪个版本"。
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")"/../../../.. && pwd)"; cd "$REPO"
 
-OCV_SRC="${1:-${OCV_SRC:-/tmp/ocvpin}}"
-BUILD="${OCV_HOST_BUILD:-/tmp/ocvhostbuild}"
+OCV_SRC="${1:-${OCV_SRC:-}}"
+BUILD="${OCV_HOST_BUILD:-}"
+[ -n "$OCV_SRC" ] || {
+  printf '[FATAL] 缺 OpenCV 源码目录：传第一个参数或 export OCV_SRC=…（commit pin 见 node-runtime-build/VERSIONS.env）\n' >&2
+  printf '       例：bash %s /path/to/opencv\n' "${BASH_SOURCE[0]}" >&2
+  exit 2
+}
+[ -n "$BUILD" ] || {
+  printf '[FATAL] 缺 OCV_HOST_BUILD（host OpenCV 静态库构建位）：export OCV_HOST_BUILD=…\n' >&2
+  printf '       例：export OCV_HOST_BUILD="$PWD/build/ocvhost"\n' >&2
+  exit 2
+}
+mkdir -p "$BUILD"
+LOG="$BUILD/opencv-host-build.log"
 HERE=bridge/image/test/cpp
 
 [ -f "$OCV_SRC/CMakeLists.txt" ] || {
@@ -56,14 +69,14 @@ if [ ! -f "$BUILD/lib/libopencv_core.a" ]; then
     -DWITH_LAPACK=OFF -DWITH_EIGEN=OFF -DWITH_PROTOBUF=OFF -DWITH_FFMPEG=OFF \
     -DWITH_GTK=OFF -DWITH_QT=OFF -DWITH_WEBP=OFF -DWITH_TIFF=OFF -DWITH_OPENEXR=OFF \
     -DWITH_OPENJPEG=OFF -DWITH_KLEIDICV=OFF -DCPU_BASELINE=SSE3 -DCPU_DISPATCH="" \
-    -DBUILD_ZLIB=ON -DBUILD_JPEG=ON -DBUILD_PNG=ON >/tmp/ocvhost-build.log 2>&1
-  cmake --build "$BUILD" --target opencv_imgcodecs -j"$(nproc)" >>/tmp/ocvhost-build.log 2>&1
+    -DBUILD_ZLIB=ON -DBUILD_JPEG=ON -DBUILD_PNG=ON >"$LOG" 2>&1
+  cmake --build "$BUILD" --target opencv_imgcodecs -j"$(nproc)" >>"$LOG" 2>&1
 fi
 # 增量目标：`opencv_imgcodecs` 只连带 core/imgproc（imgcodecs 的依赖闭包），
 # features2d/flann 虽在 BUILD_LIST 白名单里、configure 配出来了，但没人编它就不落盘
 # —— host 侧与 device 侧各实测红过一次（ld.lld: unable to find library
 # -lopencv_features2d）。所以这里显式再编一轮（已编过即 no-op，不重编）。
-cmake --build "$BUILD" --target opencv_features2d -j"$(nproc)" >>/tmp/ocvhost-build.log 2>&1
+cmake --build "$BUILD" --target opencv_features2d -j"$(nproc)" >>"$LOG" 2>&1
 
 INC=(-I"$OCV_SRC/modules/core/include" -I"$OCV_SRC/modules/imgproc/include"
      -I"$OCV_SRC/modules/imgcodecs/include" -I"$BUILD")

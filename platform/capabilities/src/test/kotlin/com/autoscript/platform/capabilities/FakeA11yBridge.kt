@@ -6,6 +6,10 @@ import com.autoscript.domain.automation.ScrollDirection
 import com.autoscript.domain.automation.WindowScope
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
+import com.autoscript.platform.capabilities.a11y.A11yBridge
+import com.autoscript.platform.capabilities.a11y.A11yNode
+import com.autoscript.platform.capabilities.a11y.A11yNodeSnap
+import com.autoscript.platform.capabilities.screen.ProducedFrame
 
 /**
  * 测试假桥：蓝图（[Blue]，设备屏幕的持久面）× 包装（[FakeNode]，一次访问一个的

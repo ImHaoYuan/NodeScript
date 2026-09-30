@@ -1,7 +1,7 @@
 package com.autoscript.domain.packager
 
 /**
- * APK 签名向导的领域契约（docs/framework-design.md §14 P0 打包：签名向导）。
+ * APK 签名向导的领域契约（docs §14 P0 打包：签名向导）。
  *
  * P0 切片：纯 Kotlin 领域模型（零 Android 依赖、JVM 可单测）。
  * 起进程与 Keystore 取密钥是实现侧细节，

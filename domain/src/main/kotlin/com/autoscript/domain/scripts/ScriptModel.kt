@@ -1,7 +1,7 @@
 package com.autoscript.domain.scripts
 
 /**
- * 脚本项目/资源模型（docs/framework-design.md §9.6）。
+ * 脚本项目/资源模型（docs §9.6）。
  * filesDir 布局：files/scripts/<projectId>/；资产经 assets→filesDir 原子部署（tmp + sha256 + rename）。
  */
 data class ScriptProject(
@@ -36,7 +36,7 @@ data class RunRecord(
 
 enum class RunState { PENDING, RUNNING, SUCCEEDED, FAILED, CRASHED, CANCELLED }
 /**
- * 一次执行在两端寄存器的关联合约（docs/framework-design.md §8.5）：两套 runId 是
+ * 一次执行在两端寄存器的关联合约（docs §8.5）：两套 runId 是
  * **一个真值的两个投影，必须成对写入** —— 只写一侧会变成「引擎在跑，任务中心查不到」
  * 或「有档案，实际没有对应执行」的孤儿记录。
  *

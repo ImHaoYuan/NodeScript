@@ -12,17 +12,17 @@ import com.autoscript.appservice.scheduler.core.TaskStore
 import com.autoscript.appservice.scheduler.core.RecoveryRecord
 import com.autoscript.appservice.scheduler.core.Scheduler
 import com.autoscript.appservice.scheduler.core.SchedulerProvider
+import com.autoscript.appservice.scheduler.WorkManagerNamespaceHandler
 import com.autoscript.bridge.BridgeRouter
 import com.autoscript.bridge.ConsoleCollector
 import com.autoscript.bridge.EventBus
 import com.autoscript.bridge.RequestHandler
 import com.autoscript.bridge.RequestRegistry
-import com.autoscript.domain.bridge.BridgeRequest
-import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.engine.EngineId
 import com.autoscript.domain.bridge.NamespaceHandler
 import com.autoscript.domain.engine.ScriptEngine
 import com.autoscript.domain.scripts.RunArchive
+import com.autoscript.platform.capabilities.CapabilityNamespaces
 
 /**
  * :app 装配根（docs §4.1 Composition Root，手写 DI，不用 Hilt）。
@@ -168,7 +168,7 @@ class AppShell(
             watchdog: EngineWatchdog? = null,
             /**
              * `npm` 命名空间实现（§10.8 auto.npm）：与 [a11yHandler]/[screenHandler] 同一注入缝
-             * （真实实现 InstallCoordinator + NpmBridgeHandler 住 :app-service:packager）。
+             * （真实实现 InstallCoordinator + NpmBridgeHandler 住 :app-service:npm）。
              * null = 未接线，桥对 `npm.*` 如实回 ERR_NOT_IMPLEMENTED（不伪造可用）。
              */
             npmHandler: NamespaceHandler? = null,
@@ -231,7 +231,7 @@ class AppShell(
              * `power_manager` 命名空间实现（§8.7 脚本电源面）：同 [datastoreHandler] 的**独立**缝 ——
              * 电源面无共担门禁（`WAKE_LOCK` 是安装时授予的 normal 权限，判定在账本与系统侧），
              * 不入 [SystemHandlers] 束。生产由 Application 从 `foregroundKeeper()` 的账本现建
-             * `PowerManagerNamespaceHandler(...).mount()` 后传入（与 `workManager` 恒挂载不同 ——
+             * `PowerManagerNamespaceHandler(...)` 后传入（与 `workManager` 恒挂载不同 ——
              * 调度器是本壳自建的，账本是 Application 持有的进程级单例）；
              * null = 未接线，桥如实 `ERR_NOT_IMPLEMENTED`（不伪造可用）。
              */
@@ -256,7 +256,7 @@ class AppShell(
 
             val controller = RuntimeController(FixedEnginePool(engineFactory, poolCapacity))
             val enginesHandler = EnginesNamespaceHandler(controller)
-            router.register("engines") { request -> enginesHandler.handleLike(request) }
+            router.register("engines", enginesHandler)
 
             // 能力命名空间按挂载缝注入（§4.1/§6）：本层只负责把 handler 挂上 Router，
             // 不 new 具体实现（那需要直连 :platform，被 archUnit 禁止）。缺省不挂 =
@@ -285,7 +285,7 @@ class AppShell(
             )
             // 脚本建任务面（`auto.workManager.*`）：调度器是本壳自建的（与 a11y/screen
             // 注入缝不同 —— 真实现不在 `:platform`），故恒挂载，无注入缝。
-            router.register("workManager", WorkManagerNamespaceHandler(scheduler).mount())
+            router.register("workManager", WorkManagerNamespaceHandler(scheduler))
 
             // 看门狗：采样器 + 心跳来源在此装配；policy 取 controller 自己那份（单一事实来源，
             //  Threshold 改变只改一处）。缺省 new 一个套在真 controller 上的生产实例。
@@ -309,24 +309,6 @@ class AppShell(
     }
 }
 
-/** engines handler 用自有 Request/Response 形状；桥接层做字段级转接（无逻辑）。 */
-private suspend fun EnginesNamespaceHandler.handleLike(request: BridgeRequest): BridgeResponse {
-    return when (
-        val r = handle(
-            EnginesNamespaceHandler.Request(
-                id = request.id,
-                method = request.method,
-                payload = request.payload,
-                ttlMillis = request.ttlMillis,
-            ),
-        )
-    ) {
-        is EnginesNamespaceHandler.Response.Ok ->
-            BridgeResponse.Ok(r.id, r.payload)
-        is EnginesNamespaceHandler.Response.Err ->
-            BridgeResponse.Err(r.id, r.code, r.detail)
-    }
-}
 
 /**
  * `dialogs`/`shell`/`device`/`app`/`floatingWindow` 五个命名空间的注入束（§9.4/§9.6/§12.2）。

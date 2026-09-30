@@ -1,7 +1,5 @@
 package com.autoscript.platform.system
 
-import com.autoscript.domain.system.Clipboard
-
 /**
  * `clipboard` 的 Android 实现（docs §12.2；SPI 见 `:domain` 的 [Clipboard]，
  * 语义层 handler 在 `:platform:capabilities`）。分层照 settings/notification：

@@ -60,7 +60,7 @@ data class NodeEngineConfig(
 )
 
 /**
- * `ScriptEngine` 的进程池实现（docs/framework-design.md §8.1「实现在 :engine:node-process」/
+ * `ScriptEngine` 的进程池实现（docs §8.1「实现在 :engine:node-process」/
  * §19「Kotlin spawn」的落地）：每 execute 起一个宿主进程（§8.2 每脚本一进程），env 契约
  * 与 `main.cpp`（§7.8）逐键对齐。
  *
