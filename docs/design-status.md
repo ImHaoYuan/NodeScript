@@ -40,6 +40,33 @@
 
 ## 流水（最新在上）
 
+### 2026-09-30 —— 外部审查整改·步骤 8：framework-design.md 拆 12 卷 + 机器读者/文档漂移修缮
+
+（四提交推进；§号与标题文本逐字保留，只移动文件）
+
+- **8-1（04b230a）纯拆分**：1,380 行 / 252,896 B 单体按 § 号切 `docs/design/` 12 卷
+  （`00-overview(§0–2) / 03-technology(§3) / 04-architecture(§4–5) / 06-modules(§6) / 07-bridge(§7) /
+  08-execution(§8) / 09-capabilities(§9) / 10-npm(§10) / 11-security(§11) / 12-js-api(§12) /
+  13-roadmap-budget(§13–17) / 18-19-ledger(§18–19+文档边界)`），`framework-design.md` 换薄索引
+  （分卷导航 + 文档边界表）。核验：12 卷按文件名序拼接 == 拆分前原文**逐字节**（156,995 字符）。
+- **8-2（b5af6e6）机器读者改造**：`wiring-table.test.cjs` 改读 `docs/design/12-js-api.md`（§12.2 表）；
+  `docs-surface`/`err-catalog` 改读 `docs/design/*.md` 按名排序全拼接；全仓 **97 个**代码/构建文件的
+  `docs/framework-design.md §X.Y` KDoc/注释机械 sed 成 `docs §X.Y`（§ 号是唯一权威锚）。
+- **8-3（12cee90）§18 漂移修复 + 死链**：design-decisions「已拍板」追加 2026-09-26 preamble +
+  原 §18 第 **1–7 项**（3,947 字符原文整段照抄，编号不变）——接口期表「§18 已全部拍板」的断言自此
+  真实成立；「仍待拍板」段标题加删除线 + 订正块（原表按只追加纪律保留）；18 卷 §18 导语改
+  「决策台账——九项全部已拍板」；**拆分死链 9 处**（卷内 `](design-*.md)` 相对链接补 `../`，
+  否则解析进 `docs/design/` 内不存在的路径）+ design-status/design-decisions 头部互链改指分卷。
+- **8-4（af64b77）CLAUDE.md/README 终稿**：首段与仓库地图改「12 卷 + 薄索引」双行、decisions 行改
+  「原 §18 全部九项」、构建段 12→13 任务、协作纪律 1 改按 § 号读分卷、尾注 `Claude Opus 5` →
+  `Claude Code`（对齐现行）；根 README 与 platform 两份 README 设计章节行改指分卷；4 个 C++ 源头注
+  补漏（8-2 白名单漏 `*.cpp/*.cc`）。**豁免记明**：`gradle/libs.versions.toml` L2 一处引用不改 ——
+  冻结文件（计划承诺零改动），链接有效（指向索引入口）。
+- **验证**：CI 同源 13 任务 BUILD SUCCESSFUL（17 executed / 153 up-to-date，编译与受影响链全过）；
+  `npm test` 190 tests（189 pass / 1 env-gated skip / 0 fail —— 四门 docs-surface/err-catalog/
+  wiring-table/wire-schema 在新读口上全绿）；`gen:wire` 重生成两产物零 diff。
+
+
 ### 2026-09-30 —— 外部审查整改·步骤 7：单一 schema 生成契约 + dist 出库
 
 （wire 面单源 + 双发射 + 三门换基 + CI/dist/过时配置；五提交推进）
