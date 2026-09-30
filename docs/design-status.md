@@ -21,7 +21,7 @@
 |---|---|---|
 | §18 | 开放决策点 | **已全部拍板**（第 8/9 项 2026-09-25，第 1–7 项 2026-09-26，见 [`design-decisions.md`](design-decisions.md)；§18 保留作决策台账） |
 | §14 P1 | MediaProjection 高清会话 | 未落（授权 UI + FGS；换 producer 即插，语义面不动） |
-| §14 P1 | QuickJS `:sandbox` 进程 | 未落（仅模块骨架 `engine/sandbox/build.gradle.kts`） |
+| §14 P1 | QuickJS `:sandbox` 进程 | 未落；模块壳 **2026-09-30 已从 settings 注释摘除**（目录留盘、不计 14 模块；复活 = 注释回 + ModuleGraphTest 登记） |
 | §14 P1 | `ui` 原生 XML UI 宿主 / `ui_web` | 未落 |
 | §9.7 | OCR（P1）/ 插件（P2） | 未落 |
 | §10.5 | 生物特征二次确认 | 未落（`BiometricPrompt` 全仓零引用） |
@@ -39,6 +39,18 @@
 只在那里写一份（本文件不复制，避免两处漂移）。
 
 ## 流水（最新在上）
+
+### 2026-09-30 —— 外部审查整改·步骤 1：机器路径 18 处清零 + 原生暂存入约定 + `:engine:sandbox` 空壳摘除
+
+（审查断言「硬编码路径 18 处」按 kts 6 + build-native.sh 6 + run-host-tests.sh 6 精确核实后全清；§4.1/§6 构建面）
+
+- **app 原生/资产随包迁入约定**：`prepareEngineNativeLibs` + `prepareBridgeDistAssets` + preBuild wiring 从 `app/build.gradle.kts`（266 行 → 106 行）整段迁入 `build-logic/src/main/kotlin/autoscript.engine-natives.gradle.kts`（`autoscript.engine-natives`，:app 应用）；`import java.io.File` 随迁。
+- **机器路径三处手术**：① libnode/libopencv 第三候选（`/tmp/nrb-out7`、`/tmp/img-opencv-out`）删除，dev 复现改 `export LIBNODE=/path/to/…`；② `ANDROID_NDK_HOME` 的 `/root/ndk/…` 兜底删除，且求值刻意留在 doLast「三件齐」分支 —— **全无 → 警告 分支没 NDK 也要能 assemble**（语义三分支逐字保留，本机实测：三件齐 env 绿 / 半套红带 export 指引 / 挪开交付件后全无警绿）；③ 半套报错补 `export LIBNODE` 出口指引。
+- **两脚本默认值 → 必填 env**：`build-native.sh` 的 `ANDROID_NDK_HOME`/`NODE_SRC`/`LIBNODE` 无缺省（缺即 fail 带 export 样例，`bash -n` 过 + 缺 env 实测报错形态）；`run-host-tests.sh` 的 `OCV_SRC`（参数或 env 二选一必填）、`OCV_HOST_BUILD` 必填（缺即 usage exit 2），构建日志 `/tmp/ocvhost-build.log` ×3 改入 `$BUILD/opencv-host-build.log`。`image-native.yml` L72 注释同步（L103 本就显式传 `/tmp/ocvpin`，CI 已显式 `OCV_HOST_BUILD`）。
+- **`:engine:sandbox` 空壳摘除**（QuickJS 已裁不变，推翻「壳保留」旧口径见 design-decisions）：settings `include` 注释（注释块写复活步骤）；ModuleGraphTest 三改 —— `include` 正则锚行首 `(?m)^\s*`（注释行不计，机器口径）、allowed 删行、断言消息 15→14。`grep "/tmp/\|/root/" --include=*.kts` 仅剩 `platform/capabilities` 注释里「无障碍/root/adb」字样（非路径）；两脚本 0 命中。
+- **验证**：`bash -n` ×2；缺 env 报错形态实测；`assembleDebug` 三件齐绿（env：`LIBNODE`+`ANDROID_NDK_HOME`）；CI 同源 12 任务绿；`bridge/js` npm test 185 pass / 1 env-gated skip。
+- **本机注意**：worktree 的 `engine/node-process/build/native-local` 留有半套交付件（stale noden）→ 本机跑 `:app:*` 任务需 `export LIBNODE=… ANDROID_NDK_HOME=…`（或清掉 native-local 回「全无 → 警告」）；**干净 checkout = CI 同源零 env**（全无分支不要 NDK）。
+
 
 ### 2026-09-30 —— 外部审查整改·步骤 4：删 \*Lite + RpcNamespaceHandler 基类承接解码与错误映射
 

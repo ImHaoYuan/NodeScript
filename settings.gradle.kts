@@ -34,7 +34,9 @@ include(":bridge:java")
 include(":bridge:native")
 include(":bridge:image")
 include(":engine:node-process")
-include(":engine:sandbox")
+// 审查步骤 1（2026-09-30）：空壳摘除 —— QuickJS 已裁（§18 第 1 项），不占模块表。
+// 复活 = 取消本行注释 + ModuleGraphTest 允许集登记（其 include 正则锚行首，注释不计）。
+// include(":engine:sandbox")
 include(":platform:capabilities")
 include(":platform:system")
 include(":ui")

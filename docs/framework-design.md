@@ -180,7 +180,7 @@
 
 ## 6. Gradle 模块结构与依赖规则
 
-> 批判建议「约 12 个模块、不要过度拆分」，下表为落定清单（15 个），薄模块已合并（原 4 个 `:platform:*` 合并为 2 个，插件管理器/打包器等薄服务并入对应模块）——拆分的唯一目的是：**让依赖方向能在 Gradle 层面被强制**。
+> 批判建议「约 12 个模块、不要过度拆分」，下表为落定清单（14 个；`:engine:sandbox` 空壳 2026-09-30 已从 settings 摘除，原 15 —— 见 [`design-decisions.md`](design-decisions.md) 已推翻表），薄模块已合并（原 4 个 `:platform:*` 合并为 2 个，插件管理器/打包器等薄服务并入对应模块）——拆分的唯一目的是：**让依赖方向能在 Gradle 层面被强制**。
 
 | 模块 | 职责 | 允许依赖 | 所有模块禁止 |
 |---|---|---|---|
@@ -197,7 +197,7 @@
 | `:bridge:image` | C++：图像分析管线 addon（独立 so `libopencv.so`，OpenCV 4.14.0 静态链接 + kleidicv，不依赖 node；`imgnative.cpp` 计算核 + `images_jni.cc` 装载面，构建轨 `node-runtime-build/scripts/build-opencv.sh` + `.github/workflows/image-native.yml`；宿主机语义门禁 `bridge/image/test/cpp/`，303 例直链同 commit OpenCV 跑像素断言，覆盖 ingest 26 + findColor 36 + decode 归一 21 + matchTemplate 24 + 灰度 28 + 裁剪 46 + 缩放 45 + 旋转 45 + 特征 32） | 被引擎宿主 + `:main` 分析器引用 | — |
 | `:bridge:js` | npm workspace：TS facade SDK（`@autojs/*`）、RuntimeChannel、bootstrap loader、d.ts | 仅 npm 依赖 | 禁 Gradle 反向 |
 | `:engine:node-process` | `:nodeN` 进程宿主：**`NodeProcessEngine`（Kotlin spawn：ProcessLauncher 缝 + env 契约 + pid/状态语义，实现 `:domain` 的 `ScriptEngine`）**、main.cpp、Node config、JNI 注册 | `:bridge:native`、`:domain` | 禁 Android SDK UI；Kotlin 侧禁 `com.autoscript.bridge..`/`appservice`/`platform`（ArchitectureTest 量化） |
-| `:engine:sandbox` | QuickJS 宿主进程 —— **已裁、不进排期**（§18 第 1 项；`settings.gradle.kts` 模块表由协调者冻结，壳保留） | — | — |
+| `:engine:sandbox` | QuickJS 宿主进程 —— **已裁、不进排期**（§18 第 1 项）；模块壳 **2026-09-30 已从 `settings.gradle.kts` 注释摘除**（原「协调者冻结、壳保留」口径已推翻，见 design-decisions），不占模块表 —— 复活 = 注释回 include + ModuleGraphTest 允许集登记 | — | — |
 | `:platform:capabilities` | a11y 服务/UiNodeTreeReader、截图 FrameSource（a11y 路径已接，MediaProjection 待）、输入通道（无障碍/root/adb/Shizuku）、`a11y`/`screen` 命名空间 handler + 挂载缝薄转接；`DialogHost`（`AndroidDialogHost` 编排 + **设备面全部住 `…capabilities.device` 子包** —— ArchUnit 按包豁免 `android..`，语义层保持纯 JVM）；`dialogs`/`shell`/`device`/`app`/`floatingWindow` 五个 handler（语义层，SPI 由 Android 侧注入）；`datastore`/`zip`/`settings` 三个存储面 + `notification` 通知面 + `clipboard` 剪贴板面 + `sensors` 传感器面 + `images` 图像面 handler（§9.6/§9.2/§12.2，各自独立注入缝 —— 图像面的 `ImagesNamespaceHandler` **单独成文件、刻意不住 `SystemNamespaces.kt`**：那五个共担 OVERLAY/ROOT/ADB_INPUT 门禁组，图像面没有门禁） | `:domain` + 系统 API | 禁服务逻辑；禁直连 `com.autoscript.bridge..`（挂载缝类型住 `:domain`，见 §12.2） |
 | `:platform:system` | overlay、通知、datastore（SQLite）、shell、设备信息、zip、系统设置 —— **只放 `com.autoscript.domain.system` 各 SPI 的 Android 实现**（`Runtime.exec`/`Build`/`PackageManager`/`WindowManager`），handler 语义层不在这里（见上一行，理由见 §12.2）。**已落地**：`shell`/`device`/`app`/`floatingWindow` 四件 + `datastore`（`AndroidDataStore`+`SqliteKvOps`）+ `zip`（`JdkZipArchiver`，`java.util.zip` 纯 JVM 无 ops 缝）+ `settings`（`AndroidSystemSettings`+`SettingsSystemOps`）（`SystemSpis.of` 是实现入口，`Bundle` 已到十件）+ `notification`（`AndroidNotificationPoster`+`NotificationOps`，默认 channel 归实现）+ `clipboard`（`AndroidClipboard`+`ClipboardOps`，与 a11y 剪贴板同口径）+ `sensors`（`AndroidSensorSource`+`SensorOps`，拉取式游标/有界环/句柄纪律）；`dialogs` **不在本模块**（domain KDoc 约定实现住 :platform:capabilities，平台模块间无依赖边，构造归 `PlatformWiring.of`）；`images` 的 `ImageAnalyzer` 真实现是 `NativeImageAnalyzer` + `JniOps`（`System.loadLibrary("opencv")`，so 缺位即不构造）——它不住 `SystemSpis.Bundle`（`images` 是独立可选参数，构造归 `PlatformWiring.of`：`JniOps.loadOrNull()` 失败 → null → 桥对 `images.*` 如实 `ERR_NOT_IMPLEMENTED`） | `:domain` | 禁服务逻辑；禁直连 `com.autoscript.bridge..`（本模块不挂 Router，挂载在 `:platform:capabilities`） |
 | `:node-runtime-build` | **构建管线（不打包进 APK）**：Node 源码 recipe、NDK 编译、16KB 对齐门禁、产物 hash | CI 脚本 | — |
@@ -1202,7 +1202,7 @@ offQe();
 
 ### P1 — 并发、图像、生态关键件（沙箱已裁，§18 第 1 项）
 - 引擎池自适应（1-3）＋执行 slot FGS + 队列语义；`engines` 多引擎/`RuntimeChannel`。
-- ~~QuickJS `:sandbox` 进程~~ **已裁（2026-09-26，§18 第 1 项「不要沙箱」）**：QuickJS 整条轨撤出排期，引擎只剩 Node 一条；`:engine:sandbox` 模块壳保留但不进排期。连带作废的还有 npm P1 里的「QuickJS 白名单库独立 vendored」与 §16 的两条相关风险——第三方脚本的防线改为**安装时用户选择 + §11 来源提示**（进程隔离那条不再存在）。
+- ~~QuickJS `:sandbox` 进程~~ **已裁（2026-09-26，§18 第 1 项「不要沙箱」）**：QuickJS 整条轨撤出排期，引擎只剩 Node 一条；`:engine:sandbox` 模块壳保留但不进排期（**2026-09-30 追记：壳已从 settings 注释摘除，不占模块表**）。连带作废的还有 npm P1 里的「QuickJS 白名单库独立 vendored」与 §16 的两条相关风险——第三方脚本的防线改为**安装时用户选择 + §11 来源提示**（进程隔离那条不再存在）。
 - `libopencv.so` 全图像管线的 P1 算子与桥面消费方**均已全落**；**找色已落地**（2026-09-25，§9.2：单色 + 逐分量容差 + 可选区域 + 首个命中，四层同改，`x=-1` 哨兵与“扫过 0 像素”两条口径），模板匹配 + `decode`/`release` 亦已随 §9.2 落地，**灰度、裁剪、缩放、旋转与特征已落计算核**（2026-09-25：`imgnative_gray` 产出新帧 + 28 例；`imgnative_crop` 尺寸会变的产出 + 复用区域判据 + 真拷贝 + 46 例；`imgnative_resize` 目标尺寸入参 + 固定 LINEAR + 配额 + 45 例；`imgnative_rotate` 逆时针角度 + expand 包络画布 + 帧中心 + 45 例；`imgnative_feature` ORB+ratio+几何一致性只回坐标 + 32 例 host 断言；**五者桥面已于 2026-09-29 全部开通** —— P1 图像桥消费方兑现了当初"没有消费方就不开桥面"的判据，`:domain ImageAnalyzer` 扩到十方法）；MediaProjection 会话式截屏/录屏仍待（换 producer 即插，语义面不动）。
 - `ui` 原生 XML UI 宿主 + `ui_web` WebView JS 桥 + 悬浮窗。
 - datastore SQLite、settings、sensors、notification、app Intent、zip、power_manager（**已落地**，见 §8.7；clipboard 亦已落地 §12.2 第五条独立缝，sensors 亦已落地 §12.2 第六条独立缝，images 桥面与 native 实现均已落地 §12.2 第七条独立缝 —— `libopencv.so`（OpenCV 4.14 静态链接，`node-runtime-build/scripts/build-opencv.sh` + `.github/workflows/image-native.yml`）+ `NativeImageAnalyzer`/`JniOps`（`:platform:system`）+ `PlatformWiring.of` 三件套齐全，so 缺位时桥回 `ERR_NOT_IMPLEMENTED`）。
@@ -1302,7 +1302,7 @@ offQe();
 
 1. **引擎路线：先 Node-only，还是 P0 就并行 QuickJS 沙箱？**
    推荐「P0 只 Node；QuickJS 沙箱 P1」——沙箱牵扯独立进程、白名单、双引擎 API 对齐三件大事，混进 P0 会把最小闭环拖垮。
-   **已拍板（2026-09-26）：不要沙箱**——QuickJS 整条轨撤出排期，**不只是推迟到 P1**：引擎只剩 Node 一条轨，`:engine:sandbox` 不进排期（`settings.gradle.kts` 里的模块壳保留，模块表按协调者冻结不动），§14 的「QuickJS `:sandbox` 进程」与 §16 的两条相关风险随之作废。
+   **已拍板（2026-09-26）：不要沙箱**——QuickJS 整条轨撤出排期，**不只是推迟到 P1**：引擎只剩 Node 一条轨，`:engine:sandbox` 不进排期（原记「模块壳保留、模块表冻结不动」；**2026-09-30 壳已注释摘除**，模块表 15→14，ModuleGraphTest 同批），§14 的「QuickJS `:sandbox` 进程」与 §16 的两条相关风险随之作废。
    **这条改的是安全边界，不是排期**：原先「第三方/市场脚本 → `:sandbox` 白名单子集」的隔离（§11 来源分级表）不再存在，第三方脚本与自写脚本**同在 Node 进程、同权**（无障碍/截屏/点击/网络全开）。防线因此只剩两条：**安装时的用户选择**（见第 7 项）与 §11 的来源提示——「靠能力授予而非进程隔离」要写在给用户的提示里，不能让人以为装来的脚本是沙箱跑的。
 2. **进程模型：P0 就用「每脚本一进程」，还是先单引擎进程后扩？**
    推荐**一步到位**：反正脚本绝不能进主进程，单引擎进程的边界与多引擎池完全同构，代价只是「池容量先写死为 1」。避免二次重构。

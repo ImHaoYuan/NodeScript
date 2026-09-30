@@ -12,7 +12,7 @@
 | `.claude/skills/skill-designer/` | 项目级 skill：设计/创建技能 + 外科手术式改代码 + git 提交 | — |
 | `module-stubs` 之外的模块 | 各模块职责见下 | §6 |
 
-## Gradle 模块（模块表由 `settings.gradle.kts` 冻结，15 个）
+## Gradle 模块（模块表由 `settings.gradle.kts` 冻结，14 个 —— `:engine:sandbox` 空壳 2026-09-30 已注释摘除，复活 = 注释回 + ModuleGraphTest 登记）
 
 - `:app` — AppShellApplication 启动装配（§4.1 Composition Root）；Compose UI 已拆去 `:ui`（2026-09-23 落地：launcher 随库 manifest 合并，`:app` 源码零 compose / 零 import ui）
 - `:app-service:runtime` — RuntimeController / EnginePool / Watchdog 仲裁（§8）
@@ -25,7 +25,7 @@
 - `:bridge:native` — C++ N-API addon 控制面 + libnode.so 装载（§7，CI 构建）
 - `:bridge:image` — C++ 图像管线 libopencv.so（OpenCV 4.x，§9.2，CI 构建）
 - `:engine:node-process` — :nodeN 进程宿主：`NodeProcessEngine`（Kotlin spawn，实现 `:domain` 的 `ScriptEngine`）+ main.cpp（§5/§7.8；addon `.so` 本机 NDK 可交叉编译验证，APK `assembleDebug` 本机可直跑）
-- `:engine:sandbox` — QuickJS 宿主进程（P1）
+- `:engine:sandbox` — QuickJS 宿主进程（**已裁 §18 第 1 项；壳 2026-09-30 已从 settings 注释摘除、不计 14**，目录留盘；复活 = 注释回 include + ModuleGraphTest 允许集登记）
 - `:platform:capabilities` — a11y/截图/输入/悬浮窗/系统/存储（§9.1–9.4）
 - `:platform:system` — overlay/通知/datastore/shell/zip/设备信息（§9.6）
 - `:ui` — Compose UI 呈现层：启动 Activity（launcher）、首屏/任务中心/控制台/能力中心界面；状态经 `:domain` 的 `HostSummary` 读口现取，禁依赖 `:app`（§6）

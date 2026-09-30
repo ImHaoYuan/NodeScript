@@ -69,8 +69,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends cmake ninja-build g++ git ccache
 
       # host OpenCV 静态库 5–10 分钟档：g++ 经 ccache 包调用，BUILD_DIR 复用即命中。
-      # run-host-tests.sh 的 BUILD 缺省 /tmp/ocvhostbuild（$OCV_HOST_BUILD 可覆写）——
-      # 这里覆写进 workspace 才能被 actions/cache 存走；commit 对表由脚本内 pin 源 verdict。
+      # run-host-tests.sh 的 BUILD 必填（$OCV_HOST_BUILD，审查步骤 1 起无缺省）——
+      # 这里显式指进 workspace 才能被 actions/cache 存走；commit 对表由脚本内 pin 源 verdict。
       - name: 缓存 host ccache（x86_64 OpenCV 静态库）
         uses: actions/cache@v4
         with:
