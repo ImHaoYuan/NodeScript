@@ -8,7 +8,6 @@ import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
-import com.autoscript.domain.storage.ZipArchiver
 import java.nio.file.Path
 
 /**

@@ -7,7 +7,6 @@ import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
-import com.autoscript.domain.system.Clipboard
 
 /**
  * `clipboard` 命名空间的桥处理器（§12.2；JS 对偶 `bridge/js/src/clipboard.ts`）。

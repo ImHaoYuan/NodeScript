@@ -1,11 +1,12 @@
-package com.autoscript.domain.storage
+package com.autoscript.platform.system
 
 /**
  * `settings` 系统设置契约（docs/framework-design.md §9.6，JS 对偶待建 `auto.settings`）。
  *
- * 为什么住 `:domain`：与 [DataStore] / [ZipArchiver] 同一套理由 —— 真实现要碰
- * `android.provider.Settings`，§6 要求 `:platform:*` 只依赖 `:domain`；
- * 「问什么」与「怎么问系统」切开，桥面 handler 才是纯 JVM 可测的。
+ * 2026-09-30 审查步骤 6 自 `:domain` 迁入本模块（grep 判据同 [ClipboardContracts]）——
+ * 与 [ZipArchiver] 同批；`com.autoscript.domain.storage.DataStore` 反例留 `:domain`
+ * （存储面通用契约，非本能力专用，`:app` 测试在读）。「问什么」与「怎么问系统」
+ * 仍切开成契约 / `AndroidSystemSettings` 两类型，handler 纯 JVM 可测不因同模块而变差。
  *
  * **P0 范围钉在 `Settings.System` 命名空间**（可写面：亮度/铃声/屏幕超时这类
  * 用户可改项；WRITE_SETTINGS 门控的正是它）。`Settings.Global`/`Secure`
@@ -15,7 +16,7 @@ package com.autoscript.domain.storage
  * **写入失败的口径（§9.5）**：未授 `WRITE_SETTINGS` → 抛 `ERR_PERMISSION_DENIED`
  * （不是回 false —— 授权问题就该是分类错误，调用方才能引导；「回 false 交给你猜」
  * 把门禁语义冲掉了）。系统在已授权情况下仍拒绝（键被保护等）→ `ERR_IO`。
- * 读侧缺键回 null 是**常态不是错误**（与 [DataStore.get] 的缺失口径同族）。
+ * 读侧缺键回 null 是**常态不是错误**（与 [com.autoscript.domain.storage.DataStore.get] 的缺失口径同族）。
  */
 interface SystemSettings {
 

@@ -1,11 +1,12 @@
-package com.autoscript.domain.system
+package com.autoscript.platform.system
 
 /**
  * `notification` 命名空间契约（docs/framework-design.md §12.2；JS 对偶 `auto.notification`）。
  *
- * 为什么住 `:domain`：与 [ShellExecutor] / [com.autoscript.domain.storage.SystemSettings]
- * 同一套理由 —— 真实现要碰 `android.app.NotificationManager`，§6 要求 `:platform:*`
- * 只依赖 `:domain`；「发什么」与「怎么发」切开，桥面 handler 才是纯 JVM 可测的。
+ * 2026-09-30 审查步骤 6 自 `:domain` 迁入本模块（grep 判据同 [ClipboardContracts]：
+ * 仅 handler+impl 消费，生产读面零引用）—— 与 [ShellExecutor] / [SystemSettings]
+ * 同批。「发什么」与「怎么发」仍切开成契约 / `AndroidNotificationPoster` 两类型，
+ * handler 纯 JVM 可测不因同模块而变差。
  *
  * **P1 范围钉在三方法**（`canPost`/`post`/`cancel`）+ 三字段（[NotificationSpec] 的
  * `id`/`text`/`title`）。刻意不预支的面，逐条给理由：

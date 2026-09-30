@@ -1,12 +1,12 @@
-package com.autoscript.domain.system
+package com.autoscript.platform.system
 
 /**
  * `clipboard` 命名空间契约（docs/framework-design.md §12.2；JS 对偶 `auto.clipboard`）。
  *
- * 为什么住 `:domain`：与 [NotificationPoster] /
- * [com.autoscript.domain.storage.SystemSettings] 同一套理由 —— 真实现要碰
- * `android.content.ClipboardManager`，§6 要求 `:platform:*` 只依赖 `:domain`；
- * 「读写什么」与「怎么问系统」切开，桥面 handler 才是纯 JVM 可测的。
+ * 2026-09-30 审查步骤 6 自 `:domain` 迁入本模块（grep 判据：仅 handler+impl 消费，
+ * `:app`/`:ui`/app-service 生产读面零引用）—— 与 [NotificationPoster] /
+ * [SystemSettings] 同批。「读写什么」与「怎么问系统」仍切开成契约 / `AndroidClipboard`
+ * 两类型，handler 纯 JVM 可测不因同模块而变差。
  *
  * **P0 范围钉在两方法**（`getText`/`setText`，纯文本）。刻意不预支的面，逐条给理由：
  * - **不带 `hasText`**：`getText` 回 null 即"无内容"，再开一个布尔读口就是两处判据，

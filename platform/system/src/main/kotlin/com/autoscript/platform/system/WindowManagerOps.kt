@@ -10,7 +10,6 @@ import android.widget.FrameLayout
 import android.widget.TextView
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
-import com.autoscript.domain.system.FloatingWindowSpec
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 

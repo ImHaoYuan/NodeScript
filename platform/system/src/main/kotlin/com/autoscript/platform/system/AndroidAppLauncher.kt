@@ -1,7 +1,5 @@
 package com.autoscript.platform.system
 
-import com.autoscript.domain.system.AppLauncher
-
 /**
  * `app` 命名空间的 Android 实现（docs §9.3/§9.6；SPI 见 `:domain` 的 [AppLauncher]）。
  *

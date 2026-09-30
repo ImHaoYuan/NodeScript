@@ -15,19 +15,8 @@ import com.autoscript.domain.bridge.HandleRef
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
 import com.autoscript.domain.automation.ImageAnalyzer
-import com.autoscript.domain.storage.ZipArchiver
-import com.autoscript.domain.storage.SystemSettings
 import com.autoscript.domain.storage.DataStore
-import com.autoscript.domain.system.SensorSource
-import com.autoscript.domain.system.NotificationPoster
-import com.autoscript.domain.system.Clipboard
 import com.autoscript.domain.bridge.NamespaceHandler
-import com.autoscript.domain.system.AppLauncher
-import com.autoscript.domain.system.DeviceInfoProvider
-import com.autoscript.domain.system.FloatingWindowHost
-import com.autoscript.domain.system.FloatingWindowSpec
-import com.autoscript.domain.system.ShellExecutor
-import com.autoscript.domain.system.ShellMode
 
 /**
  * `shell` / `device` / `app` / `floatingWindow` 四个命名空间的桥处理器 + 系统面
@@ -196,7 +185,7 @@ object SystemNamespaces {
 
     /**
      * `zip` 命名空间（§9.6）：`compress`/`extract` 两方法。参数即
-     * [com.autoscript.domain.storage.ZipArchiver] SPI 实现（测试传假归档器，
+     * [ZipArchiver] SPI 实现（测试传假归档器，
      * 真机传 `:platform:system` 的 `JdkZipArchiver`）。同 datastore：
      * 无共担门禁 → 独立注入缝 `AppShell.assemble` 的 `zipHandler`。
      */

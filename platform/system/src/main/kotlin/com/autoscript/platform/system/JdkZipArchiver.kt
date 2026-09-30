@@ -2,7 +2,6 @@ package com.autoscript.platform.system
 
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
-import com.autoscript.domain.storage.ZipArchiver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.IOException

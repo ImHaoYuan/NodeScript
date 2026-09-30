@@ -4,8 +4,6 @@ import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
-import com.autoscript.domain.system.NotificationPoster
-import com.autoscript.domain.system.NotificationSpec
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf

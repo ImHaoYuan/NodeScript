@@ -2,8 +2,6 @@ package com.autoscript.platform.system
 
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
-import com.autoscript.domain.system.NotificationPoster
-import com.autoscript.domain.system.NotificationSpec
 
 /**
  * `notification` 的 Android 实现（docs §12.2；SPI 见 `:domain` 的 [NotificationPoster]，

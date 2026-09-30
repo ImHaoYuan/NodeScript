@@ -5,9 +5,6 @@ import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.bridge.HandleRef
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
-import com.autoscript.domain.system.SensorDelay
-import com.autoscript.domain.system.SensorEventBatch
-import com.autoscript.domain.system.SensorSource
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf

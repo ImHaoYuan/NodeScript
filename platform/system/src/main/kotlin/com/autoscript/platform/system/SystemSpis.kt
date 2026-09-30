@@ -2,25 +2,16 @@ package com.autoscript.platform.system
 
 import android.content.Context
 import com.autoscript.domain.storage.DataStore
-import com.autoscript.domain.storage.SystemSettings
-import com.autoscript.domain.storage.ZipArchiver
-import com.autoscript.domain.system.AppLauncher
-import com.autoscript.domain.system.Clipboard
-import com.autoscript.domain.system.DeviceInfoProvider
-import com.autoscript.domain.system.FloatingWindowHost
-import com.autoscript.domain.system.NotificationPoster
-import com.autoscript.domain.system.SensorSource
-import com.autoscript.domain.system.ShellExecutor
 
 /**
  * `:platform:system` 的实现入口（docs §12.2「分两层」的**下面那层**）：
- * 把 `com.autoscript.domain.system` 的各 SPI 在本模块的实现一次性造齐，
- * 交给上层（`:platform:capabilities` 的 handler → 装配层注入束）用。
+ * 系统面十个 SPI 的 Android 实现一次性造齐（2026-09-30 审查步骤 6 起，SPI 契约本身
+ * 也随迁本模块同包 —— 判据见 `SystemHostContracts.kt` KDoc），交装配层组合。
  *
- * **为什么这里只到 SPI 为止、不直接产出 `NamespaceHandler`**：handler 是桥面形状
- * （`SystemNamespaces.kt` 在 `:platform:capabilities`），本模块若去 new 它就要依赖
- * `:platform:capabilities` —— 那是一条 §6 模块表没有的平台内互赖。分层的好处正在于此：
- * 本模块只认 `:domain`，谁把它接到桥上都不影响这里。
+ * **本类与 [SystemNamespaces] 的分工（同模块内仍两对象）**：本类负责「拿 `Context`
+ * 造 Android 实现」（构造签名要 Android 类型），`SystemNamespaces` 负责「SPI →
+ * `NamespaceHandler` 工厂束」（纯参数注入，单测直传假 SPI）。装配层 `PlatformWiring`
+ * 拿两者组装 —— 本类不 new handler，handler 侧不碰 `Context`。
  *
  * **`dialogs` 仍不在此造**（理由从"待 P2"变成"分层归属"）：`DialogHost` 实现按
  * domain KDoc 约定住 `:platform:capabilities`（`AndroidDialogHost` 编排 +
@@ -61,7 +52,7 @@ object SystemSpis {
 
     /**
      * 十个 SPI 实现（`dialogs` 缺位，见 [SystemSpis] 的 KDoc）。
-     * 字段声明成 SPI 类型而非具体类：上层只该看见 `:domain` 的契约。
+     * 字段声明成 SPI 类型而非具体类：上层只该看见契约，不背实现。
      *
      * `datastore` 是 SPI 束的成员、**不是** `systemHandlers` 束的成员：
      * handler 侧它是独立注入缝（存储面无共担门禁，§12.2 接线表）——

@@ -1,4 +1,4 @@
-package com.autoscript.domain.system
+package com.autoscript.platform.system
 
 import com.autoscript.domain.bridge.HandleRef
 
@@ -6,9 +6,9 @@ import com.autoscript.domain.bridge.HandleRef
  * `sensors` 命名空间契约（docs/framework-design.md §12.2；JS 对偶 `auto.sensors`，
  * 对标 AutoJsPro v9 `sensors.register/unregister/unregisterAll` + `SensorDelay` 四档）。
  *
- * 为什么住 `:domain`：与 [Clipboard] / [NotificationPoster] 同一套理由 —— 真实现要碰
- * `android.hardware.SensorManager`，§6 要求 `:platform:*` 只依赖 `:domain`；
- * 「采什么、怎么拿」与「怎么问系统」切开，桥面 handler 才是纯 JVM 可测的。
+ * 2026-09-30 审查步骤 6 自 `:domain` 迁入本模块（grep 判据同 [ClipboardContracts]）——
+ * 与 [Clipboard] / [NotificationPoster] 同批。「采什么、怎么拿」与「怎么问系统」
+ * 仍切开成契约 / `AndroidSensorSource` 两类型，handler 纯 JVM 可测不因同模块而变差。
  *
  * **拉取式游标，不做跨进程 push 回调**（与 `a11y.events` / `engines.channelDrain` 同构）：
  * 传感器是系统侧的 push 源（`SensorEventListener`），但跨进程调用永远异步且有 TTL

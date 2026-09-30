@@ -1,14 +1,14 @@
-package com.autoscript.domain.storage
+package com.autoscript.platform.system
 
 import java.nio.file.Path
 
 /**
  * `zip` 归档契约（docs/framework-design.md §9.6，JS 对偶待建 `auto.zip`）。
  *
- * 为什么住 `:domain`：与 [DataStore] 同一套理由 —— 实现（`java.util.zip`）落
- * `:platform:system`（§6 模块表本行的「zip」），把「要什么操作」与「怎么编排
- * 归档字节」切开，上层（handler/装配）才不背归档细节。`java.util.zip` 本身
- * 零 Android 依赖，实现可整类进本机 JVM 单测（README ops 表里唯一「接触面：无」的一行）。
+ * 2026-09-30 审查步骤 6 自 `:domain` 迁入实现同模块 `:platform:system`（grep 判据：
+ * 仅 handler+impl 消费）—— 契约与 `JdkZipArchiver` 实现仍切两类型：「要什么操作」
+ * 与「怎么编排归档字节」分开，上层（handler/装配）才不背归档细节。`java.util.zip`
+ * 本身零 Android 依赖，实现可整类进本机 JVM 单测（README ops 表里唯一「接触面：无」的一行）。
  *
  * **安全底线（契约级义务，与 shell 的超时义务同级）**：[extract] 必须防
  * **zip-slip** —— 条目解析出目标目录之外（`../` 逃逸、绝对路径条目）即整次拒绝
