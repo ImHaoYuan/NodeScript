@@ -217,7 +217,7 @@ class AutojsError extends Error {
    被依赖库的传递依赖，2026-09-29 真机实证；16KB 门禁已过，PRODUCT 哈希 `3cadbcdf…`
    见 `/tmp/nrb-out7/SHASUMS256`）。
    **`napi_*` 的解析面不是这一步给的**（原口径"addon 的 `napi_*` 从 libnode 动态表解析"
-   已推翻，见 [`design-decisions.md`](design-decisions.md#已推翻--已改口径)）：bionic 的
+   已推翻，见 [`design-decisions.md`](../design-decisions.md#已推翻--已改口径)）：bionic 的
    linker namespace **不把先做的 `dlopen(RTLD_GLOBAL)` 符号给后做的 `dlopen`**（glibc 会）。
    addon 侧的解法是它自己 **DT_NEEDED `libnode.so`**（按 SONAME 命中已在进程内的那份，
    与落位目录无关），宿主不必先加载 libnode；宿主保持 dlopen 形只为 exit 4 的失败语义与

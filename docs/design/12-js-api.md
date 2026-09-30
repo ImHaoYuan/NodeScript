@@ -24,7 +24,7 @@
 
 **接线现状（Kotlin 侧，与 `AppShell.assemble` 对齐；未列出的命名空间在两侧都还没有 handler）**：
 
-> 下表第四列（挂载状态）是**状态**，权威台账见 [`design-status.md`](design-status.md)。
+> 下表第四列（挂载状态）是**状态**，权威台账见 [`design-status.md`](../design-status.md)。
 > 本表保留第四列是为了就近阅读；两者不一致时，以台账（日期更晚）为准，并回来改本表。
 
 > 本表有**机械化门禁**：`bridge/schema/wire.schema.json` 是 wire 面单一事实来源（审查步骤 7），`bridge/js/test/wire-schema.test.cjs` 四向对账（不经 mock）——facade `invoke` 的命名空间/方法必须在 schema 表内、生产源 `register` 集合与 schema 键**双向相等**、19 个 handler 的 `methods()` 申报（单源指生成物 `WireMethods.BY_NS`）与 schema 键双向相等、schema 方法必须被 facade 发或登记在 schema `aliases`（收了没人发的 wire 名要么 facade 漏调、要么写进 schema `aliases` 并说明为什么，且不许虚报）；生成物 `wire-types.ts`/`WireMethods.kt` 由 `generate.mjs --check` 钉同步（CI 另跑 `npm run gen:wire && git diff --exit-code`）。它是 `npm test` 的一部分，随 CI 跑；a11y 选择器动作经 `call('<m>')` 字面量（schema `dynamicSinks` 登记）与 `findOneOrNull`、`shell.shell()` 两条 alias 是仅有的登记（原「正则啃 `when` 块」的 `wire-reconcile.test.cjs` 已删，底账换 schema）。 同族另有三道：`event-wire.test.cjs`（npm **事件面** wire 逐字对账——宿主 `phaseWire`/`kindWire`/`actionWire`/`type` ⇄ `npm.ts` 的 `PHASES`/`WARNING_KINDS`/`APPROVAL_ACTIONS`/`routeInstallEvent` 分支双向集合相等，防 `.name.lowercase()` 折出 `post_check` 那类连字符漂移），并钉**键名面**——`encodeEvent`/审批 `mapOf` 发的每个键 ⇄ JS `w.x` 读的键逐分支对账，JS 读宿主不发的键即红、宿主发了没人读的键须登记 `UNREAD` 并写明理由（mock 测试发的永远是 JS 自己认识的键，键名漂移只有这道门能抓）与 `err-catalog.test.cjs`（错误目录三面对账，见 §7.6）；`wiring-table.test.cjs`（**本表 ↔ schema** 对账：facade 列点名的 `.ts` 真存在且与 schema `facade` 字段一致、handler 列点名的类真存在（花括号组展开，且每行至少认出一个候选防改名绕过）、行覆盖与 schema 键**双向相等** + 状态列写「已挂/已可挂」的必须在 schema 里——表是手写的，§19 又宣布它为事实来源，就该有门看着；`register`↔schema 的那半由 wire-schema 门钉）；`pull-wire.test.cjs`（**另两条拉取环** a11y.events / sensors.drain 的回包键名 + 入参键名对账——入参 `sinceSeq` 改名的失败面是宿主读不到、游标恒 0、事件重复投递，不报错只出错数据）。
@@ -238,7 +238,7 @@ offQe();
 ### 12.4 typings 工程
 `:bridge:js` 产出全套 `.d.ts`（@types/auto），IDE 补全不依赖文档站点；d.ts 作为 API 契约的单一事实来源，API 评审以 d.ts diff 为准。
 
-**与 `bridge/schema/wire.schema.json` 的分工**（2026-09-30 审查步骤 7 拍板）：d.ts 管**对外 API 形状**（参数/返回/重载，脚本作者看得见的 TS 面），schema 管**桥线 wire 名**（每 ns 方法表 + aliases + dynamicSinks + facade 归属，双发射 `wire-types.ts`/`WireMethods.kt`）—— 两份各司其职、各自入库、各有一道门，不合并（理由见 [`design-decisions.md`](design-decisions.md) 第 12 项）。对账门在 §12.2 门禁说明段。
+**与 `bridge/schema/wire.schema.json` 的分工**（2026-09-30 审查步骤 7 拍板）：d.ts 管**对外 API 形状**（参数/返回/重载，脚本作者看得见的 TS 面），schema 管**桥线 wire 名**（每 ns 方法表 + aliases + dynamicSinks + facade 归属，双发射 `wire-types.ts`/`WireMethods.kt`）—— 两份各司其职、各自入库、各有一道门，不合并（理由见 [`design-decisions.md`](../design-decisions.md) 第 12 项）。对账门在 §12.2 门禁说明段。
 
 ---
 
