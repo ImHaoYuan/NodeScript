@@ -29,7 +29,7 @@
 | §15 | APK ≤ 40MB | **已超支**（实测 ≈81MB，见 [`design-decisions.md`](design-decisions.md#已推翻--已改口径)） |
 | — | 真机红测：exec/dlopen + 桥全链 | **已做**（2026-09-29，见下「流水」；非 root、Android 13/arm64、生产布局） |
 | — | 真机红测：16KB 页机 / SELinux enforcing / `nativeLibraryDir` 提取路径 / targetSdk36 exec 策略 | 未做（设备 PAGE_SIZE=4096，这几项该机**原理上测不到**） |
-| — | 真机红测：性能数字（冷启/帧往返） | 部分（冷启 158ms→新件 181–206ms；桥往返 p95=1ms；引擎 RSS≈46MB；`Intl` zh/en 运行期**已验**） |
+| — | 真机红测：性能数字（冷启/帧往返/图像算子） | 部分（冷启 158ms→新件 181–206ms；桥往返 p95=1ms；引擎 RSS≈46MB；`Intl` zh/en 运行期**已验**；图像算子 A2–A4 **已量 2026-09-30**：A3 契约口径 0.88ms ✅、A4 933.6ms ❌、A2 计算段 1912.8ms ❌，见流水） |
 
 ---
 
@@ -39,6 +39,40 @@
 只在那里写一份（本文件不复制，避免两处漂移）。
 
 ## 流水（最新在上）
+
+### 2026-09-30 —— A2–A4 真机性能实测（恢复自挂起；云手机 Android 13/API 33/arm64/4KB，OpenCV 4.14）
+
+恢复点「下载 artifact → 推设备 → 跑 imgbench」按挂起注记原样执行：image-native **228ab11**
+artifact（`SHASUMS256` 校验过）替换设备上**kleidicv 断符号旧件**（`cannot locate symbol
+"kleidicv_saturating_add_u8"`——即挂起注记点名的 HAL 悬空件，旧件 7.3MB / 新件 8.9MB）→ dlopen 通。
+driver = `imgbench.c`（本机 NDK r28c 交叉编译推设备，`dlopen` 计算核直连，**无桥/JNI 开销**，
+已是最好情况），输入 1080×2400 真机截图 `scr.raw/png`，每项 ×100 取中位。
+
+**先修两处 driver 缺陷，测出的数才有效**：① A2 段复用的模板 `tpl` 在 A4 段末已被 `release` ——
+use-after-free，首轮 A2 全 `FAIL match2 rc=1`；② A3 probe 传 `target={0,0,0,0}/tol=0` 找「透明黑」
+恒 miss —— 首轮 100 次测的全是 **miss 路径**（6.45ms 是无效场景数字），改取帧内真实像素色后
+才是命中路径（probe 回 `(0,0)` rgba=(245,245,245,255)）。
+
+| # | 项 | 实测 median（×100） | 判据 | 判定 |
+|---|---|---|---|---|
+| — | `ingest`（1080×2400 RGBA→帧表） | 6.07ms | （无判据，参考值） | — |
+| A3 | `findColor` ROI 300×150（**契约口径「单人独立子图」**） | **0.878ms**（mean 0.889 / max 1.064） | < 10ms | **✅ 达标**（余量 11×） |
+| A3 | `findColor` 全帧（口径外参考） | 61.42ms | —（判据非全帧） | 口径外；host 30.2ms |
+| A4 | `matchTemplate` 370×80 UI 切片 | **933.6ms** | < 40ms | **❌ 超 23×** |
+| A4 | `matchTemplate` 48×48 小模板（尺寸对照） | **862.4ms** | < 40ms | **❌ 超 21×**；与 370×80 同量级 → **耗时与模板尺寸弱相关** |
+| A2 | 计算段 `decode(46.2ms) + match×2(1827ms)` | **1912.8ms** | 一次截图两次匹配 < 700ms；端到端 < 1s | **❌ 双判据均超**；截屏段未测（无生产 APK/a11y），计算段既超、端到端必超 |
+
+**host 对照（判因，x86_64 + OpenCV 4.10，同 `scr.raw`，本机实测）**：match 370×80 = **565.8ms**、
+48×48 = **614.1ms**、findColor 全帧 = 30.2ms、ROI = 0.194ms —— match 的 ~0.6–0.9s 是**平台无关
+量级**（两平台同序、两尺寸同序）：`cv::matchTemplate` 每次调用重算图像频谱，固定开销主导。
+**结论：A4/A2 未达标不是设备慢、也不是模板选大了，是「裸 `cv::matchTemplate` 全图搜索」的
+实现量级本身** —— §7.7 的 <40ms 判据自记入起从未真机量过，本次首测即超（判据**不改**，改口径
+是拍板动作；三条出路选项已记 §7.7 实测记账块）。A3 按契约口径达标销账。
+
+过程记账：远程 adb（frp 隧道）断流三轮（含一次半死 `echo` 不回），最终改**设备端 `setsid nohup`
+落 `out.txt` + 轮询自动重连拉取**，结果零丢失。C2 回填已执行（数字进 §7.7）；B 组四项不变（等
+16KB 页机 / enforcing 设备）；A1/A5/A6/C1 已测结论不受本条影响。
+
 
 ### 2026-09-30 —— 外部审查整改·步骤 8：framework-design.md 拆 12 卷 + 机器读者/文档漂移修缮
 
@@ -176,9 +210,9 @@ A2–A4（截图→找图/找色/模板）仍欠：`libopencv.so` 不在设备�
 | # | 量什么 | 契约锚 | 怎么量（adb 可脚本化） | 判据 |
 |---|---|---|---|---|
 | A1 | 桥往返（JS→:main→回） | §7.7 空 RPC p95 < 2ms | `auto.console.log` 200 次脚本侧打点（host 真处理） | **已测 9-30：p95=1ms**（console 整调用往返；见本文件流水 9-30 条） |
-| A2 | `captureScreen → findImage` 端到端 | §7.7 < 1s；一次截图两次匹配 < 700ms | 真机截屏（a11y 路径）→ `ingest` → `findImage` 两次，打点三段（截图 / ingest / 匹配×2） | 端到端 < 1s；当前：**待实测**（链路 9-26 已通，数字空） |
-| A3 | `findColor` 1080p | §7.7 < 10ms | 生产布局下落一张 1080p 真机截图，`findColor` 单人独立子图计时（`adb shell` 循环 100 次取中位） | < 10ms；当前：宿主 36 例只保语义，设备耗时空 |
-| A4 | `matchTemplate` 1080p | §7.7 < 40ms | 同 A3，模板用真机 UI 切片（非合成图） | < 40ms |
+| A2 | `captureScreen → findImage` 端到端 | §7.7 < 1s；一次截图两次匹配 < 700ms | 真机截屏（a11y 路径）→ `ingest` → `findImage` 两次，打点三段（截图 / ingest / 匹配×2） | **已量计算段 9-30：1912.8ms ❌**（decode 46.2 + match×2 1827；截屏段未测——无生产 APK/a11y，计算段已超则端到端必超）；driver 见流水 A2–A4 条 |
+| A3 | `findColor` 1080p | §7.7 < 10ms | 生产布局下落一张 1080p 真机截图，`findColor` 单人独立子图计时（`adb shell` 循环 100 次取中位） | **已量 9-30：ROI 300×150 median 0.878ms ✅**（全帧 61.4ms 是口径外参考；host ROI 0.19ms） |
+| A4 | `matchTemplate` 1080p | §7.7 < 40ms | 同 A3，模板用真机 UI 切片（非合成图） | **已量 9-30：370×80 = 933.6ms ❌ / 48×48 = 862.4ms ❌**（host 同输入 566/614ms —— 平台无关量级，非设备慢） |
 | A5 | `Intl.*` zh/en 运行期 | §18 第 4 项跟进 | `node -e "console.log(new Intl.NumberFormat('zh-CN').format(1234567.89))"` + `DateTimeFormat('zh-CN')` 在真机 noden 跑 | **已测 9-30：与桌面逐字一致**（新件，ICU 78 small-icu zh,en；见本文件流水 9-30 条） |
 | A6 | 引擎进程 RSS | §15 80–160MB | 脚本存活窗内 `smaps_rollup` 采样 | **已测 9-30：Rss≈46.6MB/Pss≈44MB**，区间内偏下限（见本文件流水 9-30 条） |
 
@@ -196,7 +230,7 @@ A2–A4（截图→找图/找色/模板）仍欠：`libopencv.so` 不在设备�
 | # | 量什么 | 契约锚 | 说明 |
 |---|---|---|---|
 | C1 | `.node` 经 `process.dlopen` 路径的 `require` | §10.12 / §19 台账 9-29 | **已验 9-30**：`require` 路径同样 `ERR_DLOPEN_FAILED`（`cannot locate symbol "napi_add_env_cleanup_hook"`），§10.12 口径不变 |
-| C2 | `captureScreen → findImage` 实测数字回填 §7.7 | §7.7 / §9.2 | = A2 落地后的回填动作（数字进契约表 + 本表接口期行销账） |
+| C2 | `captureScreen → findImage` 实测数字回填 §7.7 | §7.7 / §7.7 实测记账块 | **已执行 2026-09-30**：数字进 §7.7 表下实测记账块（判据保留、出路三选项未拍板）+ 上方接口期行销账 |
 
 执行顺序建议：A（现有设备即刻可做）→ B（等设备）→ C1（可与 A 同批）→ C2（A2 的回填）。
 本条是清单，不改任何契约数字；数字只在实测后按"只追加"纪律另起流水回填。

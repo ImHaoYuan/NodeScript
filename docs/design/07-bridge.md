@@ -77,6 +77,23 @@ class AutojsError extends Error {
 | `matchTemplate` 1080p | < 40ms | OpenCV TM_CCOEFF_NORMED（实测它、不是早前写的 CCORR：见下注）|
 | 紧凑树构建/传输 | < 15ms / 数十 KB | 预聚合属性，代价解析放"取用即取" |
 
+> **2026-09-30 真机实测回填（A2–A4；云手机 Android 13 / arm64 + OpenCV 4.14 `libopencv.so`
+> dlopen 直连——无桥/JNI 开销，已是最好情况；输入 = 1080×2400 真机截图，每项 ×100 取中位）**：
+> - **`findColor`（单人独立子图 300×150 ROI）：median 0.88ms ✅**（判据 <10ms，余量 11×）。
+>   全帧扫描 61.4ms 是**口径外**参考值（判据写明「单人独立子图」；host x86 同款全帧 30.2ms / ROI 0.19ms）。
+> - **`matchTemplate`：未达标 ❌** —— 370×80 UI 切片 median **933.6ms**、48×48 小模板 median
+>   **862.4ms**（判据 <40ms，超 21–23×）。两尺寸**同量级**说明耗时由 `cv::matchTemplate` 的
+>   图像频谱/DFT 固定开销主导、与模板尺寸弱相关；**host x86_64 OpenCV 4.10 同输入 565.8 / 614.1ms**
+>   —— 不是设备慢，是「每次调用全图重算频谱」的量级本身：判据 <40ms 对**裸 `cv::matchTemplate`
+>   全图搜索**在两个平台都不可达（该判据自记入起从未真机量过，2026-09-30 首次实测即此结果）。
+> - **`captureScreen → findImage`：计算段未达标 ❌** —— decode 46.2ms + match×2 1827ms =
+>   median **1912.8ms**，已超「一次截图两次匹配 < 700ms」（2.7×）与「端到端 < 1s」两条判据；
+>   截屏段未测（无生产 APK / a11y 服务在跑），但计算段既已超，端到端必超。
+> - **出路（未拍板，列选项不改判据）**：① 帧内缓存图像频谱 —— 同帧 match×2 第二次免 DFT，
+>   正中 A2 形态，实现落点在 `imgnative.cpp` 帧表侧；② 预筛收缩搜索窗（findColor/金字塔粗定位
+>   后再小窗精确 match）；③ 判据改口径 —— 把 <40ms 定义到「预筛后小窗」而非全图搜索（拍板项）。
+>   数字出处、方法与 driver 缺陷修正见 `design-status.md` 流水 2026-09-30「A2–A4 真机性能实测」条。
+>
 > **`TM_CCOEFF_NORMED` 而不是 `TM_CCORR_NORMED`（2026-09-25 实测改口径，非抄来的）**：
 > `imgnative_match` 一直用 CCOEFF，早前本表与 `:domain` KDoc 两处写成 CCORR —— 名字漂移
 > 谁都没炸，因为真实纹理模板下两者都能拿 1.0。差别在**画面里没有模板**时（host 静态库实测）：
