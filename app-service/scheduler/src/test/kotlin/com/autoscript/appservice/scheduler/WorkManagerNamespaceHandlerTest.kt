@@ -1,4 +1,4 @@
-package com.autoscript.shell
+package com.autoscript.appservice.scheduler
 
 import com.autoscript.appservice.scheduler.core.InMemoryIntentLog
 import com.autoscript.appservice.scheduler.core.InMemoryRunArchive
@@ -130,27 +130,6 @@ class WorkManagerNamespaceHandlerTest {
         // cancel 幂等：从未登记的 id 照样 true
         val r = h.handle(req(9, "cancel", """{"id":"ghost"}"""))
         assertEquals("true", assertInstanceOf(BridgeResponse.Ok::class.java, r).payload)
-        Unit
-    }
-
-    @Test
-    fun `装配壳恒挂 workManager：无需注入即可建任务`() = runBlocking {
-        val shell = AppShell.assemble(
-            engineFactory = { id -> FakeEngineForDispatcher(id) },
-            schedulerProvider = NoopProvider(),
-            intentLog = InMemoryIntentLog(),
-        )
-        shell.use {
-            val r = shell.router.dispatch(
-                BridgeRequest(
-                    1, "workManager", "create",
-                    """{"id":"w1","name":"n","projectId":"p","scriptPath":"a.js","schedule":{"kind":"once","delaySeconds":60}}""",
-                    5_000,
-                ),
-            )
-            assertInstanceOf(BridgeResponse.Ok::class.java, r)
-            assertEquals(listOf("w1"), shell.scheduler.tasks().map { it.id })
-        }
         Unit
     }
 }

@@ -13,7 +13,7 @@ import java.time.ZoneId
 
 /**
  * 登记闸门（[TaskCenterOps.toScheduledTask]）：`:domain` [TaskRegistration] → 调度器
- * `ScheduledTask` 的映射与校验。与桥侧 [WorkManagerNamespaceHandler] **同一套规则、
+ * `ScheduledTask` 的映射与校验。与桥侧 [com.autoscript.appservice.scheduler.WorkManagerNamespaceHandler] **同一套规则、
  * 两侧各测** —— 任何一侧单改（放行 cron / 放宽空串）另一侧先红。
  *
  * 为什么值得测：每一格错了都不会崩 —— 只会登记出一条用户以为在排期、实际不跑的

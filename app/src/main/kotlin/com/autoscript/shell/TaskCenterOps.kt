@@ -15,7 +15,7 @@ import java.util.UUID
  * **为什么单独一个文件**：与 [TaskCenterRead]/[ConsoleRead] 同一条理由 —— `Application`
  * 在 JVM 单测里构造不出来，而"入参怎么校验、哪个入口拒绝"这段判断必须可测。读口那份是
  * 快照拼装，本对象是**写入口的单一闸门**：UI 操作面经 [AssembledShell.registerTask] 走这里，
- * 规则与桥侧 `workManager.create`（[WorkManagerNamespaceHandler]）**逐条对齐** ——
+ * 规则与桥侧 `workManager.create`（[com.autoscript.appservice.scheduler.WorkManagerNamespaceHandler]）**逐条对齐** ——
  * 两边各自测住同一套语义（空串拒绝 / cron 表达式校验 / 越界拒绝），任何一侧单改先红。
  *
  * 三条纪律：

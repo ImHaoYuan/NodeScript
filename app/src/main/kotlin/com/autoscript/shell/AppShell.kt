@@ -12,6 +12,7 @@ import com.autoscript.appservice.scheduler.core.TaskStore
 import com.autoscript.appservice.scheduler.core.RecoveryRecord
 import com.autoscript.appservice.scheduler.core.Scheduler
 import com.autoscript.appservice.scheduler.core.SchedulerProvider
+import com.autoscript.appservice.scheduler.WorkManagerNamespaceHandler
 import com.autoscript.bridge.BridgeRouter
 import com.autoscript.bridge.ConsoleCollector
 import com.autoscript.bridge.EventBus
