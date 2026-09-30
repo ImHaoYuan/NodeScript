@@ -1,4 +1,4 @@
-package com.autoscript.shell
+package com.autoscript.platform.system
 
 import android.content.Context
 import android.os.PowerManager
@@ -29,7 +29,7 @@ interface WakeLockOps {
  * 唤醒锁账本（§8.7）：token 引用计数 + 超时到期，系统锁的取/放由本类决定。
  *
  * 为什么要账本而不是布尔：唤醒锁是**进程级单资源**，而持有方至少有两类 ——
- * 框架侧的前台服务（[ForegroundKeeper] 的框架 token）与（P1 的）脚本侧
+ * 框架侧的前台服务（`:app` 装配包 `ForegroundKeeper` 的框架 token）与（P1 的）脚本侧
  * `power_manager` 请求。两者共用一个系统锁，必须引用计数才不会互相踩：
  * 脚本释放时把框架的锁也放掉，表现就是"熄屏任务随机被拒"，现场极难查。
  *
@@ -38,7 +38,7 @@ interface WakeLockOps {
  *   账本里存在 token ⇔ 系统锁真的取到了（除非下面第三条的分歧）；
  * - **超时自动释放**（§8.7「配套超时自动释放」）：带 `timeoutMillis` 的 token 到期后由
  *   [sweep] 释放。这是**安全属性**，不是优化 —— 一个卡死的持有方不该让 CPU 永远不休眠。
- *   驱动方是 [ForegroundKeeper.startTicker]（周期性 renew + sweep）；
+ *   驱动方是 `ForegroundKeeper.startTicker`（`:app`，周期性 renew + sweep）；
  * - **[isHeld] 两侧都真才算持着**：账本有 token **且** `ops.held` 为真。两者分歧
  *   （例如锁被外部/系统放掉）时按**没持着**算 —— 门禁宁可如实拒绝一次亮屏任务，
  *   也不能让任务在一个其实会休眠的 CPU 上跑（那条路径的表现是"任务成功、实际什么都没发生"）。
@@ -117,7 +117,7 @@ class WakeLockLedger(
  *
  * **为什么是 `PARTIAL_WAKE_LOCK`**：自动化要的是"CPU 不休眠"，不是"屏幕亮着"——
  * 屏幕亮不亮由用户/系统决定，门禁侧另有 `PowerManager.isInteractive` 那条判据
- * （[AndroidScreenGate] 两个信号都问）。而 `FULL_WAKE_LOCK`/`SCREEN_*_WAKE_LOCK` 与
+ * （`:app` 的 `AndroidScreenGate` 两个信号都问）。而 `FULL_WAKE_LOCK`/`SCREEN_*_WAKE_LOCK` 与
  * `ACQUIRE_CAUSES_WAKEUP` 在 API 33 起已废弃（系统不鼓励后台应用强行点屏），
  * 本实现一条都不用。
  *

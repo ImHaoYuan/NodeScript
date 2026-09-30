@@ -1,13 +1,20 @@
-package com.autoscript.shell
+package com.autoscript.platform.system
 
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.core.Clock
+import com.autoscript.domain.core.KeepAliveRenew
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+
+/**
+ * 框架席位字面量 = `ForegroundKeeper.FRAMEWORK_TOKEN`（住 `:app`，本模块见不到 ——
+ * `:app` 侧 `ForegroundKeeperTest` 钉同一字面量，任一侧单改先红）。
+ */
+private const val FRAMEWORK = "framework:keepalive"
 
 /**
  * `power_manager` 桥面验证（§8.7 脚本电源面：脚本唤醒锁进框架同一本账）。
@@ -41,29 +48,28 @@ class PowerManagerNamespaceHandlerTest {
         override fun nowMillis(): Long = now
     }
 
-    private class FakeForeground : ForegroundOps {
-        override var foregroundRunning: Boolean = true
+    /** keepalive 缝假件（`:domain` [KeepAliveRenew]）：数补拉次数，不碰 :app 的 keeper。 */
+    private class FakeRenew : KeepAliveRenew {
         var renews = 0
-        override fun startService(): Boolean = true
-        override fun stopService(): Boolean = true
-        override fun activateForeground(): Boolean = true
-        override fun deactivateForeground(): Boolean = true
+        override fun renew(): List<String> {
+            renews += 1
+            return emptyList()
+        }
     }
 
     private fun rig(
         acquireOk: Boolean = true,
         withKeeper: Boolean = true,
-    ): Triple<PowerManagerNamespaceHandler, WakeLockLedger, FakeForeground> {
+    ): Triple<PowerManagerNamespaceHandler, WakeLockLedger, FakeRenew?> {
         val ledger = WakeLockLedger(FakeLock(acquireOk), FakeClock())
-        val fg = FakeForeground()
-        val keeper = if (withKeeper) {
-            ForegroundKeeper(fg, ledger, FakeClock(), tickMillis = 60 * 60 * 1000L).also {
-                // 框架侧先占一席：脚本锁与框架锁引用计数共存是本测试的前提
-                assertTrue(it.start(), "框架保活先起")
-                fg.foregroundRunning = true
-            }
-        } else null
-        return Triple(PowerManagerNamespaceHandler(ledger, keeper), ledger, fg)
+        if (withKeeper) {
+            // 框架侧先占一席：脚本锁与框架锁引用计数共存是本测试的前提。
+            // （原 rig 走真 ForegroundKeeper.start()；迁模块后见不到 :app，
+            //   直接占同名席位 —— 语义同一，keeper 自身的起停由 :app 侧测试守。）
+            assertTrue(ledger.hold(FRAMEWORK, null), "框架保活先起")
+        }
+        val renew = if (withKeeper) FakeRenew() else null
+        return Triple(PowerManagerNamespaceHandler(ledger, renew), ledger, renew)
     }
 
     private fun req(id: Long, method: String, payload: String?) =
@@ -86,9 +92,9 @@ class PowerManagerNamespaceHandlerTest {
         val token = payload.substringAfter("\"token\":\"").substringBefore("\"")
         assertTrue(token.startsWith("script-"), "token 服务端分配：$payload")
         assertTrue(ledger.heldTokens().contains(token), "锁进账本：$payload")
-        assertTrue(ledger.heldTokens().contains(ForegroundKeeper.FRAMEWORK_TOKEN), "框架锁不受影响")
+        assertTrue(ledger.heldTokens().contains(FRAMEWORK), "框架锁不受影响")
         assertTrue(ledger.isHeld(), "门禁读这里 —— 必须为 true")
-        assertTrue(fg.renews >= 0, "renew 幂等只兜冷沿，不断言动作数")
+        assertEquals(1, fg!!.renews, "acquire 成功后补拉一次（冷沿兜底；幂等、无动作即空列表）")
         Unit
     }
 
@@ -101,7 +107,7 @@ class PowerManagerNamespaceHandlerTest {
         assertEquals("ERR_INVALID_PARAM", errCode(h, "acquire", """{"timeoutMillis":-5}"""), "负数")
         assertEquals("ERR_INVALID_PARAM", errCode(h, "acquire", """{"timeoutMillis":"一小时"}"""), "非数字")
         assertEquals(
-            setOf(ForegroundKeeper.FRAMEWORK_TOKEN),
+            setOf(FRAMEWORK),
             ledger.heldTokens(),
             "非法请求一律不记账（账本只有框架那一席）",
         )
@@ -130,7 +136,7 @@ class PowerManagerNamespaceHandlerTest {
         val token = payload.substringAfter("\"token\":\"").substringBefore("\"")
         assertEquals("true", ok(h, "release", """{"token":"$token"}"""), "放自己 → true")
         assertEquals(
-            setOf(ForegroundKeeper.FRAMEWORK_TOKEN),
+            setOf(FRAMEWORK),
             ledger.heldTokens(),
             "脚本锁走了，框架锁还在",
         )

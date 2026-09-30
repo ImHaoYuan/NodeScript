@@ -11,10 +11,13 @@ import com.autoscript.platform.capabilities.a11y.AndroidUiTree
 import com.autoscript.platform.capabilities.CapabilityNamespaces
 import com.autoscript.platform.capabilities.screen.ScreenshotSource
 import com.autoscript.platform.capabilities.device.SystemDialogOps
+import com.autoscript.platform.system.AndroidWakeLockOps
 import com.autoscript.platform.system.JniOps
 import com.autoscript.platform.system.NativeImageAnalyzer
 import com.autoscript.platform.system.SystemNamespaces
+import com.autoscript.platform.system.PowerManagerNamespaceHandler
 import com.autoscript.platform.system.SystemSpis
+import com.autoscript.platform.system.WakeLockLedger
 import com.autoscript.platform.capabilities.a11y.A11yEventRing
 import com.autoscript.platform.capabilities.a11y.InMemoryUiTree
 import com.autoscript.platform.capabilities.a11y.SystemA11yBridge
@@ -140,6 +143,23 @@ object PlatformWiring {
      * null → 图像面不注入（见 [Injection.imagesHandler]）。**默认值在装配期求值**，
      * 单测可传 null/替身绕过 native —— 同一函数真假可注入，不绑死构造。
      */
+    /**
+     * §8.7 唤醒锁账本的生产构造缝（审查步骤 6 起账本类住 `:platform:system`）。
+     * 根包 `AppShellApplication` 经此拿账本 —— 它不 import 任何
+     * `com.autoscript.platform..`（ArchitectureTest「平台实现只许装配包碰」看住）。
+     */
+    fun wakeLockLedger(context: Context): WakeLockLedger =
+        WakeLockLedger(AndroidWakeLockOps(context))
+
+    /**
+     * §8.7 脚本电源 handler 构造缝（`AppShell.assemble` 的 `powerManagerHandler` 独立缝）：
+     * 账本取 keeper 持有的**同一本账**（脚本锁与框架锁引用计数共存），keepalive 喂同一
+     * 实现 `KeepAliveRenew` 的实例（`:domain` 窄缝，见 `ForegroundKeeper`）。返回类型是
+     * `NamespaceHandler`（`:domain`）—— 根包调用处连平台类型名都不必提。
+     */
+    fun powerManagerHandler(keeper: ForegroundKeeper): NamespaceHandler =
+        PowerManagerNamespaceHandler(keeper.wakeLocks(), keeper)
+
     fun of(
         context: Context,
         overlayAvailable: () -> Boolean = { false },

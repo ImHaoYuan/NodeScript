@@ -1,4 +1,4 @@
-package com.autoscript.shell
+package com.autoscript.platform.system
 
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
@@ -6,15 +6,18 @@ import com.autoscript.domain.bridge.RpcNamespaceHandler
 import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
+import com.autoscript.domain.core.KeepAliveRenew
 
 /**
  * `power_manager` 命名空间桥处理器（docs §8.7 保活与电源；JS `auto.power` 的 Kotlin 对偶）。
  *
- * 归属：住 `:app` 装配包（与 `WorkManagerNamespaceHandler` 同形）——它直驱本包自建的
- * [WakeLockLedger]（与框架保活同一本账），真实现不在 `:platform`，故**恒备、可注入**：
- * `AppShell.assemble` 经独立缝 `powerManagerHandler` 挂载（与 datastore/zip/settings/
- * notification 同一形态的独立缝 —— 电源面无共担门禁，`WAKE_LOCK` 是安装时授予的
- * normal 权限，判定在账本与系统侧，不入 [SystemHandlers] 束）。
+ * 归属（2026-09-30 审查步骤 6 迁入）：自 `:app` 装配包移入 `:platform:system` ——
+ * 与 [WakeLockLedger] 同模块直驱**同一本账**（框架保活与脚本锁引用计数共存）。
+ * keepalive 缝收窄为 `:domain` 的 [KeepAliveRenew]（`ForegroundKeeper` 实现之、住
+ * `:app`），本模块不反向见 :app。`AppShell.assemble` 经独立缝 `powerManagerHandler`
+ * 挂载（与 datastore/zip/settings/notification 同一形态的独立缝 —— 电源面无共担
+ * 门禁，`WAKE_LOCK` 是安装时授予的 normal 权限，判定在账本与系统侧，不入
+ * `SystemHandlers` 束）。
  *
  * 线格式（与 `bridge/js` power.ts 逐字段对齐）：
  * - `acquire`：`{timeoutMillis}` → Ok `{"token":"script-…"}`。
@@ -30,7 +33,7 @@ import com.autoscript.domain.core.ErrorCode
  *
  * 三条诚实纪律：
  * - **脚本锁必须限时**：`timeoutMillis` 必填且 > 0 —— 无期限只属框架 token
- *   （[ForegroundKeeper.FRAMEWORK_TOKEN]），脚本无期限等于"卡死的持有方让 CPU
+ *   （`ForegroundKeeper.FRAMEWORK_TOKEN`，住 `:app`），脚本无期限等于"卡死的持有方让 CPU
  *   永远不休眠"，正是 [WakeLockLedger] 超时自动释放要防的那条（§8.7 安全属性）；
  * - **直驱账本，不走 `ForegroundKeeper.start(token)`**：那个单槽只属框架
  *   （调两次会互踩 `frameworkToken`，框架 stop 会误放脚本的锁）—— 脚本侧持有方
@@ -39,13 +42,13 @@ import com.autoscript.domain.core.ErrorCode
  *   [WakeLockOps.acquire] 的 false 形状）：此时**未记账**，门禁据此拒绝 SCREEN_ON，
  *   而不是"以为有锁、跑在会休眠的 CPU 上"。
  *
- * FGS 补拉：`acquire` 成功后调一次 [ForegroundKeeper.renew] —— 生产路径框架保活
+ * FGS 补拉：`acquire` 成功后调一次 [KeepAliveRenew.renew] —— 生产路径框架保活
  * 常转（ticker 本来就在扫到期/补服务），这次调用只为兜"keeper 从未 start / 服务被
  * ROM 杀掉但进程还活着"的冷沿：renew 幂等（无动作即空列表），不记新账。
  */
 class PowerManagerNamespaceHandler(
     private val ledger: WakeLockLedger,
-    private val keepalive: ForegroundKeeper? = null,
+    private val keepalive: KeepAliveRenew? = null,
 ) : RpcNamespaceHandler() {
 
     override suspend fun dispatch(request: BridgeRequest): BridgeResponse = ok(request, payload(request))

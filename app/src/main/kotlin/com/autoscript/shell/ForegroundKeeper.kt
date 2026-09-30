@@ -1,7 +1,9 @@
 package com.autoscript.shell
 
 import com.autoscript.domain.core.Clock
+import com.autoscript.domain.core.KeepAliveRenew
 import com.autoscript.domain.core.SystemClock
+import com.autoscript.platform.system.WakeLockLedger
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ScheduledFuture
@@ -40,7 +42,7 @@ class ForegroundKeeper(
     /** 续期/清理周期。默认 15 分钟：Android 的 FGS 没有固定超时（specialUse 尤其），
      *  这个 tick 只为**到期唤醒锁的及时回收**与 FGS 心跳，不是续命所需。 */
     private val tickMillis: Long = DEFAULT_TICK_MILLIS,
-) {
+) : KeepAliveRenew {
 
     /** 框架 token：无期限（见类 KDoc）。 */
     private var frameworkToken: String? = null
@@ -108,7 +110,7 @@ class ForegroundKeeper(
      * @return 本轮动作的如实描述（诊断/ticker 日志用；无动作时为空列表）。
      */
     @Synchronized
-    fun renew(): List<String> {
+    override fun renew(): List<String> {
         val actions = mutableListOf<String>()
         val expired = wakeLocks.sweep()
         if (expired.isNotEmpty()) actions += "释放到期锁：${expired.joinToString(",")}"
@@ -141,6 +143,13 @@ class ForegroundKeeper(
 
     /** 账本（能力中心要显示"谁持着锁、还剩多久"时读）。 */
     fun wakeLocks(): WakeLockLedger = wakeLocks
+
+    /**
+     * 账本持锁事实（§8.7 屏幕门禁 `deferWakeLock` 的生产读口）。
+     * 单开一个布尔读口是为了根包（`AppShellApplication.screenGateOf`）—— 它不得碰
+     * `com.autoscript.platform..`（ArchitectureTest 看住），经本方法就不必提账本类型。
+     */
+    fun lockHeld(): Boolean = wakeLocks.isHeld()
 
     private fun startTickerLocked() {
         if (tickerTask != null) return

@@ -1,4 +1,4 @@
-package com.autoscript.shell
+package com.autoscript.platform.system
 
 import com.autoscript.domain.core.Clock
 import org.junit.jupiter.api.Assertions.assertEquals

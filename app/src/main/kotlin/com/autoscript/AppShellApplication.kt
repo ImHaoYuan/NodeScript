@@ -21,7 +21,6 @@ import com.autoscript.shell.AlarmSchedulerProvider
 import com.autoscript.shell.AndroidAlarmPort
 import com.autoscript.shell.AndroidBridgeBinder
 import com.autoscript.shell.AndroidForegroundOps
-import com.autoscript.shell.AndroidWakeLockOps
 import com.autoscript.shell.AndroidPermissionGates
 import com.autoscript.shell.AndroidScreenGate
 import com.autoscript.shell.AppShell
@@ -33,21 +32,13 @@ import com.autoscript.shell.CapabilityCenterRead
 import com.autoscript.shell.ForegroundHost
 import com.autoscript.shell.ForegroundKeeper
 import com.autoscript.shell.PlatformWiring
-import com.autoscript.shell.PowerManagerNamespaceHandler
 import com.autoscript.shell.RecoverySnapshot
 import com.autoscript.shell.SchedulerAlarmRoute
 import com.autoscript.shell.ScreenGateAndroid
 import com.autoscript.shell.ScreenInteractive
-import com.autoscript.shell.WakeLockLedger
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import java.nio.file.Path
-import com.autoscript.platform.capabilities.CapabilityNamespaces
-import com.autoscript.platform.capabilities.a11y.AndroidUiTree
-import com.autoscript.platform.capabilities.a11y.SystemA11yBridge
-import com.autoscript.platform.capabilities.screen.AndroidFrameProducer
-import com.autoscript.platform.capabilities.screen.AndroidGestureInput
-import com.autoscript.platform.capabilities.screen.ScreenshotSource
 
 /**
  * 启动装配（docs/framework-design.md §4.1 Composition Root，手写 DI，不用 Hilt）。
@@ -65,9 +56,11 @@ import com.autoscript.platform.capabilities.screen.ScreenshotSource
  * 3. **重建/恢复**：接到广播时 application 已 attach，就地走 2 的路线，幂等由
  *    scheduler 的 runNonce 承担（同一个 runNonce 重复投递不会双跑）。
  *
- * §8.7 的保活与电源**已接线**（2026-09-23）：[AndroidWakeLockOps] 取真 `PARTIAL_WAKE_LOCK`、
- * [WakeLockLedger] 做 token 引用计数与超时自动释放、[ForegroundKeeper] 管 specialUse FGS 的
- * 起停与续期。屏幕门禁的持锁判定取 [WakeLockLedger.isHeld]（账本与系统两侧都真）——
+ * §8.7 的保活与电源**已接线**（2026-09-23）：`AndroidWakeLockOps` 取真 `PARTIAL_WAKE_LOCK`、
+ * `WakeLockLedger`（2026-09-30 审查步骤 6 起住 `:platform:system`，经
+ * `PlatformWiring.wakeLockLedger` 构造）做 token 引用计数与超时自动释放、[ForegroundKeeper]
+ * 管 specialUse FGS 的起停与续期。屏幕门禁的持锁判定取 [ForegroundKeeper.lockHeld]
+ * （= 账本 `isHeld`，账本与系统两侧都真）——
  * 于是熄屏 + `SCREEN_ON` 的任务要么真有锁放行、要么**如实拒绝**，没有第三条路
  * （"锁也没拿却照样跑"的表现是"任务成功、实际什么都没发生"）。
  */
@@ -114,7 +107,7 @@ class AppShellApplication : Application(), HostSummary {
      *
      * **进程级单例式**（懒建 + 缓存）：它持有的唤醒锁是进程级单资源，
      * 第二份实例会各记各的 token（互相看不见对方持着锁 → 一方 release 把另一方的锁也放掉，
-     * 表现是"熄屏任务随机被拒"，见 [WakeLockLedger] 的引用计数理由）。
+     * 表现是"熄屏任务随机被拒"，见 `WakeLockLedger` 的引用计数理由）。
      */
     @Volatile
     private var keepAlive: ForegroundKeeper? = null
@@ -259,10 +252,7 @@ class AppShellApplication : Application(), HostSummary {
                 // §8.7 脚本电源面：账本是 foregroundKeeper() 持有的进程级单例（`onCreate`
                 // 先于装配起，见 [onCreate]），现建 handler 喂独立缝 —— 脚本锁与框架锁
                 // 同一本账，引用计数共存，框架 stop 只放框架自己的那一份。
-                powerManagerHandler = PowerManagerNamespaceHandler(
-                    foregroundKeeper().wakeLocks(),
-                    foregroundKeeper(),
-                ),
+                powerManagerHandler = PlatformWiring.powerManagerHandler(foregroundKeeper()),
                 systemHandlers = wiring.systemHandlers,
             )
             // accept 开 serve：壳 router 就绪才收（bind 与 start 之间的入连接在内核 backlog
@@ -352,7 +342,7 @@ class AppShellApplication : Application(), HostSummary {
                 // 通知点开去哪：`:app` 不认识 `:ui` 的 MainActivity，类名只能由这里给。
                 contentActivity = launcherActivityOrNull(),
             )
-            val keeper = ForegroundKeeper(ops, WakeLockLedger(AndroidWakeLockOps(applicationContext)))
+            val keeper = ForegroundKeeper(ops, PlatformWiring.wakeLockLedger(applicationContext))
             ForegroundHost.keeper = keeper
             if (!keeper.start()) {
                 Log.w(TAG, "保活未生效：服务拉不起或唤醒锁取不到（SCREEN_ON 任务将被如实拒绝）")
@@ -580,14 +570,14 @@ class AppShellApplication : Application(), HostSummary {
         /**
          * 屏幕门禁的生产实现（真 PowerManager + 真持锁判定）。见 [AndroidScreenGate.of]。
          *
-         * `deferWakeLock` 取 [WakeLockLedger.isHeld]（账本与系统两侧都真）：
+         * `deferWakeLock` 取 [ForegroundKeeper.lockHeld]（= 账本 `isHeld`，两侧都真）：
          * §8.7 原先那条"缝默认恒真 = 明写的待接"在此收口 —— 拿不到锁时 `SCREEN_ON`
          * 任务如实被拒，而不是在一个会休眠的 CPU 上跑完还报成功。
          */
         fun screenGateOf(app: AppShellApplication): ScreenGateAndroid =
             AndroidScreenGate.of(
                 app.applicationContext,
-                deferWakeLock = ScreenInteractive { app.foregroundKeeper().wakeLocks().isHeld() },
+                deferWakeLock = ScreenInteractive { app.foregroundKeeper().lockHeld() },
             )
 
         /** 闹钟广播 action（与 manifest 里静态注册的是同一条，常量出处 [AlarmFires]）。 */

@@ -19,6 +19,9 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import com.autoscript.platform.system.PowerManagerNamespaceHandler
+import com.autoscript.platform.system.WakeLockLedger
+import com.autoscript.platform.system.WakeLockOps
 
 /**
  * 能力命名空间挂载缝验证（§4.1/§6 + `:app` ArchitectureTest「禁直连 :platform」）：

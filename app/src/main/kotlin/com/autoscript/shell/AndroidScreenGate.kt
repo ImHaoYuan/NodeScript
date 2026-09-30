@@ -2,6 +2,7 @@ package com.autoscript.shell
 
 import android.content.Context
 import com.autoscript.appservice.scheduler.core.ScreenGuarantee
+import com.autoscript.platform.system.WakeLockLedger
 
 /**
  * 屏幕门禁的 Android 实现（docs §8.6 守时契约：亮屏 + 解锁是保底）。
@@ -44,7 +45,7 @@ fun interface ScreenOffGuard {
  * 门禁的判断逻辑因此可测，不需要 Mock 任何 Android 框架对象。
  *
  * **`deferWakeLock` 的生产实参已接线**（2026-09-23，§8.7 保活落地）：
- * `AppShellApplication.screenGateOf` 传的是 `WakeLockLedger::isHeld`（账本与系统两侧都真），
+ * `AppShellApplication.screenGateOf` 传的是 `keeper::lockHeld`（= 账本 `isHeld`，两侧都真），
  * 不再是恒真 —— §8.7 里那条"恒真 = 明写的待接"因此收口。
  */
 class AndroidScreenGate(
@@ -78,7 +79,7 @@ class AndroidScreenGate(
          * 它拿的是真 `PowerManager`，桌面 JVM 上取不到。
          *
          * @param deferWakeLock 持锁判定（§8.7）。**缺省恒真只对未接保活路径的调用方成立** ——
-         *   生产（`AppShellApplication.screenGateOf`）必须传 `WakeLockLedger::isHeld`：
+         *   生产（`AppShellApplication.screenGateOf`）必须传 `keeper::lockHeld`（= 账本 `isHeld`）：
          *   缺省值是"旧行为"（明写的待接），不是"可以一直用"。传恒真 = `SCREEN_ON` 任务
          *   在没锁的情况下也放行，表现是"任务成功、实际在会休眠的 CPU 上跑"。
          * @param onScreenOff 熄屏裁剪点（§8.8：MediaProjection 在 keyguard 下给黑帧，
