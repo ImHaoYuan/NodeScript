@@ -1,5 +1,6 @@
 package com.autoscript.platform.capabilities
 
+import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.automation.ColorHit
 import com.autoscript.domain.automation.FeatureHit
 import com.autoscript.domain.automation.ImageAnalyzer
@@ -97,7 +98,7 @@ class ImagesNamespaceHandler(
             val ref = frame.handle
             ResponseLite.Ok(
                 request.id,
-                A11yBridgeJson.encode(
+                DomainJson.encode(
                     mapOf(
                         "ref" to mapOf("refId" to ref.refId, "generation" to ref.generation),
                         "width" to frame.width.toLong(),
@@ -356,7 +357,7 @@ class ImagesNamespaceHandler(
 
     /** 产出帧回包（与 decode 同形：ref + 宽高真值，随产出帧走）。 */
     private fun framePayload(frame: ImageFrame): String =
-        A11yBridgeJson.encode(
+        DomainJson.encode(
             mapOf(
                 "ref" to mapOf("refId" to frame.handle.refId, "generation" to frame.handle.generation),
                 "width" to frame.width.toLong(),
@@ -392,7 +393,7 @@ class ImagesNamespaceHandler(
         if (m == null) {
             "null"
         } else {
-            A11yBridgeJson.encode(
+            DomainJson.encode(
                 mapOf(
                     "x" to m.x.toLong(),
                     "y" to m.y.toLong(),
@@ -409,7 +410,7 @@ class ImagesNamespaceHandler(
         if (m == null) {
             "null"
         } else {
-            A11yBridgeJson.encode(
+            DomainJson.encode(
                 mapOf(
                     "x" to m.x.toLong(),
                     "y" to m.y.toLong(),
@@ -425,7 +426,7 @@ class ImagesNamespaceHandler(
         if (h == null) {
             "null"
         } else {
-            A11yBridgeJson.encode(
+            DomainJson.encode(
                 mapOf(
                     "x" to h.x.toLong(),
                     "y" to h.y.toLong(),

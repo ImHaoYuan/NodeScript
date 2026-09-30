@@ -1,5 +1,6 @@
 package com.autoscript.platform.capabilities
 
+import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.automation.ColorHit
 import com.autoscript.domain.automation.FeatureHit
 import com.autoscript.domain.automation.ImageAnalyzer
@@ -218,10 +219,10 @@ class ImagesNamespaceHandlerTest {
     /** decode 一帧，拿回脚本可见的 ref（发号侧归一后就是 SPI 自己的号段）。 */
     private suspend fun decodeFrame(path: String = "/sdcard/icon.png"): HandleRef {
         val payload = ok(call("decode", """{"path":"$path"}"""))
-        val ref = (A11yBridgeJson.decodeObject(payload)["ref"] as A11yBridgeJson.Value.Obj).fields
+        val ref = (DomainJson.decodeObject(payload)["ref"] as DomainJson.Value.Obj).fields
         return HandleRef(
-            (ref["refId"] as A11yBridgeJson.Value.N).raw.toLong(),
-            (ref["generation"] as A11yBridgeJson.Value.N).raw.toLong(),
+            (ref["refId"] as DomainJson.Value.N).raw.toLong(),
+            (ref["generation"] as DomainJson.Value.N).raw.toLong(),
         )
     }
 
@@ -253,12 +254,12 @@ class ImagesNamespaceHandlerTest {
     @Test
     fun `decode 发 path 回帧句柄 + 文件真宽高`() = runBlocking {
         val payload = ok(call("decode", """{"path":"/sdcard/icon.png"}"""))
-        val o = A11yBridgeJson.decodeObject(payload)
-        val ref = (o["ref"] as A11yBridgeJson.Value.Obj).fields
-        assertEquals("1", (ref["refId"] as A11yBridgeJson.Value.N).raw, "SPI 发号从 1 起（handler 不再自管表）")
-        assertEquals("1", (ref["generation"] as A11yBridgeJson.Value.N).raw, "一个文件一个帧，generation 恒 1")
-        assertEquals("1080", (o["width"] as A11yBridgeJson.Value.N).raw, "宽高取文件真值（对齐 :domain ImageFrame）")
-        assertEquals("2400", (o["height"] as A11yBridgeJson.Value.N).raw)
+        val o = DomainJson.decodeObject(payload)
+        val ref = (o["ref"] as DomainJson.Value.Obj).fields
+        assertEquals("1", (ref["refId"] as DomainJson.Value.N).raw, "SPI 发号从 1 起（handler 不再自管表）")
+        assertEquals("1", (ref["generation"] as DomainJson.Value.N).raw, "一个文件一个帧，generation 恒 1")
+        assertEquals("1080", (o["width"] as DomainJson.Value.N).raw, "宽高取文件真值（对齐 :domain ImageFrame）")
+        assertEquals("2400", (o["height"] as DomainJson.Value.N).raw)
         assertEquals(listOf("/sdcard/icon.png"), fake.decoded, "path 原样到 SPI，不拼接不解析")
         Unit
     }
@@ -279,12 +280,12 @@ class ImagesNamespaceHandlerTest {
         assertEquals(haystack, h)
         assertEquals(needle, n)
         assertEquals(0.9, t, 0.0)
-        val o = A11yBridgeJson.decodeObject(a)
-        assertEquals("10", (o["x"] as A11yBridgeJson.Value.N).raw)
-        assertEquals("20", (o["y"] as A11yBridgeJson.Value.N).raw)
-        assertEquals("100", (o["width"] as A11yBridgeJson.Value.N).raw)
-        assertEquals("50", (o["height"] as A11yBridgeJson.Value.N).raw)
-        assertTrue((o["confidence"] as A11yBridgeJson.Value.N).raw == "0.93", "置信度随帧走: $a")
+        val o = DomainJson.decodeObject(a)
+        assertEquals("10", (o["x"] as DomainJson.Value.N).raw)
+        assertEquals("20", (o["y"] as DomainJson.Value.N).raw)
+        assertEquals("100", (o["width"] as DomainJson.Value.N).raw)
+        assertEquals("50", (o["height"] as DomainJson.Value.N).raw)
+        assertTrue((o["confidence"] as DomainJson.Value.N).raw == "0.93", "置信度随帧走: $a")
         Unit
     }
 
@@ -404,13 +405,13 @@ class ImagesNamespaceHandlerTest {
         val haystack = decodeFrame("/sdcard/screen.png")
 
         val payload = ok(call("findColor", findColorJson(haystack, "[18,52,86,255]", "10")))
-        val o = A11yBridgeJson.decodeObject(payload)
-        assertEquals("120", (o["x"] as A11yBridgeJson.Value.N).raw)
-        assertEquals("340", (o["y"] as A11yBridgeJson.Value.N).raw)
-        assertEquals("18", (o["r"] as A11yBridgeJson.Value.N).raw, "回的是实际像素值，不是请求的目标色")
-        assertEquals("52", (o["g"] as A11yBridgeJson.Value.N).raw)
-        assertEquals("86", (o["b"] as A11yBridgeJson.Value.N).raw)
-        assertEquals("255", (o["a"] as A11yBridgeJson.Value.N).raw)
+        val o = DomainJson.decodeObject(payload)
+        assertEquals("120", (o["x"] as DomainJson.Value.N).raw)
+        assertEquals("340", (o["y"] as DomainJson.Value.N).raw)
+        assertEquals("18", (o["r"] as DomainJson.Value.N).raw, "回的是实际像素值，不是请求的目标色")
+        assertEquals("52", (o["g"] as DomainJson.Value.N).raw)
+        assertEquals("86", (o["b"] as DomainJson.Value.N).raw)
+        assertEquals("255", (o["a"] as DomainJson.Value.N).raw)
         assertEquals(1, fake.colorCalls.size, "命中了也如实记一次 SPI 调用")
         Unit
     }
@@ -513,11 +514,11 @@ class ImagesNamespaceHandlerTest {
         fake.nextWidth = 540
         fake.nextHeight = 1200
         val payload = ok(call("toGrayscale", transformJson(shot)))
-        val o = A11yBridgeJson.decodeObject(payload)
-        val ref = (o["ref"] as A11yBridgeJson.Value.Obj).fields
-        assertEquals("2", (ref["refId"] as A11yBridgeJson.Value.N).raw, "产出帧与 decode 同一号段")
-        assertEquals("540", (o["width"] as A11yBridgeJson.Value.N).raw, "宽高随产出帧真值")
-        assertEquals("1200", (o["height"] as A11yBridgeJson.Value.N).raw)
+        val o = DomainJson.decodeObject(payload)
+        val ref = (o["ref"] as DomainJson.Value.Obj).fields
+        assertEquals("2", (ref["refId"] as DomainJson.Value.N).raw, "产出帧与 decode 同一号段")
+        assertEquals("540", (o["width"] as DomainJson.Value.N).raw, "宽高随产出帧真值")
+        assertEquals("1200", (o["height"] as DomainJson.Value.N).raw)
         val source = fake.transforms.single().source
         assertEquals(shot, source, "source 原样到 SPI，不拼接不解析")
         Unit
@@ -541,11 +542,11 @@ class ImagesNamespaceHandlerTest {
     fun `crop 把 region 原样交给 SPI`() = runBlocking {
         val shot = decodeFrame()
         val payload = ok(call("crop", """{"source":{"refId":1,"generation":1},"region":[10,20,30,40]}"""))
-        val o = A11yBridgeJson.decodeObject(payload)
-        val ref = (o["ref"] as A11yBridgeJson.Value.Obj).fields
-        assertEquals("2", (ref["refId"] as A11yBridgeJson.Value.N).raw, "产出帧与 decode 同一号段")
-        assertEquals("30", (o["width"] as A11yBridgeJson.Value.N).raw, "宽高随产出帧（区域 w/h）")
-        assertEquals("40", (o["height"] as A11yBridgeJson.Value.N).raw)
+        val o = DomainJson.decodeObject(payload)
+        val ref = (o["ref"] as DomainJson.Value.Obj).fields
+        assertEquals("2", (ref["refId"] as DomainJson.Value.N).raw, "产出帧与 decode 同一号段")
+        assertEquals("30", (o["width"] as DomainJson.Value.N).raw, "宽高随产出帧（区域 w/h）")
+        assertEquals("40", (o["height"] as DomainJson.Value.N).raw)
         val region = fake.transforms.single().region
         assertEquals(listOf(10, 20, 30, 40), region)
         Unit
@@ -600,10 +601,10 @@ class ImagesNamespaceHandlerTest {
         val templ = decodeFrame()
         fake.featureResult = FeatureHit(345, 678, 0.63)
         val payload = ok(call("findFeature", """{"scene":{"refId":1,"generation":1},"template":{"refId":2,"generation":1}}"""))
-        val o = A11yBridgeJson.decodeObject(payload)
-        assertEquals("345", (o["x"] as A11yBridgeJson.Value.N).raw)
-        assertEquals("678", (o["y"] as A11yBridgeJson.Value.N).raw)
-        assertEquals("0.63", (o["confidence"] as A11yBridgeJson.Value.N).raw)
+        val o = DomainJson.decodeObject(payload)
+        assertEquals("345", (o["x"] as DomainJson.Value.N).raw)
+        assertEquals("678", (o["y"] as DomainJson.Value.N).raw)
+        assertEquals("0.63", (o["confidence"] as DomainJson.Value.N).raw)
         assertEquals(Pair(scene, templ), fake.featureCalls.single())
 
         fake.featureResult = null
@@ -615,10 +616,10 @@ class ImagesNamespaceHandlerTest {
     fun `产出帧与源帧同一条表——释放、STALE、再变换`() = runBlocking {
         val shot = decodeFrame()
         val payload = ok(call("toGrayscale", transformJson(shot)))
-        val ref = (A11yBridgeJson.decodeObject(payload)["ref"] as A11yBridgeJson.Value.Obj).fields
+        val ref = (DomainJson.decodeObject(payload)["ref"] as DomainJson.Value.Obj).fields
         val child = HandleRef(
-            (ref["refId"] as A11yBridgeJson.Value.N).raw.toLong(),
-            (ref["generation"] as A11yBridgeJson.Value.N).raw.toLong(),
+            (ref["refId"] as DomainJson.Value.N).raw.toLong(),
+            (ref["generation"] as DomainJson.Value.N).raw.toLong(),
         )
         // 产出帧可释放、可再变换
         assertEquals("true", ok(call("release", refJson(child))))
@@ -658,10 +659,10 @@ class ImagesNamespaceHandlerTest {
         assertEquals(1L, shot.handle.refId, "截屏帧进的是 images 那张表（号段从 1 起）")
 
         val iconPayload = ok(images.handle(BridgeRequest(2, "images", "decode", """{"path":"/sdcard/icon.png"}""", 5_000)))
-        val iconFields = (A11yBridgeJson.decodeObject(iconPayload)["ref"] as A11yBridgeJson.Value.Obj).fields
+        val iconFields = (DomainJson.decodeObject(iconPayload)["ref"] as DomainJson.Value.Obj).fields
         val icon = HandleRef(
-            (iconFields["refId"] as A11yBridgeJson.Value.N).raw.toLong(),
-            (iconFields["generation"] as A11yBridgeJson.Value.N).raw.toLong(),
+            (iconFields["refId"] as DomainJson.Value.N).raw.toLong(),
+            (iconFields["generation"] as DomainJson.Value.N).raw.toLong(),
         )
         assertEquals(2L, icon.refId, "decode 接着截屏帧往下发号 —— 同一段，不是两张表")
 

@@ -1,5 +1,6 @@
 package com.autoscript.platform.capabilities
 
+import com.autoscript.domain.json.DomainJson
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
@@ -89,8 +90,8 @@ class A11yWaitForTest {
             A11yNamespaceHandler.Response.Ok::class.java,
             handler.handle(A11yNamespaceHandler.Request(5, "findOne", """{"conditions":{"text":"启动"}}""")),
         )
-        val o = A11yBridgeJson.decodeObject(findOne.payload!!)
-        assertInstanceOf(A11yBridgeJson.Value.Obj::class.java, o["ref"], "findOne 命中仍回 {ref}")
+        val o = DomainJson.decodeObject(findOne.payload!!)
+        assertInstanceOf(DomainJson.Value.Obj::class.java, o["ref"], "findOne 命中仍回 {ref}")
         val none = assertInstanceOf(
             A11yNamespaceHandler.Response.Err::class.java,
             handler.handle(A11yNamespaceHandler.Request(6, "findOne", """{"conditions":{"text":"不存在"}}""")),

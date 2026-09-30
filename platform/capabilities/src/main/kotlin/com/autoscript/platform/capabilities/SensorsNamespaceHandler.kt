@@ -1,5 +1,6 @@
 package com.autoscript.platform.capabilities
 
+import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
 import com.autoscript.domain.system.SensorDelay
@@ -78,7 +79,7 @@ class SensorsNamespaceHandler(
             val ref = sensors.register(name, delay)
             ResponseLite.Ok(
                 request.id,
-                A11yBridgeJson.encode(mapOf("refId" to ref.refId, "generation" to ref.generation)),
+                DomainJson.encode(mapOf("refId" to ref.refId, "generation" to ref.generation)),
             )
         } catch (e: IllegalArgumentException) {
             ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
@@ -137,7 +138,7 @@ class SensorsNamespaceHandler(
             val got = sensors.drain(ref, sinceSeq, max)
             ResponseLite.Ok(
                 request.id,
-                A11yBridgeJson.encode(
+                DomainJson.encode(
                     mapOf(
                         "first" to got.firstSeq,
                         "last" to got.lastSeq,
@@ -163,8 +164,8 @@ class SensorsNamespaceHandler(
     private fun sensorNameOf(request: BridgeRequestLite): String =
         sensorNameOf(request.decodeObject())
 
-    private fun sensorNameOf(fields: Map<String, A11yBridgeJson.Value>): String {
-        val name = fields["name"] as? A11yBridgeJson.Value.S
+    private fun sensorNameOf(fields: Map<String, DomainJson.Value>): String {
+        val name = fields["name"] as? DomainJson.Value.S
             ?: throw IllegalArgumentException("sensors 缺 name 字段或 name 不是字符串")
         if (name.v.isBlank()) throw IllegalArgumentException("sensors name 不得为空白")
         return name.v

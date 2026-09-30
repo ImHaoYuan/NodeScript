@@ -1,5 +1,6 @@
 package com.autoscript.platform.capabilities
 
+import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.automation.ColorHit
 import com.autoscript.domain.automation.FeatureHit
 import com.autoscript.domain.automation.ImageAnalyzer
@@ -47,9 +48,9 @@ class CapabilityNamespacesTest {
 
         val ok = assertInstanceOf(BridgeResponse.Ok::class.java, resp)
         assertEquals(7L, ok.id)
-        val o = A11yBridgeJson.decodeObject(ok.payload!!)
-        val ref = (o["ref"] as A11yBridgeJson.Value.Obj).fields
-        assertEquals("1", (ref["refId"] as A11yBridgeJson.Value.N).raw)
+        val o = DomainJson.decodeObject(ok.payload!!)
+        val ref = (o["ref"] as DomainJson.Value.Obj).fields
+        assertEquals("1", (ref["refId"] as DomainJson.Value.N).raw)
         Unit                                           // 显式收尾：void 返回值才被 JUnit5 视为测试
     }
 
@@ -145,8 +146,8 @@ class CapabilityNamespacesTest {
             BridgeResponse.Ok::class.java,
             handler.handle(BridgeRequest(5, "screen", "startCapturer", null, 5_000)),
         )
-        val sessionId = ((A11yBridgeJson.decodeObject(start.payload!!)["session"] as A11yBridgeJson.Value.Obj)
-            .fields["refId"] as A11yBridgeJson.Value.N).raw
+        val sessionId = ((DomainJson.decodeObject(start.payload!!)["session"] as DomainJson.Value.Obj)
+            .fields["refId"] as DomainJson.Value.N).raw
 
         val frame = assertInstanceOf(
             BridgeResponse.Ok::class.java,
@@ -154,9 +155,9 @@ class CapabilityNamespacesTest {
                 BridgeRequest(6, "screen", "nextFrame", """{"session":{"refId":$sessionId,"generation":1}}""", 5_000),
             ),
         )
-        val o = A11yBridgeJson.decodeObject(frame.payload!!)
-        assertEquals("1080", (o["width"] as A11yBridgeJson.Value.N).raw)
-        assertEquals("2400", (o["height"] as A11yBridgeJson.Value.N).raw)
+        val o = DomainJson.decodeObject(frame.payload!!)
+        assertEquals("1080", (o["width"] as DomainJson.Value.N).raw)
+        assertEquals("2400", (o["height"] as DomainJson.Value.N).raw)
 
         val unknownSession = assertInstanceOf(
             BridgeResponse.Err::class.java,
@@ -175,8 +176,8 @@ class CapabilityNamespacesTest {
             BridgeResponse.Ok::class.java,
             handler.handle(BridgeRequest(8, "images", "decode", """{"path":"/sdcard/icon.png"}""", 5_000)),
         )
-        val ref = (A11yBridgeJson.decodeObject(decoded.payload!!)["ref"] as A11yBridgeJson.Value.Obj).fields
-        val haystack = """{"refId":${(ref["refId"] as A11yBridgeJson.Value.N).raw},"generation":1}"""
+        val ref = (DomainJson.decodeObject(decoded.payload!!)["ref"] as DomainJson.Value.Obj).fields
+        val haystack = """{"refId":${(ref["refId"] as DomainJson.Value.N).raw},"generation":1}"""
         val needle = haystack
 
         val hit = assertInstanceOf(
@@ -185,8 +186,8 @@ class CapabilityNamespacesTest {
                 BridgeRequest(9, "images", "findImage", """{"haystack":$haystack,"needle":$needle,"threshold":0.9}""", 5_000),
             ),
         )
-        val o = A11yBridgeJson.decodeObject(hit.payload!!)
-        assertEquals("12", (o["x"] as A11yBridgeJson.Value.N).raw, "命中体逐字段透传")
+        val o = DomainJson.decodeObject(hit.payload!!)
+        assertEquals("12", (o["x"] as DomainJson.Value.N).raw, "命中体逐字段透传")
         assertEquals(9L, hit.id)
 
         // 换一个恒未命中的假分析器：未匹配是答案 —— 裸 null，不折叠成 ERR_NOT_FOUND

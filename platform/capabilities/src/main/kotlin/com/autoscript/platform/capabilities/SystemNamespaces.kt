@@ -1,5 +1,6 @@
 package com.autoscript.platform.capabilities
 
+import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.bridge.HandleRef
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
@@ -78,7 +79,7 @@ class ShellNamespaceHandler(
             val r = executor.exec(cmd, mode, timeout)
             ResponseLite.Ok(
                 request.id,
-                A11yBridgeJson.encode(
+                DomainJson.encode(
                     mapOf("code" to r.code.toLong(), "stdout" to r.stdout, "stderr" to r.stderr),
                 ),
             )
@@ -94,9 +95,9 @@ class DeviceNamespaceHandler(private val info: DeviceInfoProvider) {
     suspend fun handle(request: BridgeRequestLite): ResponseLite = when (request.method) {
         "model" -> {
             val p = info.profile()   // 构造期已校验（空型号/SDK<1 即拒）
-            ResponseLite.Ok(request.id, A11yBridgeJson.encode(p.model))
+            ResponseLite.Ok(request.id, DomainJson.encode(p.model))
         }
-        "sdkInt" -> ResponseLite.Ok(request.id, A11yBridgeJson.encode(info.profile().sdkInt.toLong()))
+        "sdkInt" -> ResponseLite.Ok(request.id, DomainJson.encode(info.profile().sdkInt.toLong()))
         else -> ResponseLite.err(request.id, ErrorCode.ERR_NOT_IMPLEMENTED, "未知 device 方法: ${request.method}")
     }
 }
@@ -117,11 +118,11 @@ class AppNamespaceHandler(private val launcher: AppLauncher) {
                 return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
             }
             // 起不来回 false（JS facade `=== true` 判成败），不抛错
-            ResponseLite.Ok(request.id, A11yBridgeJson.encode(launcher.launch(pkg)))
+            ResponseLite.Ok(request.id, DomainJson.encode(launcher.launch(pkg)))
         }
         "currentPackage" -> {
             val pkg = launcher.currentPackage()
-            ResponseLite.Ok(request.id, A11yBridgeJson.encode(pkg))
+            ResponseLite.Ok(request.id, DomainJson.encode(pkg))
         }
         else -> ResponseLite.err(request.id, ErrorCode.ERR_NOT_IMPLEMENTED, "未知 app 方法: ${request.method}")
     }
@@ -153,7 +154,7 @@ class DialogsNamespaceHandler(private val host: DialogHost) {
             }
             ResponseLite.Ok(
                 request.id,
-                A11yBridgeJson.encode(mapOf("value" to out.value, "confirmed" to out.confirmed)),
+                DomainJson.encode(mapOf("value" to out.value, "confirmed" to out.confirmed)),
             )
         }
         "choose" -> {
@@ -177,7 +178,7 @@ class DialogsNamespaceHandler(private val host: DialogHost) {
                 return ResponseLite.err(request.id, e.error, e.message)
             }
             // 下标直出（JS facade `?? -1`）；取消即 -1，不套 null
-            ResponseLite.Ok(request.id, A11yBridgeJson.encode(choice.index.toLong()))
+            ResponseLite.Ok(request.id, DomainJson.encode(choice.index.toLong()))
         }
         else -> ResponseLite.err(request.id, ErrorCode.ERR_NOT_IMPLEMENTED, "未知 dialogs 方法: ${request.method}")
     }
@@ -212,7 +213,7 @@ class FloatingWindowNamespaceHandler(
                 }
                 ResponseLite.Ok(
                     request.id,
-                    A11yBridgeJson.encode(mapOf("refId" to ref.refId, "generation" to ref.generation)),
+                    DomainJson.encode(mapOf("refId" to ref.refId, "generation" to ref.generation)),
                 )
             }
             "close" -> {
@@ -272,57 +273,57 @@ sealed interface ResponseLite {
  * 每个方法在非法输入上抛 IllegalArgumentException —— handler 折叠为
  * ERR_INVALID_PARAM（§7 诚实上报，不伪造成功）。
  */
-internal fun BridgeRequestLite.decodeObject(): Map<String, A11yBridgeJson.Value> {
+internal fun BridgeRequestLite.decodeObject(): Map<String, DomainJson.Value> {
     if (payload == null) throw IllegalArgumentException("$method 缺 payload")
-    return A11yBridgeJson.decodeObject(payload)
+    return DomainJson.decodeObject(payload)
 }
 
 internal fun BridgeRequestLite.requiredStr(
-    o: Map<String, A11yBridgeJson.Value>,
+    o: Map<String, DomainJson.Value>,
     key: String,
-): String = (o[key] as? A11yBridgeJson.Value.S)?.v ?: throw IllegalArgumentException("缺字符串字段 $key")
+): String = (o[key] as? DomainJson.Value.S)?.v ?: throw IllegalArgumentException("缺字符串字段 $key")
 
 internal fun BridgeRequestLite.optStr(
-    o: Map<String, A11yBridgeJson.Value>,
+    o: Map<String, DomainJson.Value>,
     key: String,
 ): String? = when (val v = o[key]) {
-    null, is A11yBridgeJson.Value.Null -> null
-    is A11yBridgeJson.Value.S -> v.v
+    null, is DomainJson.Value.Null -> null
+    is DomainJson.Value.S -> v.v
     else -> throw IllegalArgumentException("字段 $key 必须是字符串")
 }
 
 internal fun BridgeRequestLite.requiredLong(
-    o: Map<String, A11yBridgeJson.Value>,
+    o: Map<String, DomainJson.Value>,
     key: String,
 ): Long = when (val v = o[key]) {
     null -> throw IllegalArgumentException("缺数字字段 $key")
-    is A11yBridgeJson.Value.Null -> throw IllegalArgumentException("字段 $key 必须是数字")
-    is A11yBridgeJson.Value.N -> v.raw.toLongOrNull() ?: throw IllegalArgumentException("字段 $key 数字越界")
+    is DomainJson.Value.Null -> throw IllegalArgumentException("字段 $key 必须是数字")
+    is DomainJson.Value.N -> v.raw.toLongOrNull() ?: throw IllegalArgumentException("字段 $key 数字越界")
     else -> throw IllegalArgumentException("字段 $key 必须是数字")
 }
 
 internal fun BridgeRequestLite.optLong(
-    o: Map<String, A11yBridgeJson.Value>,
+    o: Map<String, DomainJson.Value>,
     key: String,
 ): Long? = when (val v = o[key]) {
-    null, is A11yBridgeJson.Value.Null -> null
-    is A11yBridgeJson.Value.N -> v.raw.toLongOrNull() ?: throw IllegalArgumentException("字段 $key 数字越界")
+    null, is DomainJson.Value.Null -> null
+    is DomainJson.Value.N -> v.raw.toLongOrNull() ?: throw IllegalArgumentException("字段 $key 数字越界")
     else -> throw IllegalArgumentException("字段 $key 必须是数字")
 }
 
 internal fun BridgeRequestLite.requiredStrList(
-    o: Map<String, A11yBridgeJson.Value>,
+    o: Map<String, DomainJson.Value>,
     key: String,
 ): List<String> {
     val v = o[key] ?: throw IllegalArgumentException("缺 $key 字段")
-    if (v !is A11yBridgeJson.Value.Arr) throw IllegalArgumentException("$key 必须是数组")
-    return v.items.map { (it as? A11yBridgeJson.Value.S)?.v ?: throw IllegalArgumentException("$key 必须是字符串数组") }
+    if (v !is DomainJson.Value.Arr) throw IllegalArgumentException("$key 必须是数组")
+    return v.items.map { (it as? DomainJson.Value.S)?.v ?: throw IllegalArgumentException("$key 必须是字符串数组") }
 }
 
 /** 必填数字（JSON 数字原文 → Double；缺键/非数字 → IllegalArgumentException）。
  * 置信度/阈值这类非整数量走它（optLong 只认整数，会悄悄把 `0.9` 挡成参数错）。 */
 internal fun BridgeRequestLite.requiredDouble(
-    o: Map<String, A11yBridgeJson.Value>,
+    o: Map<String, DomainJson.Value>,
     key: String,
 ): Double {
     val v = o[key] ?: throw IllegalArgumentException("缺数字字段 $key")
@@ -330,26 +331,26 @@ internal fun BridgeRequestLite.requiredDouble(
 }
 
 /** 数字原文 → Double（拒绝 NaN/Infinity：wire 上送不着，实现侧也不该拿到）。 */
-private fun rawDouble(v: A11yBridgeJson.Value, key: String): Double {
-    if (v !is A11yBridgeJson.Value.N) throw IllegalArgumentException("字段 $key 必须是数字")
+private fun rawDouble(v: DomainJson.Value, key: String): Double {
+    if (v !is DomainJson.Value.N) throw IllegalArgumentException("字段 $key 必须是数字")
     val d = v.raw.toDoubleOrNull() ?: throw IllegalArgumentException("字段 $key 不是数字: ${v.raw}")
     if (!d.isFinite()) throw IllegalArgumentException("字段 $key 必须是有限数字")
     return d
 }
 
-internal fun BridgeRequestLite.requiredRef(o: Map<String, A11yBridgeJson.Value>): HandleRef =
+internal fun BridgeRequestLite.requiredRef(o: Map<String, DomainJson.Value>): HandleRef =
     requiredRef(o, "ref")
 
 /** 句柄字段：键可配（一处请求带两个句柄时 —— `images.matchTemplate` 的 haystack/needle）。 */
 internal fun BridgeRequestLite.requiredRef(
-    o: Map<String, A11yBridgeJson.Value>,
+    o: Map<String, DomainJson.Value>,
     key: String,
 ): HandleRef {
     val v = o[key] ?: throw IllegalArgumentException("缺 $key 字段")
-    if (v !is A11yBridgeJson.Value.Obj) throw IllegalArgumentException("$key 必须是对象")
-    val refId = (v.fields["refId"] as? A11yBridgeJson.Value.N)?.raw?.toLongOrNull()
+    if (v !is DomainJson.Value.Obj) throw IllegalArgumentException("$key 必须是对象")
+    val refId = (v.fields["refId"] as? DomainJson.Value.N)?.raw?.toLongOrNull()
         ?: throw IllegalArgumentException("缺数字 $key.refId")
-    val gen = (v.fields["generation"] as? A11yBridgeJson.Value.N)?.raw?.toLongOrNull()
+    val gen = (v.fields["generation"] as? DomainJson.Value.N)?.raw?.toLongOrNull()
         ?: throw IllegalArgumentException("缺数字 $key.generation")
     return HandleRef(refId, gen)
 }
@@ -358,13 +359,13 @@ internal fun BridgeRequestLite.requiredRef(
  * `images findColor` 的 color/region 走它：分量是原生侧的域（0..255），非整数
  * 由本层折 `ERR_INVALID_PARAM`，不把 `1.5` 这种值悄悄截给 native。 */
 internal fun BridgeRequestLite.requiredIntList(
-    o: Map<String, A11yBridgeJson.Value>,
+    o: Map<String, DomainJson.Value>,
     key: String,
 ): List<Int> {
     val v = o[key] ?: throw IllegalArgumentException("缺 $key 字段")
-    if (v !is A11yBridgeJson.Value.Arr) throw IllegalArgumentException("$key 必须是数组")
+    if (v !is DomainJson.Value.Arr) throw IllegalArgumentException("$key 必须是数组")
     return v.items.map { item ->
-        val n = item as? A11yBridgeJson.Value.N
+        val n = item as? DomainJson.Value.N
             ?: throw IllegalArgumentException("$key 必须是数字数组")
         val i = n.raw.toIntOrNull() ?: throw IllegalArgumentException("$key 元素不是整数: ${n.raw}")
         i
@@ -373,22 +374,22 @@ internal fun BridgeRequestLite.requiredIntList(
 
 /** 可选整数数组：缺键/JSON `null` → null；在场即按 [requiredIntList] 同一口径解析。 */
 internal fun BridgeRequestLite.optIntList(
-    o: Map<String, A11yBridgeJson.Value>,
+    o: Map<String, DomainJson.Value>,
     key: String,
 ): List<Int>? = when (val v = o[key]) {
-    null, is A11yBridgeJson.Value.Null -> null
+    null, is DomainJson.Value.Null -> null
     else -> requiredIntList(o, key)
 }
 
 /** 枚举字段：缺省/`null` 走 [fallback]；未知字面量拒绝（拼错即报错，不静默套默认）。 */
 internal fun <T> BridgeRequestLite.enumOrNull(
-    o: Map<String, A11yBridgeJson.Value>,
+    o: Map<String, DomainJson.Value>,
     key: String,
     fallback: T,
     parse: (String) -> T,
 ): T = when (val v = o[key]) {
-    null, is A11yBridgeJson.Value.Null -> fallback
-    is A11yBridgeJson.Value.S -> try {
+    null, is DomainJson.Value.Null -> fallback
+    is DomainJson.Value.S -> try {
         parse(v.v)
     } catch (_: IllegalArgumentException) {
         throw IllegalArgumentException("未知 $key 值: ${v.v}")

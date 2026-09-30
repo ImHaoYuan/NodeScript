@@ -1,5 +1,6 @@
 package com.autoscript.platform.capabilities
 
+import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.core.AutojsException
@@ -99,10 +100,10 @@ class SystemNamespacesTest {
         val h = CapabilityNamespaces.shell(fake, defaultTimeoutMillis = 12_345)
         val resp = h.handle(BridgeRequest(1, "shell", "exec", """{"cmd":"id","timeout":9000}""", 5_000))
         val ok = assertInstanceOf(BridgeResponse.Ok::class.java, resp)
-        val o = A11yBridgeJson.decodeObject(ok.payload!!)
-        assertEquals("0", (o["code"] as A11yBridgeJson.Value.N).raw)
-        assertEquals("out", (o["stdout"] as A11yBridgeJson.Value.S).v)
-        assertEquals("err", (o["stderr"] as A11yBridgeJson.Value.S).v)
+        val o = DomainJson.decodeObject(ok.payload!!)
+        assertEquals("0", (o["code"] as DomainJson.Value.N).raw)
+        assertEquals("out", (o["stdout"] as DomainJson.Value.S).v)
+        assertEquals("err", (o["stderr"] as DomainJson.Value.S).v)
         assertEquals(9_000L, fake.timeout)
         // 缺 timeout → 走 handler 默认（不是 0、不是无限）
         h.handle(BridgeRequest(2, "shell", "exec", """{"cmd":"id"}""", 5_000))
@@ -173,12 +174,12 @@ class SystemNamespacesTest {
             BridgeResponse.Ok::class.java,
             h.handle(BridgeRequest(1, "device", "model", null, 5_000)),
         )
-        assertEquals("Pixel 8", A11yBridgeJson.decode(model.payload!!).let { (it as A11yBridgeJson.Value.S).v })
+        assertEquals("Pixel 8", DomainJson.decode(model.payload!!).let { (it as DomainJson.Value.S).v })
         val sdk = assertInstanceOf(
             BridgeResponse.Ok::class.java,
             h.handle(BridgeRequest(2, "device", "sdkInt", null, 5_000)),
         )
-        assertEquals("34", (A11yBridgeJson.decode(sdk.payload!!) as A11yBridgeJson.Value.N).raw)
+        assertEquals("34", (DomainJson.decode(sdk.payload!!) as DomainJson.Value.N).raw)
         // P0 只两个方法，其余如实未实现
         val unknown = assertInstanceOf(
             BridgeResponse.Err::class.java,
@@ -204,7 +205,7 @@ class SystemNamespacesTest {
             h.handle(BridgeRequest(2, "app", "currentPackage", null, 5_000)),
         )
         assertEquals("null", cur.payload)
-        assertInstanceOf(A11yBridgeJson.Value.Null::class.java, A11yBridgeJson.decode(cur.payload!!))
+        assertInstanceOf(DomainJson.Value.Null::class.java, DomainJson.decode(cur.payload!!))
         Unit
     }
 
@@ -233,9 +234,9 @@ class SystemNamespacesTest {
             BridgeResponse.Ok::class.java,
             h.handle(BridgeRequest(1, "dialogs", "prompt", """{"title":"名字","placeholder":"请输入"}""", 5_000)),
         )
-        val o = A11yBridgeJson.decodeObject(ok.payload!!)
-        assertEquals("张三", (o["value"] as A11yBridgeJson.Value.S).v)
-        assertTrue((o["confirmed"] as A11yBridgeJson.Value.B).v)
+        val o = DomainJson.decodeObject(ok.payload!!)
+        assertEquals("张三", (o["value"] as DomainJson.Value.S).v)
+        assertTrue((o["confirmed"] as DomainJson.Value.B).v)
         Unit
     }
 
@@ -246,9 +247,9 @@ class SystemNamespacesTest {
             BridgeResponse.Ok::class.java,
             h.handle(BridgeRequest(1, "dialogs", "prompt", """{"title":"名字"}""", 5_000)),
         )
-        val o = A11yBridgeJson.decodeObject(ok.payload!!)
-        assertTrue(o["value"] is A11yBridgeJson.Value.Null)
-        assertFalse((o["confirmed"] as A11yBridgeJson.Value.B).v)
+        val o = DomainJson.decodeObject(ok.payload!!)
+        assertTrue(o["value"] is DomainJson.Value.Null)
+        assertFalse((o["confirmed"] as DomainJson.Value.B).v)
         Unit
     }
 
@@ -259,14 +260,14 @@ class SystemNamespacesTest {
             BridgeResponse.Ok::class.java,
             h.handle(BridgeRequest(1, "dialogs", "choose", """{"title":"选","options":["a","b","c"]}""", 5_000)),
         )
-        assertEquals("2", (A11yBridgeJson.decode(ok.payload!!) as A11yBridgeJson.Value.N).raw)
+        assertEquals("2", (DomainJson.decode(ok.payload!!) as DomainJson.Value.N).raw)
 
         val cancelled = CapabilityNamespaces.dialogs(FakeDialogs(choice = DialogChoice.CANCELLED))
         val c = assertInstanceOf(
             BridgeResponse.Ok::class.java,
             cancelled.handle(BridgeRequest(2, "dialogs", "choose", """{"title":"选","options":["a"]}""", 5_000)),
         )
-        assertEquals("-1", (A11yBridgeJson.decode(c.payload!!) as A11yBridgeJson.Value.N).raw)
+        assertEquals("-1", (DomainJson.decode(c.payload!!) as DomainJson.Value.N).raw)
         Unit
     }
 
@@ -325,9 +326,9 @@ class SystemNamespacesTest {
             BridgeResponse.Ok::class.java,
             h.handle(BridgeRequest(1, "floatingWindow", "create", """{"title":"面板","width":300,"height":200}""", 5_000)),
         )
-        val o = A11yBridgeJson.decodeObject(created.payload!!)
-        assertEquals("42", (o["refId"] as A11yBridgeJson.Value.N).raw)
-        assertEquals("1", (o["generation"] as A11yBridgeJson.Value.N).raw)
+        val o = DomainJson.decodeObject(created.payload!!)
+        assertEquals("42", (o["refId"] as DomainJson.Value.N).raw)
+        assertEquals("1", (o["generation"] as DomainJson.Value.N).raw)
 
         val closed = assertInstanceOf(
             BridgeResponse.Ok::class.java,

@@ -1,5 +1,6 @@
 package com.autoscript.platform.capabilities
 
+import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.automation.ScreenSnapshot
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -35,10 +36,10 @@ class ScreenNamespaceHandlerTest {
             ScreenNamespaceHandler.Response.Ok::class.java,
             handler.handle(ScreenNamespaceHandler.Request(1, "capture", null)),
         )
-        val o = A11yBridgeJson.decodeObject(resp.payload!!)
-        val ref = (o["ref"] as A11yBridgeJson.Value.Obj).fields
-        assertEquals("1", (ref["refId"] as A11yBridgeJson.Value.N).raw)
-        assertTrue((o["width"] as A11yBridgeJson.Value.N).raw.toLong() > 0)
+        val o = DomainJson.decodeObject(resp.payload!!)
+        val ref = (o["ref"] as DomainJson.Value.Obj).fields
+        assertEquals("1", (ref["refId"] as DomainJson.Value.N).raw)
+        assertTrue((o["width"] as DomainJson.Value.N).raw.toLong() > 0)
     }
 
     @Test
@@ -59,10 +60,10 @@ class ScreenNamespaceHandlerTest {
             ScreenNamespaceHandler.Response.Ok::class.java,
             handler.handle(ScreenNamespaceHandler.Request(10, "capture", null)),
         )
-        val o = A11yBridgeJson.decodeObject(cap.payload!!)
-        val ref = (o["ref"] as A11yBridgeJson.Value.Obj).fields
+        val o = DomainJson.decodeObject(cap.payload!!)
+        val ref = (o["ref"] as DomainJson.Value.Obj).fields
         val refJson =
-            """{"refId":${(ref["refId"] as A11yBridgeJson.Value.N).raw},"generation":${(ref["generation"] as A11yBridgeJson.Value.N).raw}}"""
+            """{"refId":${(ref["refId"] as DomainJson.Value.N).raw},"generation":${(ref["generation"] as DomainJson.Value.N).raw}}"""
         val rec = assertInstanceOf(
             ScreenNamespaceHandler.Response.Ok::class.java,
             handler.handle(ScreenNamespaceHandler.Request(11, "recycle", """{"ref":$refJson}""")),
@@ -81,7 +82,7 @@ class ScreenNamespaceHandlerTest {
             ScreenNamespaceHandler.Response.Ok::class.java,
             handler.handle(ScreenNamespaceHandler.Request(20, "startCapturer", null)),
         )
-        val sessionId = ((A11yBridgeJson.decodeObject(start.payload!!)["session"] as A11yBridgeJson.Value.Obj).fields["refId"] as A11yBridgeJson.Value.N).raw
+        val sessionId = ((DomainJson.decodeObject(start.payload!!)["session"] as DomainJson.Value.Obj).fields["refId"] as DomainJson.Value.N).raw
         val frame = assertInstanceOf(
             ScreenNamespaceHandler.Response.Ok::class.java,
             handler.handle(ScreenNamespaceHandler.Request(21, "nextFrame", """{"session":{"refId":$sessionId,"generation":1}}""")),
@@ -151,14 +152,14 @@ class ScreenNamespaceHandlerTest {
             h.handle(ScreenNamespaceHandler.Request(50, "startCapturer", """{"width":720,"height":1280}""")),
         )
         assertTrue(!start.payload!!.contains("720"), "回包不带请求尺寸（带了就是把提示说成事实）")
-        val sessionId = ((A11yBridgeJson.decodeObject(start.payload!!)["session"] as A11yBridgeJson.Value.Obj).fields["refId"] as A11yBridgeJson.Value.N).raw
+        val sessionId = ((DomainJson.decodeObject(start.payload!!)["session"] as DomainJson.Value.Obj).fields["refId"] as DomainJson.Value.N).raw
         val frame = assertInstanceOf(
             ScreenNamespaceHandler.Response.Ok::class.java,
             h.handle(ScreenNamespaceHandler.Request(51, "nextFrame", """{"session":{"refId":$sessionId,"generation":1}}""")),
         )
         assertEquals(listOf(720 to 1280), seen, "提示要走到生产者")
-        val o = A11yBridgeJson.decodeObject(frame.payload!!)
-        assertEquals("1080", (o["width"] as A11yBridgeJson.Value.N).raw, "帧尺寸恒为真实帧")
+        val o = DomainJson.decodeObject(frame.payload!!)
+        assertEquals("1080", (o["width"] as DomainJson.Value.N).raw, "帧尺寸恒为真实帧")
         Unit
     }
 

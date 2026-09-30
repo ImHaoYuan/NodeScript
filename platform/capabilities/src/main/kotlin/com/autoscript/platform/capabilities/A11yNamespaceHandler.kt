@@ -1,5 +1,6 @@
 package com.autoscript.platform.capabilities
 
+import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.automation.GestureInput
 import com.autoscript.domain.automation.GesturePoint
 import com.autoscript.domain.automation.GestureStroke
@@ -23,7 +24,7 @@ import com.autoscript.domain.core.ErrorCode
  * 只需实现这三块 SPI 即可替换内存树/输入 —— 本类逐行逻辑不变（替换 = 调
  * `CapabilityNamespaces.a11y` 时换 tree/actions/input/events 四个参数）。
  *
- * `:app` 装配层薄转接挂 BridgeRouter。载荷用本模块内 [A11yBridgeJson]
+ * `:app` 装配层薄转接挂 BridgeRouter。载荷用本模块内 [DomainJson]
  *（:bridge:java 的 TinyJson 是 internal，跨模块不可见；见 runtime 的 EngineBridgeJson 同例）。
  *
  * 方法表（与 `bridge/js` a11y.ts 一一对应）：
@@ -117,10 +118,10 @@ class A11yNamespaceHandler(
             return err(request.id, ErrorCode.ERR_NOT_FOUND, "选择器无匹配")
         }
         if (!single) {
-            return ok(request.id, A11yBridgeJson.encode(matched.map { nodePayload(it.handle, null) }))
+            return ok(request.id, DomainJson.encode(matched.map { nodePayload(it.handle, null) }))
         }
         val first = matched.first()
-        return ok(request.id, A11yBridgeJson.encode(nodePayload(first.handle, null)))
+        return ok(request.id, DomainJson.encode(nodePayload(first.handle, null)))
     }
 
     /**
@@ -175,7 +176,7 @@ class A11yNamespaceHandler(
         } catch (e: AutojsException) {
             return err(request.id, e.error, e.message)
         }
-        return ok(request.id, A11yBridgeJson.encode(matched.take(max).map { nodePayload(it.handle, null) }))
+        return ok(request.id, DomainJson.encode(matched.take(max).map { nodePayload(it.handle, null) }))
     }
 
     // ── 动作 ─────────────────────────────────────────────────────────
@@ -253,7 +254,7 @@ class A11yNamespaceHandler(
         if (b == null) return ok(request.id, null)
         return ok(
             request.id,
-            A11yBridgeJson.encode(mapOf("left" to b.left.toLong(), "top" to b.top.toLong(), "right" to b.right.toLong(), "bottom" to b.bottom.toLong())),
+            DomainJson.encode(mapOf("left" to b.left.toLong(), "top" to b.top.toLong(), "right" to b.right.toLong(), "bottom" to b.bottom.toLong())),
         )
     }
 
@@ -268,7 +269,7 @@ class A11yNamespaceHandler(
         } catch (e: AutojsException) {
             return err(request.id, e.error, e.message)
         }
-        return ok(request.id, if (v == null) null else A11yBridgeJson.encode(v))
+        return ok(request.id, if (v == null) null else DomainJson.encode(v))
     }
 
     private suspend fun children(request: Request): Response {
@@ -282,7 +283,7 @@ class A11yNamespaceHandler(
         } catch (e: AutojsException) {
             return err(request.id, e.error, e.message)
         }
-        return ok(request.id, A11yBridgeJson.encode(kids.map { nodePayload(it.handle, null) }))
+        return ok(request.id, DomainJson.encode(kids.map { nodePayload(it.handle, null) }))
     }
 
     private suspend fun parent(request: Request): Response {
@@ -296,7 +297,7 @@ class A11yNamespaceHandler(
         } catch (e: AutojsException) {
             return err(request.id, e.error, e.message)
         }
-        return ok(request.id, if (p == null) null else A11yBridgeJson.encode(nodePayload(p.handle, null)))
+        return ok(request.id, if (p == null) null else DomainJson.encode(nodePayload(p.handle, null)))
     }
 
     private suspend fun dispose(request: Request): Response {
@@ -336,7 +337,7 @@ class A11yNamespaceHandler(
         val got = (events ?: tree.events()).next(sinceSeq, batch)
         return ok(
             request.id,
-            A11yBridgeJson.encode(
+            DomainJson.encode(
                 mapOf(
                     "first" to got.firstSeq,
                     "last" to got.lastSeq,
@@ -380,21 +381,21 @@ class A11yNamespaceHandler(
         }
     }
 
-    private fun gestureOf(v: A11yBridgeJson.Value?): GestureInput {
-        if (v !is A11yBridgeJson.Value.Arr) throw IllegalArgumentException("strokes 必须是数组")
+    private fun gestureOf(v: DomainJson.Value?): GestureInput {
+        if (v !is DomainJson.Value.Arr) throw IllegalArgumentException("strokes 必须是数组")
         return GestureInput(
             v.items.map { s ->
-                val o = (s as? A11yBridgeJson.Value.Obj)?.fields
+                val o = (s as? DomainJson.Value.Obj)?.fields
                     ?: throw IllegalArgumentException("stroke 必须是对象")
-                val points = (o["points"] as? A11yBridgeJson.Value.Arr)
+                val points = (o["points"] as? DomainJson.Value.Arr)
                     ?: throw IllegalArgumentException("stroke.points 必须是数组")
                 GestureStroke(
                     points = points.items.map { p ->
-                        val f = (p as? A11yBridgeJson.Value.Obj)?.fields
+                        val f = (p as? DomainJson.Value.Obj)?.fields
                             ?: throw IllegalArgumentException("point 必须是 {x,y} 对象")
-                        val x = (f["x"] as? A11yBridgeJson.Value.N)?.raw?.toIntOrNull()
+                        val x = (f["x"] as? DomainJson.Value.N)?.raw?.toIntOrNull()
                             ?: throw IllegalArgumentException("point.x 必须是非负整数")
-                        val y = (f["y"] as? A11yBridgeJson.Value.N)?.raw?.toIntOrNull()
+                        val y = (f["y"] as? DomainJson.Value.N)?.raw?.toIntOrNull()
                             ?: throw IllegalArgumentException("point.y 必须是非负整数")
                         GesturePoint(x, y)
                     },
@@ -410,14 +411,14 @@ class A11yNamespaceHandler(
     private fun nodePayload(ref: HandleRef, extra: Map<String, Any?>?): Map<String, Any?> =
         mapOf("ref" to mapOf("refId" to ref.refId, "generation" to ref.generation))
 
-    private fun decodePayload(payload: String?): Map<String, A11yBridgeJson.Value> {
+    private fun decodePayload(payload: String?): Map<String, DomainJson.Value> {
         if (payload == null) throw IllegalArgumentException("缺 payload")
-        return A11yBridgeJson.decodeObject(payload)
+        return DomainJson.decodeObject(payload)
     }
 
-    private fun selectorOf(v: A11yBridgeJson.Value?): UiSelectorDsl {
-        if (v == null || v is A11yBridgeJson.Value.Null) return UiSelectorDsl.builder()
-        if (v !is A11yBridgeJson.Value.Obj) throw IllegalArgumentException("conditions 必须是对象")
+    private fun selectorOf(v: DomainJson.Value?): UiSelectorDsl {
+        if (v == null || v is DomainJson.Value.Null) return UiSelectorDsl.builder()
+        if (v !is DomainJson.Value.Obj) throw IllegalArgumentException("conditions 必须是对象")
         val o = v.fields
         // 白名单字段：未知键如实拒绝（防拼写错误静默变全量匹配）。
         for (k in o.keys) {
@@ -433,42 +434,42 @@ class A11yNamespaceHandler(
         )
     }
 
-    private fun requiredRef(o: Map<String, A11yBridgeJson.Value>): HandleRef {
+    private fun requiredRef(o: Map<String, DomainJson.Value>): HandleRef {
         val v = o["ref"] ?: throw IllegalArgumentException("缺 ref 字段")
-        if (v !is A11yBridgeJson.Value.Obj) throw IllegalArgumentException("ref 必须是对象")
-        val refId = (v.fields["refId"] as? A11yBridgeJson.Value.N)?.raw?.toLongOrNull()
+        if (v !is DomainJson.Value.Obj) throw IllegalArgumentException("ref 必须是对象")
+        val refId = (v.fields["refId"] as? DomainJson.Value.N)?.raw?.toLongOrNull()
             ?: throw IllegalArgumentException("缺数字 ref.refId")
-        val gen = (v.fields["generation"] as? A11yBridgeJson.Value.N)?.raw?.toLongOrNull()
+        val gen = (v.fields["generation"] as? DomainJson.Value.N)?.raw?.toLongOrNull()
             ?: throw IllegalArgumentException("缺数字 ref.generation")
         return HandleRef(refId, gen)
     }
 
-    private fun requiredStr(o: Map<String, A11yBridgeJson.Value>, key: String): String =
-        (o[key] as? A11yBridgeJson.Value.S)?.v ?: throw IllegalArgumentException("缺字符串字段 $key")
+    private fun requiredStr(o: Map<String, DomainJson.Value>, key: String): String =
+        (o[key] as? DomainJson.Value.S)?.v ?: throw IllegalArgumentException("缺字符串字段 $key")
 
-    private fun optStr(o: Map<String, A11yBridgeJson.Value>, key: String): String? {
+    private fun optStr(o: Map<String, DomainJson.Value>, key: String): String? {
         val v = o[key] ?: return null
-        if (v is A11yBridgeJson.Value.Null) return null
-        return (v as? A11yBridgeJson.Value.S)?.v ?: throw IllegalArgumentException("字段 $key 必须是字符串")
+        if (v is DomainJson.Value.Null) return null
+        return (v as? DomainJson.Value.S)?.v ?: throw IllegalArgumentException("字段 $key 必须是字符串")
     }
 
-    private fun optBool(o: Map<String, A11yBridgeJson.Value>, key: String): Boolean? {
+    private fun optBool(o: Map<String, DomainJson.Value>, key: String): Boolean? {
         val v = o[key] ?: return null
-        if (v is A11yBridgeJson.Value.Null) return null
-        return (v as? A11yBridgeJson.Value.B)?.v ?: throw IllegalArgumentException("字段 $key 必须是布尔")
+        if (v is DomainJson.Value.Null) return null
+        return (v as? DomainJson.Value.B)?.v ?: throw IllegalArgumentException("字段 $key 必须是布尔")
     }
 
-    private fun optLong(o: Map<String, A11yBridgeJson.Value>, key: String): Long? {
+    private fun optLong(o: Map<String, DomainJson.Value>, key: String): Long? {
         val v = o[key] ?: return null
-        if (v is A11yBridgeJson.Value.Null) return null
-        return (v as? A11yBridgeJson.Value.N)?.raw?.toLongOrNull()
+        if (v is DomainJson.Value.Null) return null
+        return (v as? DomainJson.Value.N)?.raw?.toLongOrNull()
             ?: throw IllegalArgumentException("字段 $key 必须是数字")
     }
 
-    private fun optDirection(o: Map<String, A11yBridgeJson.Value>, key: String): ScrollDirection? {
+    private fun optDirection(o: Map<String, DomainJson.Value>, key: String): ScrollDirection? {
         val v = o[key] ?: return null
-        if (v is A11yBridgeJson.Value.Null) return null
-        val name = (v as? A11yBridgeJson.Value.S)?.v
+        if (v is DomainJson.Value.Null) return null
+        val name = (v as? DomainJson.Value.S)?.v
             ?: throw IllegalArgumentException("字段 $key 必须是方向名字符串")
         return try {
             ScrollDirection.valueOf(name.uppercase())

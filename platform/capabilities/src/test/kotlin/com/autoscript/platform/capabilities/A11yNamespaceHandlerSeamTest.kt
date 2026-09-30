@@ -1,5 +1,6 @@
 package com.autoscript.platform.capabilities
 
+import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.automation.GestureInput
 import com.autoscript.domain.automation.InputProvider
 import com.autoscript.domain.automation.UiActionExecutor
@@ -128,9 +129,9 @@ class A11yNamespaceHandlerSeamTest {
             A11yNamespaceHandler.Response.Ok::class.java,
             handler.handle(A11yNamespaceHandler.Request(1, "findOne", """{"conditions":{"text":"启动"}}""")),
         )
-        val o = A11yBridgeJson.decodeObject(resp.payload!!)
-        val ref = (o["ref"] as A11yBridgeJson.Value.Obj).fields
-        assertEquals("1", (ref["refId"] as A11yBridgeJson.Value.N).raw)
+        val o = DomainJson.decodeObject(resp.payload!!)
+        val ref = (o["ref"] as DomainJson.Value.Obj).fields
+        assertEquals("1", (ref["refId"] as DomainJson.Value.N).raw)
         assertEquals(listOf("启动"), reader.finds, "选择器条件原样交给 reader，语义层不自己过滤")
         Unit
     }
@@ -184,12 +185,12 @@ class A11yNamespaceHandlerSeamTest {
             A11yNamespaceHandler.Response.Ok::class.java,
             handler.handle(A11yNamespaceHandler.Request(6, "events", """{"sinceSeq":0,"batch":8}""")),
         )
-        val o = A11yBridgeJson.decodeObject(resp.payload!!)
-        val events = (o["events"] as A11yBridgeJson.Value.Arr).items
+        val o = DomainJson.decodeObject(resp.payload!!)
+        val events = (o["events"] as DomainJson.Value.Arr).items
         assertEquals(1, events.size)
-        val ev = (events[0] as A11yBridgeJson.Value.Obj).fields
-        assertEquals("windowChanged", (ev["type"] as A11yBridgeJson.Value.S).v)
-        assertEquals("1", (ev["seq"] as A11yBridgeJson.Value.N).raw)
+        val ev = (events[0] as DomainJson.Value.Obj).fields
+        assertEquals("windowChanged", (ev["type"] as DomainJson.Value.S).v)
+        assertEquals("1", (ev["seq"] as DomainJson.Value.N).raw)
         Unit
     }
 

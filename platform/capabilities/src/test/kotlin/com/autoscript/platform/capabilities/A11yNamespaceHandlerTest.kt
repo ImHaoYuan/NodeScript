@@ -1,5 +1,6 @@
 package com.autoscript.platform.capabilities
 
+import com.autoscript.domain.json.DomainJson
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
@@ -44,10 +45,10 @@ class A11yNamespaceHandlerTest {
                 ),
             ),
         )
-        val o = A11yBridgeJson.decodeObject(resp.payload!!)
-        val ref = (o["ref"] as A11yBridgeJson.Value.Obj).fields
-        assertEquals("1", (ref["refId"] as A11yBridgeJson.Value.N).raw)
-        assertEquals("1", (ref["generation"] as A11yBridgeJson.Value.N).raw)
+        val o = DomainJson.decodeObject(resp.payload!!)
+        val ref = (o["ref"] as DomainJson.Value.Obj).fields
+        assertEquals("1", (ref["refId"] as DomainJson.Value.N).raw)
+        assertEquals("1", (ref["generation"] as DomainJson.Value.N).raw)
     }
 
     @Test
@@ -84,14 +85,14 @@ class A11yNamespaceHandlerTest {
                 A11yNamespaceHandler.Request(4, "findAll", """{"conditions":${cond(""""text":"启动"""")}}"""),
             ),
         )
-        assertEquals(2, (A11yBridgeJson.decode(all.payload!!) as A11yBridgeJson.Value.Arr).items.size)
+        assertEquals(2, (DomainJson.decode(all.payload!!) as DomainJson.Value.Arr).items.size)
         val capped = assertInstanceOf(
             A11yNamespaceHandler.Response.Ok::class.java,
             handler.handle(
                 A11yNamespaceHandler.Request(5, "findAll", """{"conditions":${cond(""""text":"启动"""")},"max":1}"""),
             ),
         )
-        assertEquals(1, (A11yBridgeJson.decode(capped.payload!!) as A11yBridgeJson.Value.Arr).items.size)
+        assertEquals(1, (DomainJson.decode(capped.payload!!) as DomainJson.Value.Arr).items.size)
         val neg = assertInstanceOf(
             A11yNamespaceHandler.Response.Err::class.java,
             handler.handle(
@@ -173,7 +174,7 @@ class A11yNamespaceHandlerTest {
             A11yNamespaceHandler.Response.Ok::class.java,
             handler.handle(A11yNamespaceHandler.Request(30, "children", """{"ref":$parentJson}""")),
         )
-        assertEquals(1, (A11yBridgeJson.decode(kids.payload!!) as A11yBridgeJson.Value.Arr).items.size)
+        assertEquals(1, (DomainJson.decode(kids.payload!!) as DomainJson.Value.Arr).items.size)
         val back = assertInstanceOf(
             A11yNamespaceHandler.Response.Ok::class.java,
             handler.handle(A11yNamespaceHandler.Request(31, "parent", """{"ref":$childJson}""")),
@@ -241,13 +242,13 @@ class A11yNamespaceHandlerTest {
             A11yNamespaceHandler.Response.Ok::class.java,
             handler.handle(A11yNamespaceHandler.Request(60, "events", """{"sinceSeq":0,"batch":32}""")),
         )
-        val batch = A11yBridgeJson.decodeObject(first.payload!!)
-        val last = (batch["last"] as A11yBridgeJson.Value.N).raw.toLong()
+        val batch = DomainJson.decodeObject(first.payload!!)
+        val last = (batch["last"] as DomainJson.Value.N).raw.toLong()
         assertTrue(last >= 1)
-        assertEquals(1, (batch["events"] as A11yBridgeJson.Value.Arr).items.size)
-        val ev0 = ((batch["events"] as A11yBridgeJson.Value.Arr).items[0] as A11yBridgeJson.Value.Obj).fields
-        assertEquals("nodeAdded", (ev0["type"] as A11yBridgeJson.Value.S).v)
-        assertTrue(ev0["node"] is A11yBridgeJson.Value.Obj)
+        assertEquals(1, (batch["events"] as DomainJson.Value.Arr).items.size)
+        val ev0 = ((batch["events"] as DomainJson.Value.Arr).items[0] as DomainJson.Value.Obj).fields
+        assertEquals("nodeAdded", (ev0["type"] as DomainJson.Value.S).v)
+        assertTrue(ev0["node"] is DomainJson.Value.Obj)
 
         // 无参调用同样合法（缺省 sinceSeq=0/batch=32）
         val noarg = assertInstanceOf(
@@ -261,8 +262,8 @@ class A11yNamespaceHandlerTest {
             A11yNamespaceHandler.Response.Ok::class.java,
             handler.handle(A11yNamespaceHandler.Request(62, "events", """{"sinceSeq":$last}""")),
         )
-        val eb = A11yBridgeJson.decodeObject(empty.payload!!)
-        assertEquals(0, (eb["events"] as A11yBridgeJson.Value.Arr).items.size)
+        val eb = DomainJson.decodeObject(empty.payload!!)
+        assertEquals(0, (eb["events"] as DomainJson.Value.Arr).items.size)
 
         // batch 非法 → ERR_INVALID_PARAM
         val bad = assertInstanceOf(

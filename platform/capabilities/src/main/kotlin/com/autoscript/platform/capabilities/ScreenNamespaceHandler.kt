@@ -1,5 +1,6 @@
 package com.autoscript.platform.capabilities
 
+import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.automation.FrameSource
 import com.autoscript.domain.automation.ImageFrame
 import com.autoscript.domain.automation.ScreenCaptureSession
@@ -16,7 +17,7 @@ import com.autoscript.domain.core.ErrorCode
  * 生产装配 = `CapabilityNamespaces.screen(ScreenshotSource(AndroidFrameProducer()))`，
  * 见 [PlatformWiring] 落点 —— handler 只认 SPI，真假实现同一条缝）。
  *
- * `:app` 装配层薄转接挂 BridgeRouter。载荷复用本模块内 [A11yBridgeJson]（同模块 internal 可见）。
+ * `:app` 装配层薄转接挂 BridgeRouter。载荷复用本模块内 [DomainJson]（同模块 internal 可见）。
  *
  * 方法表（与 `bridge/js` images.ts `screen` 对应）：
  * - `capture`：无参 → Ok `{ref:{refId,generation},width,height}`；
@@ -87,7 +88,7 @@ class ScreenNamespaceHandler(
                 sessions[nid] = session
                 nid
             }
-            ok(request.id, A11yBridgeJson.encode(mapOf("session" to mapOf("refId" to id, "generation" to 1L))))
+            ok(request.id, DomainJson.encode(mapOf("session" to mapOf("refId" to id, "generation" to 1L))))
         } catch (e: AutojsException) {
             err(request.id, e.error, e.message)
         }
@@ -123,7 +124,7 @@ class ScreenNamespaceHandler(
     // ── 载荷 ─────────────────────────────────────────────────────────
 
     private fun framePayload(f: ImageFrame): String =
-        A11yBridgeJson.encode(
+        DomainJson.encode(
             mapOf(
                 "ref" to mapOf("refId" to f.handle.refId, "generation" to f.handle.generation),
                 "width" to f.width.toLong(),
@@ -138,30 +139,30 @@ class ScreenNamespaceHandler(
      */
     private fun optSize(payload: String?): Pair<Int?, Int?> {
         if (payload == null) return null to null
-        val o = A11yBridgeJson.decodeObject(payload)
+        val o = DomainJson.decodeObject(payload)
         return optPositiveInt(o, "width") to optPositiveInt(o, "height")
     }
 
-    private fun optPositiveInt(o: Map<String, A11yBridgeJson.Value>, key: String): Int? {
+    private fun optPositiveInt(o: Map<String, DomainJson.Value>, key: String): Int? {
         val v = o[key] ?: return null
-        if (v is A11yBridgeJson.Value.Null) return null
-        val n = (v as? A11yBridgeJson.Value.N)?.raw?.toLongOrNull()
+        if (v is DomainJson.Value.Null) return null
+        val n = (v as? DomainJson.Value.N)?.raw?.toLongOrNull()
             ?: throw IllegalArgumentException("字段 $key 必须是数字")
         if (n <= 0L || n > Int.MAX_VALUE) throw IllegalArgumentException("字段 $key 必须 > 0，实际 $n")
         return n.toInt()
     }
 
-    private fun decodePayload(payload: String?): Map<String, A11yBridgeJson.Value> {
+    private fun decodePayload(payload: String?): Map<String, DomainJson.Value> {
         if (payload == null) throw IllegalArgumentException("缺 payload")
-        return A11yBridgeJson.decodeObject(payload)
+        return DomainJson.decodeObject(payload)
     }
 
-    private fun requiredRef(o: Map<String, A11yBridgeJson.Value>, key: String): HandleRef {
+    private fun requiredRef(o: Map<String, DomainJson.Value>, key: String): HandleRef {
         val v = o[key] ?: throw IllegalArgumentException("缺 $key 字段")
-        if (v !is A11yBridgeJson.Value.Obj) throw IllegalArgumentException("$key 必须是对象")
-        val refId = (v.fields["refId"] as? A11yBridgeJson.Value.N)?.raw?.toLongOrNull()
+        if (v !is DomainJson.Value.Obj) throw IllegalArgumentException("$key 必须是对象")
+        val refId = (v.fields["refId"] as? DomainJson.Value.N)?.raw?.toLongOrNull()
             ?: throw IllegalArgumentException("缺数字 $key.refId")
-        val gen = (v.fields["generation"] as? A11yBridgeJson.Value.N)?.raw?.toLongOrNull()
+        val gen = (v.fields["generation"] as? DomainJson.Value.N)?.raw?.toLongOrNull()
             ?: throw IllegalArgumentException("缺数字 $key.generation")
         return HandleRef(refId, gen)
     }

@@ -1,15 +1,15 @@
-package com.autoscript.platform.capabilities
+package com.autoscript.domain.json
 
 /**
- * 桥载荷极简 JSON 编解码（仅服务 a11y handler 的请求/响应体）。
+ * 仓内唯一的 JSON 值族编解码（原 `A11yBridgeJson`，2026-09-30 由审查步骤 4 移入 `:domain`、
+ * 步骤 3 合一后其余四个手写 codec 全部迁到本类型上 —— 选它不选 kotlinx.serialization 的
+ * 论证见 `docs/design-decisions.md`）。
  *
- * 为什么不复用 `:bridge:java` 的 TinyJson：TinyJson 是 internal（跨模块不可见），
- * 且只支持扁平对象（装不下 `ref:{refId,generation}` 嵌套与 `conditions:{...}` 对象）。
- * 本编解码只做 JSON 值级往返（string/number/bool/null/object/array），不支持注释、
- * 不做数字精度保证（Long 按十进制原文透传）；非法输入抛 IllegalArgumentException，
- * 由调用方折叠为 ERR_INVALID_PARAM（桥的诚实上报，不伪造成功）。
+ * 只做 JSON 值级往返（string/number/bool/null/object/array），不支持注释、不做数字精度保证
+ * （Long 按十进制原文透传）；非法输入抛 IllegalArgumentException，由 `RpcNamespaceHandler`
+ * 折叠为 ERR_INVALID_PARAM（桥的诚实上报，不伪造成功）。
  */
-internal object A11yBridgeJson {
+object DomainJson {
 
     sealed interface Value {
         data class S(val v: String) : Value

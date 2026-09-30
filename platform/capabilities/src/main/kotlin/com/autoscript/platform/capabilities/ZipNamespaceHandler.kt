@@ -1,5 +1,6 @@
 package com.autoscript.platform.capabilities
 
+import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
 import com.autoscript.domain.storage.ZipArchiver
@@ -75,7 +76,7 @@ class ZipNamespaceHandler(
     /** 取非空白路径字段；非法（缺/非字符串/空白/NUL 字符）抛 IllegalArgumentException。 */
     private fun pathOf(
         request: BridgeRequestLite,
-        fields: Map<String, A11yBridgeJson.Value>,
+        fields: Map<String, DomainJson.Value>,
         key: String,
     ): Path {
         val s = request.requiredStr(fields, key)

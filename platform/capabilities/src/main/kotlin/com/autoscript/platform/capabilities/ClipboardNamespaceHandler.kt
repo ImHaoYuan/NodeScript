@@ -1,5 +1,6 @@
 package com.autoscript.platform.capabilities
 
+import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
 import com.autoscript.domain.system.Clipboard
@@ -42,7 +43,7 @@ class ClipboardNamespaceHandler(
 
     /** 读剪贴板文本；null = 无内容（裸 JSON null，与 settings 读缺失同形）。 */
     private fun getText(request: BridgeRequestLite): ResponseLite = try {
-        ResponseLite.Ok(request.id, A11yBridgeJson.encode(clipboard.getText()))
+        ResponseLite.Ok(request.id, DomainJson.encode(clipboard.getText()))
     } catch (e: AutojsException) {
         ResponseLite.err(request.id, e.error, e.message)
     }
@@ -54,7 +55,7 @@ class ClipboardNamespaceHandler(
             return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
         }
         // 空串是合法内容 —— 缺参/非串/null 才是参数错，不拿 isBlank 卡 text。
-        val text = fields["text"] as? A11yBridgeJson.Value.S
+        val text = fields["text"] as? DomainJson.Value.S
             ?: return ResponseLite.err(
                 request.id,
                 ErrorCode.ERR_INVALID_PARAM,

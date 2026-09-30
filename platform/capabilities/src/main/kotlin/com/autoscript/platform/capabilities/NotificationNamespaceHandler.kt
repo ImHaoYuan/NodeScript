@@ -1,5 +1,6 @@
 package com.autoscript.platform.capabilities
 
+import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
 import com.autoscript.domain.system.NotificationPoster
@@ -85,8 +86,8 @@ class NotificationNamespaceHandler(
     }
 
     /** 取 `id` 字段：必须是 Int 范围内的整数（缺/非数/小数/越界抛 IAE → 折叠）。 */
-    private fun idOf(fields: Map<String, A11yBridgeJson.Value>): Int {
-        val n = fields["id"] as? A11yBridgeJson.Value.N
+    private fun idOf(fields: Map<String, DomainJson.Value>): Int {
+        val n = fields["id"] as? DomainJson.Value.N
             ?: throw IllegalArgumentException("缺数字字段 id")
         val raw = n.raw.toLongOrNull()
             ?: throw IllegalArgumentException("id 必须是整数: ${n.raw}")
@@ -97,8 +98,8 @@ class NotificationNamespaceHandler(
     }
 
     /** 取 `text` 字段：必须是非空白字符串（空串/纯空白是参数错，不是空通知）。 */
-    private fun textOf(fields: Map<String, A11yBridgeJson.Value>): String {
-        val text = fields["text"] as? A11yBridgeJson.Value.S
+    private fun textOf(fields: Map<String, DomainJson.Value>): String {
+        val text = fields["text"] as? DomainJson.Value.S
             ?: throw IllegalArgumentException("缺字符串字段 text")
         if (text.v.isBlank()) throw IllegalArgumentException("notification text 不得为空白")
         return text.v

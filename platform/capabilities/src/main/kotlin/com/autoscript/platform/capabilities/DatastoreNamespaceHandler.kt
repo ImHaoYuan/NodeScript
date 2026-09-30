@@ -1,5 +1,6 @@
 package com.autoscript.platform.capabilities
 
+import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
 import com.autoscript.domain.storage.DataStore
@@ -85,7 +86,7 @@ class DatastoreNamespaceHandler(
                 "put 缺 value 字段（写 JSON null 请传 value:null，不是省略）",
             )
         }
-        val text = A11yBridgeJson.encodeParsed(fields.getValue("value"))
+        val text = DomainJson.encodeParsed(fields.getValue("value"))
         return try {
             store.put(key, StoredEntry.Json(text))
             ResponseLite.Ok(request.id, "true")
@@ -125,7 +126,7 @@ class DatastoreNamespaceHandler(
     }
 
     private suspend fun keys(request: BridgeRequestLite): ResponseLite = try {
-        ResponseLite.Ok(request.id, A11yBridgeJson.encode(store.keys()))
+        ResponseLite.Ok(request.id, DomainJson.encode(store.keys()))
     } catch (e: AutojsException) {
         ResponseLite.err(request.id, e.error, e.message)
     }

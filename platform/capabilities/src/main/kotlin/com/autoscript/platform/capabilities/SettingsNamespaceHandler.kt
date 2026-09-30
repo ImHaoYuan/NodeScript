@@ -1,5 +1,6 @@
 package com.autoscript.platform.capabilities
 
+import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
 import com.autoscript.domain.storage.SystemSettings
@@ -59,7 +60,7 @@ class SettingsNamespaceHandler(
         }
         // 缺失 = 裸 null（见类 KDoc：值面无显式 null，不需要信封）
         return try {
-            ResponseLite.Ok(request.id, A11yBridgeJson.encode(settings.getString(key)))
+            ResponseLite.Ok(request.id, DomainJson.encode(settings.getString(key)))
         } catch (e: AutojsException) {
             ResponseLite.err(request.id, e.error, e.message)
         }
@@ -72,7 +73,7 @@ class SettingsNamespaceHandler(
             return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
         }
         return try {
-            ResponseLite.Ok(request.id, A11yBridgeJson.encode(settings.getInt(key)))
+            ResponseLite.Ok(request.id, DomainJson.encode(settings.getInt(key)))
         } catch (e: AutojsException) {
             ResponseLite.err(request.id, e.error, e.message)
         }
@@ -90,7 +91,7 @@ class SettingsNamespaceHandler(
             return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
         }
         // 空串是合法设置值 —— 缺参/非串才是参数错，不拿 isBlank 卡 value。
-        val value = fields["value"] as? A11yBridgeJson.Value.S
+        val value = fields["value"] as? DomainJson.Value.S
             ?: return ResponseLite.err(
                 request.id,
                 ErrorCode.ERR_INVALID_PARAM,
@@ -115,7 +116,7 @@ class SettingsNamespaceHandler(
         } catch (e: IllegalArgumentException) {
             return ResponseLite.err(request.id, ErrorCode.ERR_INVALID_PARAM, e.message)
         }
-        val n = fields["value"] as? A11yBridgeJson.Value.N
+        val n = fields["value"] as? DomainJson.Value.N
             ?: return ResponseLite.err(
                 request.id,
                 ErrorCode.ERR_INVALID_PARAM,
@@ -148,7 +149,7 @@ class SettingsNamespaceHandler(
     /** 取 `key` 字段并拒空白；缺/非串/空白抛 [IllegalArgumentException]。 */
     private fun keyOf(
         request: BridgeRequestLite,
-        fields: Map<String, A11yBridgeJson.Value>,
+        fields: Map<String, DomainJson.Value>,
     ): String {
         val key = request.requiredStr(fields, "key")
         if (key.isBlank()) throw IllegalArgumentException("settings key 不得为空白")
