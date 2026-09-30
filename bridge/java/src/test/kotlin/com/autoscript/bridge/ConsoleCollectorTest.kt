@@ -3,6 +3,7 @@ package com.autoscript.bridge
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.core.ErrorCode
+import com.autoscript.domain.json.DomainJson
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
@@ -14,7 +15,7 @@ import org.junit.jupiter.api.Test
 class ConsoleCollectorTest {
 
     private fun okPayload(level: String = "log", text: String = "hi") =
-        """{"level":${TinyJson.quote(level)},"text":${TinyJson.quote(text)}}"""
+        """{"level":${DomainJson.encode(level)},"text":${DomainJson.encode(text)}}"""
 
     @Test
     fun `log 方法追加并回 Ok`() = runBlocking {

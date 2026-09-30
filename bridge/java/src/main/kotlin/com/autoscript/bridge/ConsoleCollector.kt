@@ -3,6 +3,7 @@ package com.autoscript.bridge
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.core.ErrorCode
+import com.autoscript.domain.json.DomainJson
 import java.time.Instant
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicLong
@@ -85,13 +86,13 @@ class ConsoleCollector(
     private fun parseLogParams(payload: String?): LogParams {
         if (payload == null) throw IllegalArgumentException("console.log 缺 payload")
         val m = try {
-            TinyJson.decode(payload, setOf("level", "text"))
+            decodeFlat(payload, setOf("level", "text"))
         } catch (e: IllegalArgumentException) {
             throw IllegalArgumentException("console.log 载荷非法: ${e.message}")
         }
-        val level = (m["level"] as? TinyJson.Field.S)?.v ?: throw IllegalArgumentException("console.log 缺 level")
+        val level = (m["level"] as? DomainJson.Value.S)?.v ?: throw IllegalArgumentException("console.log 缺 level")
         if (level !in VALID_LEVELS) throw IllegalArgumentException("console.log 非法 level: $level")
-        val text = (m["text"] as? TinyJson.Field.S)?.v ?: throw IllegalArgumentException("console.log 缺 text")
+        val text = (m["text"] as? DomainJson.Value.S)?.v ?: throw IllegalArgumentException("console.log 缺 text")
         return LogParams(level, text)
     }
 
