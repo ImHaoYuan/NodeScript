@@ -53,7 +53,7 @@ android {
             all {
                 it.useJUnitPlatform()
                 // P0 回环（P0LoopbackTest）拉真 npm 进程：CI 走 -PskipNpmE2E 排除
-                // （与 :app-service:packager 的 HostNodeNpmE2ETest 同一条纪律；
+                // （与 :app-service:npm 的 HostNodeNpmE2ETest 同一条纪律；
                 // 本机闭环不带该 flag 即跑）。
                 if (project.hasProperty("skipNpmE2E")) {
                     it.exclude("**/P0LoopbackTest*")
@@ -69,6 +69,7 @@ dependencies {
     implementation(project(":app-service:script-repo"))
     implementation(project(":app-service:permission-center"))
     implementation(project(":app-service:packager"))
+    implementation(project(":app-service:npm"))
     implementation(project(":domain"))
     // 仅 Composition Root（com.autoscript.shell.AppShell）可碰 :bridge:java：
     // 把各 handler 薄转接挂到 BridgeRouter。不做业务逻辑，见 AppShell 注释 + ArchitectureTest。

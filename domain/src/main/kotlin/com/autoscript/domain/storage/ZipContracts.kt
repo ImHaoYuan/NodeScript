@@ -15,8 +15,8 @@ import java.nio.file.Path
  * （抛 `ERR_INVALID_PARAM`，越界文件一个字节都不许落）。这不是实现细节是契约：
  * 归档是**外部输入**，脚本解一个来路不明的 zip 不该能把文件写到应用私有区之外。
  *
- * 与 packager 既有 zip 代码的边界：`NpmSnapshot`/离线包那套 `java.util.zip`
- * 是 npm 专用（固定 mtime、integrity 清单），**不是**本 SPI 的实现也不复用 ——
+ * 与 npm 面既有 zip 代码的边界：`NpmSnapshot`/离线包那套 `java.util.zip`
+ * 是 npm 专用（住 `:app-service:npm`，2026-09-30 自 packager 拆出）（固定 mtime、integrity 清单），**不是**本 SPI 的实现也不复用 ——
  * 通用归档面归这里。
  */
 interface ZipArchiver {

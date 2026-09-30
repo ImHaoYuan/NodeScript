@@ -64,6 +64,7 @@ class ModuleGraphTest {
             ":app-service:script-repo",
             ":app-service:permission-center",
             ":app-service:packager",
+            ":app-service:npm",     // §6 审查步骤 5：npm 面自 packager 拆出
             ":domain",
             ":bridge:java",          // §6 包级例外一（shell 装配包挂 handler）
             ":platform:capabilities",// §6 包级例外二（shell 装配包生产装配，PlatformWiring）
@@ -78,6 +79,7 @@ class ModuleGraphTest {
         ":app-service:script-repo" to setOf(":domain"),
         ":app-service:permission-center" to setOf(":domain"),
         ":app-service:packager" to setOf(":domain"),
+        ":app-service:npm" to setOf(":domain"),
         ":domain" to emptySet(),
         ":bridge:java" to setOf(":domain"),
         ":bridge:native" to emptySet(),
@@ -95,7 +97,7 @@ class ModuleGraphTest {
     fun `模块表与 settings_gradle 一致（新增模块必须同步登记依赖规则）`() {
         assertEquals(
             allowed.keys, declaredModules,
-            "settings.gradle.kts 与 §6 允许依赖表不一致：新增/删除模块时必须同步本表（§6 冻结 14 个模块）",
+            "settings.gradle.kts 与 §6 允许依赖表不一致：新增/删除模块时必须同步本表（§6 冻结 15 个模块）",
         )
     }
 

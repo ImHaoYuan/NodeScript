@@ -166,7 +166,7 @@ class AppShell(
             watchdog: EngineWatchdog? = null,
             /**
              * `npm` 命名空间实现（§10.8 auto.npm）：与 [a11yHandler]/[screenHandler] 同一注入缝
-             * （真实实现 InstallCoordinator + NpmBridgeHandler 住 :app-service:packager）。
+             * （真实实现 InstallCoordinator + NpmBridgeHandler 住 :app-service:npm）。
              * null = 未接线，桥对 `npm.*` 如实回 ERR_NOT_IMPLEMENTED（不伪造可用）。
              */
             npmHandler: NamespaceHandler? = null,

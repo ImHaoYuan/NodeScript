@@ -34,7 +34,7 @@ const ROOT = (() => {
 const KT = fs.readFileSync(
   path.join(
     ROOT,
-    'app-service/packager/src/main/kotlin/com/autoscript/appservice/packager/npm/NpmBridgeHandler.kt',
+    'app-service/npm/src/main/kotlin/com/autoscript/appservice/npm/NpmBridgeHandler.kt',
   ),
   'utf8',
 )

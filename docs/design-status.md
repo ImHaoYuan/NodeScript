@@ -40,6 +40,18 @@
 
 ## 流水（最新在上）
 
+### 2026-09-30 —— 外部审查整改·步骤 5：拆 `:app-service:npm`（模块 14 → 15）
+
+（§6 模块表 + §10 npm 面；CI 任务行 12 → 13 模块）切分依据是零耦合：`packager/npm/` 对父包零 import、共享编排（`PackagerCollector`/`PackagerPipeline`/`TestIo`）也零反向引用 —— `git mv` 即净，编译器兜底：
+
+- **迁出 31 个 `.kt`**：`packager/npm/` 16 件 + `NpmShellKit` + npm 测试 13 件 + `NpmShellKitTest` → `app-service/npm/`（包名 `…appservice.packager.npm`/`…appservice.packager` → `…appservice.npm`）；fixture APK 资源属 Apk 测试面，留 packager。
+- **新模块骨架**：`app-service/npm/build.gradle.kts`（`autoscript.jvm` + `:domain` + coroutines；`-PskipNpmE2E` exclude 块随迁——`HostNodeNpmE2ETest`/`NpmCacheSeedDeployerTest`）；新 `ArchitectureTest`（黑名单同 packager + 同级 `appservice.packager..`）。packager 的 `tasks.test` exclude 块随之整删，其 ArchitectureTest 黑名单补 `appservice.npm..`。
+- **三角同改**：settings `include(":app-service:npm")`；ModuleGraphTest allowed 两处（`:app` 集 + 独立行 `setOf(":domain")`）+ 断言消息 14→15；framework-design §6 计数 14→15 + packager 行收窄 + npm 新行（`:app` 允许列本就是 `:app-service:*` 通配，零改）。
+- **CI**：job 名模块列举加 npm、L32 任务行加 `:app-service:npm:test`（13 任务）；`event-wire.test.cjs` 硬编码路径随迁；`TestGuard.ENV_GATED` 两条按类名匹配本就不动（注释路径更新）。
+- **消费方**：`:app` 加 `implementation(project(":app-service:npm"))`；`AppShellKit`/`AppShellProductionWiringTest`/`P0LoopbackTest` import 改；`AppShell`/`AppShellCapabilityMountTest`/`P0LoopbackTest`/`ScriptPaths`/`ZipContracts` 的 KDoc 归属句改（`NpmProjectLayout`/`NpmSnapshot`/npm 真实现住 `:app-service:npm`）；§6 同段散文与 §12.2 npm 行路径改（该行 `mount(): NamespaceHandler` 残留一并清 —— 步骤 4 已删壳，文字不留谎）。
+- **验证**：`:app-service:npm:test` + `:app-service:packager:test` 首跑绿；收尾 CI 同源 13 任务 + `bridge/js` npm test 全绿（2026-09-30，同批核验）。
+
+
 ### 2026-09-30 —— 外部审查整改·步骤 3：JSON 只留一个（DomainJson 合一）
 
 （§7.5 编解码面；选型拍板见 [`design-decisions.md`](design-decisions.md) 已拍板第 11 项）五子步各一提交：

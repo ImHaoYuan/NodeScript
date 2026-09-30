@@ -20,8 +20,8 @@ object TestGuard {
 
     /** 环境门禁类：跳过是其契约（"本地没有 npm/宿主 node 不假扮通过"），不计违规。 */
     private val ENV_GATED: Set<String> = setOf(
-        "NpmCliDeployerTest",        // app-service/packager：素材源取本机 npm 安装
-        "HostNodeNpmE2ETest",        // app-service/packager：拉真宿主 node+npm 进程
+        "NpmCliDeployerTest",        // app-service/npm：素材源取本机 npm 安装
+        "HostNodeNpmE2ETest",        // app-service/npm：拉真宿主 node+npm 进程
     )
 
     fun apply(project: Project) {

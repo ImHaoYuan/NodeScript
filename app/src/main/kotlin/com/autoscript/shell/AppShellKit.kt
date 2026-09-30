@@ -1,6 +1,6 @@
 package com.autoscript.shell
 
-import com.autoscript.appservice.packager.NpmShellKit
+import com.autoscript.appservice.npm.NpmShellKit
 import com.autoscript.appservice.runtime.EngineWatchdog
 import com.autoscript.appservice.runtime.ProcessMonitor
 import com.autoscript.appservice.runtime.UnavailableEngine

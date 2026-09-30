@@ -26,7 +26,7 @@ import org.junit.jupiter.api.Test
  *
  * 覆盖三件事：
  * 1. 注入 `a11y`/`screen`/`npm` 缝 → 请求可达真实逻辑（这里用内存假实现，等价于
- *    `:platform:capabilities` 的真实现与 `:app-service:packager` 的 npm 真实现）；
+ *    `:platform:capabilities` 的真实现与 `:app-service:npm` 的 npm 真实现）；
  * 2. 不注入 → 桥对 `a11y.*`/`screen.*`/`npm.*`/`clipboard.*`/`sensors.*`/`power_manager.*` 如实回 ERR_NOT_IMPLEMENTED（§7.5 Router 契约），
  *    **绝不伪造可用**；
  * 3. `console`/`engines` 与能力缝共存，互不抢占 namespace。

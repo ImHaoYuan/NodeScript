@@ -1,7 +1,7 @@
 package com.autoscript.shell
 
-import com.autoscript.appservice.packager.NpmShellKit
-import com.autoscript.appservice.packager.npm.HostNodeExecutor
+import com.autoscript.appservice.npm.NpmShellKit
+import com.autoscript.appservice.npm.HostNodeExecutor
 import com.autoscript.appservice.scheduler.core.SchedulerProvider
 import com.autoscript.appservice.scheduler.core.TriggerHandle
 import com.autoscript.domain.bridge.BridgeRequest
@@ -34,7 +34,7 @@ import java.nio.file.Path
  * - engines 槽只验 `poolStats` 可达（缺省 `UnavailableEngine` 如实 CRASHED ——
  *   脚本不跑，不断言执行）；
  * - 宿主机无 node/npm-cli.js 时 `assumeTrue` 自跳（CI 另经 `-PskipNpmE2E` 排除，
- *   见 `:app` 的 `build.gradle.kts`，与 `:app-service:packager` 的
+ *   见 `:app` 的 `build.gradle.kts`，与 `:app-service:npm` 的
  *   `HostNodeNpmE2ETest` 同一条纪律）。
  *
  * 桥 TTL 300s：`install` 在 Router 里是同步重操作（`enqueueHeavy` 内联执行，

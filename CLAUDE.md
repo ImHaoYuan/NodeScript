@@ -12,7 +12,7 @@
 | `.claude/skills/skill-designer/` | 项目级 skill：设计/创建技能 + 外科手术式改代码 + git 提交 | — |
 | `module-stubs` 之外的模块 | 各模块职责见下 | §6 |
 
-## Gradle 模块（模块表由 `settings.gradle.kts` 冻结，14 个 —— `:engine:sandbox` 空壳 2026-09-30 已注释摘除，复活 = 注释回 + ModuleGraphTest 登记）
+## Gradle 模块（模块表由 `settings.gradle.kts` 冻结，15 个 —— `:engine:sandbox` 空壳 2026-09-30 已注释摘除、`:app-service:npm` 同日审查步骤 5 自 packager 拆出；复活 sandbox = 注释回 + ModuleGraphTest 登记）
 
 - `:app` — AppShellApplication 启动装配（§4.1 Composition Root）；Compose UI 已拆去 `:ui`（2026-09-23 落地：launcher 随库 manifest 合并，`:app` 源码零 compose / 零 import ui）
 - `:app-service:runtime` — RuntimeController / EnginePool / Watchdog 仲裁（§8）
@@ -20,12 +20,13 @@
 - `:app-service:script-repo` — 项目/资源/脚本库、assets→filesDir 原子部署（§9.6）
 - `:app-service:permission-center` — 权限三态门禁、引导页、降级路径（§9.5）
 - `:app-service:packager` — 模板 APK 改写、签名向导（§14；整轨已移后续版本，加密资产/loader 已裁）
+- `:app-service:npm` — npm 安装/审批/镜像验证 + `npm` 桥 handler（§10；2026-09-30 审查步骤 5 自 :app-service:packager 拆出）
 - `:domain` — **纯 Kotlin 领域层**：SPI 接口 + DTO + 状态机（零 Android 依赖、JVM 可单测）
 - `:bridge:java` — Kotlin Router / RequestRegistry(TTL) / HandleRegistry(generation) / EventBus（§7）
 - `:bridge:native` — C++ N-API addon 控制面 + libnode.so 装载（§7，CI 构建）
 - `:bridge:image` — C++ 图像管线 libopencv.so（OpenCV 4.x，§9.2，CI 构建）
 - `:engine:node-process` — :nodeN 进程宿主：`NodeProcessEngine`（Kotlin spawn，实现 `:domain` 的 `ScriptEngine`）+ main.cpp（§5/§7.8；addon `.so` 本机 NDK 可交叉编译验证，APK `assembleDebug` 本机可直跑）
-- `:engine:sandbox` — QuickJS 宿主进程（**已裁 §18 第 1 项；壳 2026-09-30 已从 settings 注释摘除、不计 14**，目录留盘；复活 = 注释回 include + ModuleGraphTest 允许集登记）
+- `:engine:sandbox` — QuickJS 宿主进程（**已裁 §18 第 1 项；壳 2026-09-30 已从 settings 注释摘除、不计 15**，目录留盘；复活 = 注释回 include + ModuleGraphTest 允许集登记）
 - `:platform:capabilities` — a11y/截图/输入/悬浮窗/系统/存储（§9.1–9.4）
 - `:platform:system` — overlay/通知/datastore/shell/zip/设备信息（§9.6）
 - `:ui` — Compose UI 呈现层：启动 Activity（launcher）、首屏/任务中心/控制台/能力中心界面；状态经 `:domain` 的 `HostSummary` 读口现取，禁依赖 `:app`（§6）
@@ -39,7 +40,7 @@
 ## 构建
 
 - 本机已配置 Android SDK：`/root/android-sdk`（platform-35 + build-tools 35 + platform-tools；`local.properties` 指 `sdk.dir`，已 gitignore），JDK 17 = `/root/develop/claude/tools/jdk-17.0.17+10`。**CI 同款 `./gradlew …` 命令可本机直跑**（12 个测试任务 2026-09-23 实测全绿）——CI 仍是权威门，但本机已能同源复现。**本机快速门 = 同一条 `./gradlew` 命令**（`tools/jvm-test*` 旁路已删，2026-09-30）：约定插件 `autoscript.test-guard` 把「skipped/aborted ≠ 绿」守卫做进 Gradle，本机与 CI 同一口径、无第二口径脚本。
-- **CI 验证门**：`.github/workflows/ci.yml` —— JVM 单测（12 个模块：`:domain`、`:bridge:java`、`:app-service:{runtime,scheduler,script-repo,permission-center,packager}`、`:platform:{capabilities,system}`、`:engine:node-process`、`:ui`、`:app`）+ archUnit + `bridge/js` 的 npm test，跑在 ubuntu-latest（JDK 17 + Gradle 8.9 + Android SDK license）。Android assemble 走后续 `node-runtime-build/Dockerfile`。
+- **CI 验证门**：`.github/workflows/ci.yml` —— JVM 单测（13 个模块：`:domain`、`:bridge:java`、`:app-service:{runtime,scheduler,script-repo,permission-center,packager,npm}`、`:platform:{capabilities,system}`、`:engine:node-process`、`:ui`、`:app`）+ archUnit + `bridge/js` 的 npm test，跑在 ubuntu-latest（JDK 17 + Gradle 8.9 + Android SDK license）。Android assemble 走后续 `node-runtime-build/Dockerfile`。
 - **可用 GitHub Actions 跑远端 CI**：远端 `origin` = `git@github.com:Ventus-Pluviam/NodeScript.git`（私有仓，SSH 可推）。`ci.yml` 在 `push→main` 与 `pull_request` 时触发——把分支 `git push origin <分支>` 后开 PR 即跑全套门（JVM 单测 + archUnit + npm test），不用等合入 main 才知道红绿。本机 `gh` token 若无该私仓权限（`gh pr create` 报 404/解析不到仓库），用 push 后远端打印的 PR 链接手动开 PR；看不到 runs 输出时以本机 `./gradlew` 同源复现为准。**不要为触发 CI 直推 main**。
 - **本机快速门**：与 CI **逐字同源**的 `./gradlew`（ci.yml L 任务行），单模块跑 `./gradlew :<模块>:test`（纯 JVM）或 `:<模块>:testDebugUnitTest`（android 模块）。守卫在约定插件里：测试出现 skipped/aborted 即红（`TestGuard.ENV_GATED` 只放行设计上环境门禁的 E2E；其余用 `-PallowSkipped=<类名>` 显式放行）。**`:ui`/`:app` 同源直跑**（`./gradlew :ui:testDebugUnitTest :app:testDebugUnitTest`）。
 
