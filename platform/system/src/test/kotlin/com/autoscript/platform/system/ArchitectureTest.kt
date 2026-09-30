@@ -1,8 +1,6 @@
 package com.autoscript.platform.system
 
-import com.tngtech.archunit.core.domain.JavaClasses
-import com.tngtech.archunit.core.importer.ClassFileImporter
-import com.tngtech.archunit.lang.syntax.ArchRuleDefinition
+import com.autoscript.build.ArchGate
 import org.junit.jupiter.api.Test
 
 /**
@@ -17,21 +15,16 @@ import org.junit.jupiter.api.Test
 class ArchitectureTest {
 
     @Test
-    fun `platform system 包零跨层泄漏`() {
-        val classes: JavaClasses =
-            ClassFileImporter().importPackages("com.autoscript.platform.system")
-
-        ArchRuleDefinition.noClasses()
-            .that().resideInAPackage("..platform.system..")
-            .should().dependOnClassesThat().resideInAnyPackage(
-                "androidx..",
-                "com.autoscript.bridge..",
-                "com.autoscript.engine..",
-                "com.autoscript.appservice..",
-                "com.autoscript.platform.capabilities..",
-                "java.awt..",
-                "javax.swing..",
-            )
-            .check(classes)
-    }
+    fun `platform system 包零跨层泄漏`() = ArchGate(
+        "com.autoscript.platform.system",
+        rulePackage = "..platform.system..",
+    ).noLeakTo(
+        "androidx..",
+        "com.autoscript.bridge..",
+        "com.autoscript.engine..",
+        "com.autoscript.appservice..",
+        "com.autoscript.platform.capabilities..",
+        "java.awt..",
+        "javax.swing..",
+    )
 }

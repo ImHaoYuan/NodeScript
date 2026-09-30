@@ -3,6 +3,9 @@ import java.io.File
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    // skipped/aborted 守卫（convention 之外唯一单独应用它的模块：application 不走
+    // autoscript.android-library 约定，android{} 里塞满装配特例）。
+    id("autoscript.test-guard")
 }
 
 // facade dist 随包的生成位（§12.4）：声明须在 android.sourceSets 引用之前（kts 顺序求值）。

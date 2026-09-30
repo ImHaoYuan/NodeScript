@@ -1,29 +1,10 @@
 plugins {
-    alias(libs.plugins.android.library)
-    alias(libs.plugins.kotlin.android)
+    id("autoscript.jvm")
 }
 
-android {
-    namespace = "com.autoscript.appservice.permissioncenter"
-    compileSdk = libs.versions.compileSdk.get().toInt()
-    defaultConfig { minSdk = libs.versions.minSdk.get().toInt() }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-    kotlinOptions { jvmTarget = "17" }
-    testOptions {
-        unitTests {
-            all { it.useJUnitPlatform() }
-        }
-    }
-}
-
+// 权限三态门禁、引导页、降级路径（docs §9.5）。
+// 纯 JVM（零 `import android.`，2026-09-30 起走 kotlin.jvm —— 系统查询/拉起由 :app 注入，本模块只做判定）。
 dependencies {
     implementation(project(":domain"))
     implementation(libs.kotlinx.coroutines.core)
-
-    testImplementation(libs.junit.jupiter)
-    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
-    testImplementation(libs.archunit.junit5)
 }

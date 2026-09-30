@@ -1,8 +1,6 @@
 package com.autoscript.appservice.permissioncenter
 
-import com.tngtech.archunit.core.domain.JavaClasses
-import com.tngtech.archunit.core.importer.ClassFileImporter
-import com.tngtech.archunit.lang.syntax.ArchRuleDefinition
+import com.autoscript.build.ArchGate
 import org.junit.jupiter.api.Test
 
 /**
@@ -13,26 +11,18 @@ import org.junit.jupiter.api.Test
 class ArchitectureTest {
 
     @Test
-    fun `permission-center 包零跨层泄漏`() {
-        val classes: JavaClasses =
-            ClassFileImporter().importPackages("com.autoscript.appservice.permissioncenter")
-
-        ArchRuleDefinition.noClasses()
-            .that().resideInAPackage("com.autoscript.appservice.permissioncenter..")
-            .should().dependOnClassesThat().resideInAnyPackage(
-                "android..",
-                "androidx..",
-                "com.autoscript.bridge..",
-                "com.autoscript.platform..",
-                "com.autoscript.engine..",
-                "com.autoscript.domain.engine..",
-                "com.autoscript.domain.bridge..",
-                "com.autoscript.domain.automation..",
-                "com.autoscript.appservice.runtime..",
-                "com.autoscript.appservice.scheduler..",
-                "com.autoscript.appservice.scriptrepo..",
-                "com.autoscript.appservice.packager..",
-            )
-            .check(classes)
-    }
+    fun `permission-center 包零跨层泄漏`() = ArchGate("com.autoscript.appservice.permissioncenter").noLeakTo(
+        "android..",
+        "androidx..",
+        "com.autoscript.bridge..",
+        "com.autoscript.platform..",
+        "com.autoscript.engine..",
+        "com.autoscript.domain.engine..",
+        "com.autoscript.domain.bridge..",
+        "com.autoscript.domain.automation..",
+        "com.autoscript.appservice.runtime..",
+        "com.autoscript.appservice.scheduler..",
+        "com.autoscript.appservice.scriptrepo..",
+        "com.autoscript.appservice.packager..",
+    )
 }

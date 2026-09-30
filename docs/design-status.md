@@ -40,6 +40,19 @@
 
 ## 流水（最新在上）
 
+### 2026-09-30 —— 外部审查整改·步骤 2/4 先行：build-logic 约定插件 + JVM 插件纠偏 + 共享架构门
+
+外部审查（8 步重构顺序）核实后按「2/4 先行、8 步全做、冲突项全盘照做」推进。本条记步骤 2 落地（§4.1/§6 构建面）：
+
+- **`build-logic/` 约定插件**（`includeBuild`，不入模块图、不计 15 模块）：`autoscript.jvm`（kotlin.jvm + JDK17 + JUnit5 + 共享架构门源 + 守卫）、`autoscript.android-library`（收编 12 处逐字重复的 `android{}` 公共段，namespace 留各模块）、`autoscript.test-guard`（:app 单独应用）。
+- **纯 JVM 插件纠偏**：`:app-service:{scheduler,permission-center,packager}` 从 `android.library` 改 `kotlin.jvm`（三者 `import android.` = 0，插件错配）；`:domain`/`:bridge:java`/`:app-service:runtime` 同步走 `autoscript.jvm`。**`:app-service:script-repo` 不转**（`AndroidAssetsSource` 有 `import android.`）。ci.yml L32 对应任务名 `testDebugUnitTest` → `test`。
+- **共享架构门 `ArchGate`**：约定注入 test 源集；8 个 `ArchitectureTest` 改薄壳（只声明本模块包 + 黑名单）；`:domain`/`:bridge:java`（`@ArchTest` 形）与 `:app`（例外量化形）保留自写。
+- **删 `tools/jvm-test.sh` + `tools/jvm-test-all.sh`**（裁定全盘照做）：本机快速门 = CI 同源 `./gradlew`；「aborted ≠ 绿」由 `TestGuard` 承接（skipped 即红；`ENV_GATED` 只放行设计上环境门禁的 `NpmCliDeployerTest`/`HostNodeNpmE2ETest`）。口径变更见 [`design-decisions.md`](design-decisions.md#已推翻--已改口径)。
+- **A2–A4 真机性能实测挂起**（原主线）：重构优先；image-native 新 `libopencv` artifact 已就绪（HAL 悬空符号修复 73e2ba0 后 CI 绿），恢复时从「下载 artifact → 推设备 → 跑 imgbench」续。
+
+12 任务（CI 同源行）本机全绿（2026-09-30）。
+
+
 ### 2026-09-30 —— A 组第一批实测（云手机，Android 13 / API 33 / arm64 / PAGE_SIZE=4096）
 
 生产布局（`e2e/lib/arm64-v8a/` + `e2e/files/bridge-addon/` + `files/node_modules/auto`，`LD_LIBRARY_PATH` 清空）复跑 + 三项新数。dist 与设备件同源（`console.js` md5 一致，未推新包）。

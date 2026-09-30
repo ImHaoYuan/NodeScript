@@ -1,6 +1,5 @@
 plugins {
-    alias(libs.plugins.android.library)
-    alias(libs.plugins.kotlin.android)
+    id("autoscript.android-library")
 }
 
 // :nodeN 进程宿主：Kotlin `NodeProcessEngine`（ScriptEngine 实现，spawn 缝 + pid/状态语义）
@@ -11,29 +10,10 @@ plugins {
 // libnoden/libnode/libc++_shared 三件齐才落包，半套红；addon 走 assets，§19 交付轨）。
 android {
     namespace = "com.autoscript.engine.nodeprocess"
-    compileSdk = libs.versions.compileSdk.get().toInt()
-    defaultConfig { minSdk = libs.versions.minSdk.get().toInt() }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-    kotlinOptions { jvmTarget = "17" }
 }
 
 dependencies {
     implementation(project(":bridge:native"))
     implementation(project(":domain"))
     implementation(libs.kotlinx.coroutines.core)
-
-    testImplementation(libs.junit.jupiter)
-    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
-    testImplementation(libs.archunit.junit5)
-}
-
-android {
-    testOptions {
-        unitTests {
-            all { it.useJUnitPlatform() }
-        }
-    }
 }
