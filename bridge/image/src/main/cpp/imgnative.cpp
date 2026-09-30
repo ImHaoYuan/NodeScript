@@ -72,6 +72,9 @@ std::unordered_map<int64_t, cv::Mat> g_frames;
 struct NeedlePrep {
     double sc = 1.0;
     cv::Mat small;
+    // 相位平均粗模板（2026-10-01）：粗筛**用它**互打，`small` 只留给相位探针当基准。
+    // 见 build_needle_prep 的「相位鲁棒粗模板」段。
+    cv::Mat small_avg;
     double phase_worst = -1.0;
 };
 std::mutex g_match_cache_mu;
@@ -164,12 +167,15 @@ struct MatchHit {
 //   AUTOSCRIPT_MATCH_MIN_TEMPL_SIDE=48    模板短边低于此值 → 精确路径
 //   AUTOSCRIPT_MATCH_MARGIN=0.10          粗筛候选带宽：提出 conf ≥ thr−margin 的峰
 //   AUTOSCRIPT_MATCH_MAX_CANDIDATES=8     精配候选数下限（自适应 K 的地板，见 kKMax）
-//   AUTOSCRIPT_MATCH_HEADROOM=0.05        相位门余量：floor = 带宽 + headroom（安全/速度旋钮）
+// 【2026-10-01 移除 `AUTOSCRIPT_MATCH_HEADROOM`】原 `floor = 带宽 + headroom`（0.05）
+// 的意图是"保守一点"，但实测它把「够得着带宽、只是最差相位余量薄」的模板也挡回
+// 精确路径 —— 300×150 全帧：带宽 0.75、相位 0.8086，floor 0.80 差 0.0086 被挡，
+// 单次 473~1467ms。而**粗筛只负责提名**（候选还要过带宽、坐标/置信度回原图重算），
+// 带宽之上再留余量是重复上保险，收益为 0、代价是一次全图精确匹配。现 floor == 带宽。
 struct MatchTune {
     int min_templ_side;
     double margin;
     int max_candidates;
-    double headroom;
 };
 
 int env_int(const char* key, int dflt) {
@@ -193,7 +199,6 @@ const MatchTune& match_tune() {
         env_int("AUTOSCRIPT_MATCH_MIN_TEMPL_SIDE", 48),
         env_double("AUTOSCRIPT_MATCH_MARGIN", 0.10),
         env_int("AUTOSCRIPT_MATCH_MAX_CANDIDATES", 8),
-        env_double("AUTOSCRIPT_MATCH_HEADROOM", 0.05),
     };
     return t;
 }
@@ -210,13 +215,17 @@ double coarse_margin_of(double sc) {
 // 粗筛；最终答案仍由原图精配，正确性门仍由 scale-cycle gate + differential test 守住。
 constexpr double kMinCoarseSide = 12.0;
 constexpr double kMinTemplStd = 12.0;
-// 相位探针参数（评审二轮，替掉静态 scale-cycle 门 0.8）：
+// 相位探针参数（评审二轮，替掉静态 scale-cycle 门 0.8；2026-10-01 第三轮改口径）：
 //   B        反射填充边宽（毫像素模板的一圈“假邻域”，让粗图带上下文）
-//   floor    = min(thr − 候选带宽 + headroom, 0.97) —— 门限**绑带宽**：静态 0.8 与
-//             thr 脱钩，脚本传高阈值（如 0.99）时带宽可到 0.84 > 门 → 放行了够不着
-//             带宽的模板 = 假漏检；相位分数按 thr 现比，这个洞就闭了。
+//   floor    = min(thr − 候选带宽, 0.97) —— 门限**就是带宽**。两轮演化都在收敛同
+//             一件事：门要问「这个模板在粗尺度上够不够得着提名线」，多一分余量都
+//             是白挡。（第一轮静态 0.8 与 thr 脱钩 → 高阈值假漏；第二轮绑了带宽
+//             但又 +0.05 headroom → 实测把相位 0.8086/带宽 0.75 的模板挡回精确
+//             路径 473ms，见 MatchTune 上的移除说明。）
 //   为什么测相位：假 miss 的机制是**子像素栅格相位错位**（i.i.d. 案例），对齐的
 //   「缩小→放大」自检测不出来；探针取各相位最差分 = 真位置的最坏粗分下界。
+//   2026-10-01 起探针量的是**相位平均模板**（粗筛实际用的那个），不是相位 0 的
+//   resize 产物 —— 见 build_phase_avg。
 constexpr int kPhaseBorder = 12;
 // 自适应 K（评审二轮）：精配总像素预算固定，窗面积小 → 放更多候选（≤kKMax）。
 // 对症重复峰：K=8 时 12 枚等价图标的真峰排第 9 就出局；窗小的时候多提名几乎免费。
@@ -241,20 +250,29 @@ MatchHit match_exact(const cv::Mat& h, const cv::Mat& n, double thr) {
  * （覆盖 0.25/0.5/0.75 三种错位），0.5× 只有半格相位。单次成本 = 模板尺寸量级
  * （370×80 九相位 ~几 ms），进 NeedlePrep 缓存后每模板只算一次。
  */
+cv::Mat phase_resample(const cv::Mat& gray, double sc, int dx, int dy) {
+    cv::Mat c;
+    cv::copyMakeBorder(gray, c, kPhaseBorder + dy, kPhaseBorder - dy + 4,
+                       kPhaseBorder + dx, kPhaseBorder - dx + 4, cv::BORDER_REFLECT);
+    cv::Mat cs;
+    cv::resize(c, cs, cv::Size(), sc, sc, cv::INTER_AREA);
+    return cs;
+}
+
+/** 相位 (dx,dy) 下「模板内容原点」在重采样图中的整数坐标（= 探针窗口的中心）。 */
+inline int phase_origin(double sc, int d) {
+    return static_cast<int>(std::lround((kPhaseBorder + d) * sc));
+}
+
 double phase_probe(const cv::Mat& gray, const cv::Mat& ns, double sc) {
     const int np = (sc <= 0.25) ? 3 : 1;
     double worst = 1.0;
     for (int dx = 1; dx <= np; ++dx) {
         for (int dy = 1; dy <= np; ++dy) {
-            cv::Mat c;
-            cv::copyMakeBorder(gray, c, kPhaseBorder + dy, kPhaseBorder - dy + 4,
-                               kPhaseBorder + dx, kPhaseBorder - dx + 4, cv::BORDER_REFLECT);
-            cv::Mat cs;
-            cv::resize(c, cs, cv::Size(), sc, sc, cv::INTER_AREA);
+            const cv::Mat cs = phase_resample(gray, sc, dx, dy);
             cv::Mat r;
             cv::matchTemplate(cs, ns, r, cv::TM_CCOEFF_NORMED);
-            const int tx = static_cast<int>(std::lround((kPhaseBorder + dx) * sc));
-            const int ty = static_cast<int>(std::lround((kPhaseBorder + dy) * sc));
+            const int tx = phase_origin(sc, dx), ty = phase_origin(sc, dy);
             const int x0 = std::max(tx - 2, 0), x1 = std::min(tx + 3, r.cols);
             const int y0 = std::max(ty - 2, 0), y1 = std::min(ty + 3, r.rows);
             if (x1 <= x0 || y1 <= y0) continue;
@@ -264,6 +282,57 @@ double phase_probe(const cv::Mat& gray, const cv::Mat& ns, double sc) {
         }
     }
     return worst;
+}
+
+/**
+ * 相位平均粗模板（2026-10-01，治「大模板全帧恒精确 1.4s」）—— 相位探针的同源推广。
+ *
+ * **测出来的病灶与一般直觉相反，先记下来**：粗筛的假 miss 不是粗模板"太好"，而是
+ * 粗模板**只对住了一个相位**。现状粗模板 = `resize(gray, sc)` 相位 0，等于赌"场景里
+ * 模板也落在相位 0"。真机实测（1080×2400，同一份 OpenCV）真位置各相位粗分：
+ *
+ *   300×150 @0.25   1.0000 / 0.9007 / **0.6926** / 0.8943   （相位 0/1/2/3）
+ *   300×150 @0.50   1.0000 / 0.8269 / ……                     ← 两个被采样的相位
+ *
+ * 相位 0 是 1.0（自匹配），可场景里的模板落在哪个相位是**未知的 nuisance 参数**：
+ * thr=0.9 时带宽 0.75，0.6926 够不着 → 提名层直接空手 → 回精确路径 473~1467ms。
+ * 相位探针之所以"准"正是因为它诚实地报出了这个最差相位；问题不在门，在**模板**。
+ *
+ * 修法 = 匹配滤波的标准解法：对 nuisance 参数做**平均**，而不是压成一个点。
+ * 把 16 个相位的粗图按内容原点对齐后取平均当粗模板 —— 场景无论落在哪个相位，
+ * 与这个"平均模板"的归一化互相关都不低于各相位分的中位附近（实测最差相位
+ * 0.6926 → 0.8086，抬 0.12；0.5× 档 0.8269 → 0.9514）。
+ *
+ * **风险与界的诚实交代**（探针 /tmp/ffix/pavg.cpp 给出）：
+ *   * 平均对**对齐/结构起支配**的模板（UI/文字/图标）抬相位地板；对 i.i.d. 高频
+ *     噪声模板（case6c 那种）会把结构抹平 —— 但那类模板**现状本来就该被挡回**
+ *     （相位 0 自匹配虚高 1.0，任何相位错位都塌），平均只是把"虚高 1.0"换成
+ *     "诚实的低分"，方向一致、不会制造假中。
+ *   * 粗分整体下移（best 1.0 → 0.97）：带宽是**绝对**阈值，所以提名会略保守；
+ *     精配仍按原 4 通道窗重算，报出的数字与精确路径一字不差（差分门逐字段钉）。
+ */
+cv::Mat build_phase_avg(const cv::Mat& gray, double sc, const cv::Size& out_size) {
+    // 尺寸取 `small`（相位 0 的 resize 产物）而不是自己 round(gray.cols*sc)：
+    // cv::resize 的目标尺寸用 cvRound（.5 向偶），lround（.5 远离零）会差 1 像素
+    // —— 粗模板与粗场景的尺寸口径必须是同一个（370×80 @0.25：92 vs 93）。
+    const int tw = out_size.width, th = out_size.height;
+    const int np = (sc <= 0.25) ? 4 : 2;   // 0.25× 采 {0,1,2,3}²；0.5× 只有半格相位 {0,1}²
+    cv::Mat acc = cv::Mat::zeros(th, tw, CV_32F);
+    int n = 0;
+    for (int dx = 0; dx < np; ++dx) {
+        for (int dy = 0; dy < np; ++dy) {
+            const cv::Mat cs = phase_resample(gray, sc, dx, dy);
+            const int ox = phase_origin(sc, dx), oy = phase_origin(sc, dy);
+            const cv::Rect r(ox, oy, tw, th);
+            if (r.x < 0 || r.y < 0 || r.br().x > cs.cols || r.br().y > cs.rows) continue;
+            acc += cs(r);
+            ++n;
+        }
+    }
+    if (n == 0) return cv::Mat();
+    cv::Mat out;
+    acc.convertTo(out, CV_8U, 1.0 / n);
+    return out;
 }
 
 /** 金字塔缩放：0.25×（首选，省 16× 像素）/ 0.5×（模板短边撑不起 0.25 时）/ 1.0 = 不走粗筛。 */
@@ -295,7 +364,14 @@ NeedlePrep build_needle_prep(const cv::Mat& n) {
     // 相位探针：算「真位置在最坏栅格相位下能拿的粗分」（与 thr 无关 → 可缓存）；
     // 按 thr 比带宽的落地判断在 imgnative_match 每调用做（NaN 即精确路径）。
     cv::resize(gray, out.small, cv::Size(), sc, sc, cv::INTER_AREA);
-    out.phase_worst = phase_probe(gray, out.small, sc);
+    // 粗筛用相位平均模板（见 build_phase_avg）。**探针必须量同一个模板** —— 否则
+    // 门问的是「拿相位 0 模板能得多少分」，实际跑的却是平均模板，两者脱节（这正是
+    // 本轮修的第一版：平均模板已经把 300×150 的最差相位从 0.6926 抬到 0.8086，
+    // 门却还按 0.7180 的老数挡人）。构造失败（尺寸不齐）就退回相位 0 的 small：
+    // 粗筛仍旧能跑，只是回到「赌相位 0」的旧行为，探针与之一致。
+    out.small_avg = build_phase_avg(gray, sc, out.small.size());
+    if (out.small_avg.empty()) out.small_avg = out.small;
+    out.phase_worst = phase_probe(gray, out.small_avg, sc);
     out.sc = sc;
     // 只保留粗筛真正需要的缩小模板；灰度原图不需要跨调用保存。
     return out;
@@ -370,7 +446,9 @@ MatchHit match_pyramid(const cv::Mat& h, const cv::Mat& n, double thr, const Nee
         cv::cvtColor(h, hg, cv::COLOR_BGRA2GRAY);
         cv::resize(hg, hs, cv::Size(), sc, sc, cv::INTER_AREA);
     }
-    const cv::Mat& ns = prep.small;
+    // 粗筛模板 = 相位平均版（见 build_phase_avg）：提名层对「场景落在哪个子像素
+    // 相位」不再赌 0。尺寸与 small 同解，探针的语义/阈值一字未动。
+    const cv::Mat& ns = prep.small_avg.empty() ? prep.small : prep.small_avg;
     if (ns.cols > hs.cols || ns.rows > hs.rows) return match_exact(h, n, thr);
 
     cv::Mat r;
@@ -612,13 +690,15 @@ int imgnative_match(int64_t haystack, int64_t needle, double threshold,
         const bool force_exact = g_force_exact.load(std::memory_order_relaxed);
         const NeedlePrep prep = force_exact ? NeedlePrep{} : get_needle_prep(needle, n);
         // 相位门按 thr 落地（分数已在缓存，这里只是一次比较；NaN → 精确路径）：
-        // floor = min(thr − 候选带宽 + headroom, 0.97) —— 门限绑带宽，静态 0.8
-        // 在高阈值下会放行够不着带宽的模板（假漏检），这里按调用方的 thr 现比。
+        // floor = min(thr − 候选带宽, 0.97) = **提名线本身** —— 门只问一句「这个
+        // 模板在粗尺度上够不够提名线」，够就走粗筛。**不做假中风险**：粗筛层只
+        // 提名，候选仍要过同一条带宽，报出的坐标/置信度全部回原 4 通道窗重算，
+        // 阈值语义与精确路径一字不差（差分门 host_match_test 逐字段对拍）。
+        // 门挡错了的代价是不对称的：放行 = 最坏退化成精确路径（还是同一答案，见
+        // match_pyramid 的兜底），挡回 = 白付一次全图 matchTemplate（实测 473~1500ms）。
         bool use_pyramid = false;
         if (!force_exact && prep.sc < 1.0) {
-            const MatchTune& tune = match_tune();
-            const double floor =
-                std::min(threshold - coarse_margin_of(prep.sc) + tune.headroom, 0.97);
+            const double floor = std::min(threshold - coarse_margin_of(prep.sc), 0.97);
             use_pyramid = prep.phase_worst >= floor;
         }
         const MatchHit hit = use_pyramid ? match_pyramid(h, n, threshold, prep, haystack, full_frame)
