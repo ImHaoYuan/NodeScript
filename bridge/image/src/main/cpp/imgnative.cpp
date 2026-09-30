@@ -325,7 +325,9 @@ MatchHit match_pyramid(const cv::Mat& h, const cv::Mat& n, double thr, const Nee
     // 精配窗：粗坐标除以缩放比映回原图（截断误差 < 1/sc 原图像素 + resize 舍入），
     // pad 取 ceil(1/sc)·kPadk+2 盖住这两项（kPadk=3 比 2 多留一档量化余量）。
     // 窗是视图不拷像素；裁边后宽度恒 ≥ 模板边（左右对称收缩），不会触发断言。
-    const int pad = static_cast<int>(std::ceil(1.0 / sc)) * kPadk + 2;
+    // 非常量：FastPath（见下）在「唯一高置信」时把 pad 收窄一档；win_area/K 仍按
+    // 常态 pad 算（精配预算按保守窗估，与收窄无关）。
+    int pad = static_cast<int>(std::ceil(1.0 / sc)) * kPadk + 2;
 
     // Top-K + NMS：迭代取全局峰 → 局部窗置 −1 → 取下一个（重复 UI 行/图标格
     // 会给出一排近等高峰，NMS 不压则名额被同一个小区域占满）。K 按精配预算自适应
@@ -338,6 +340,7 @@ MatchHit match_pyramid(const cv::Mat& h, const cv::Mat& n, double thr, const Nee
                            std::max(t.max_candidates,
                                     static_cast<int>(std::lround(kRefineBudget / win_area))));
     std::vector<cv::Point> cands;
+    double first_conf = 0.0;
     const int supp = std::max(ns.cols, ns.rows) / 2 + 1;
     const cv::Rect bounds(0, 0, r.cols, r.rows);
     for (int k = 0; k < K; ++k) {
@@ -345,11 +348,27 @@ MatchHit match_pyramid(const cv::Mat& h, const cv::Mat& n, double thr, const Nee
         cv::Point loc;
         cv::minMaxLoc(r, nullptr, &mx, nullptr, &loc);
         if (mx < thr - coarse_margin) break;
+        if (cands.empty()) first_conf = mx;
         cands.push_back(loc);
         r(cv::Rect(loc.x - supp, loc.y - supp, 2 * supp + 1, 2 * supp + 1) & bounds)
             .setTo(-1.0f);
     }
 
+    // FastPath（12a，2026-10-01）：粗筛提名**唯一** + **高置信** → 精配窗收窄一档。
+    //   唯一性 = NMS 后全图只有一个过带宽候选（cands.size()==1 已含「第二个峰过
+    //   不了带宽」，探针 370×80：peak1=0.979、NMS 后 peak2=0.728 < 带宽 0.75）。
+    //   高置信 = 主峰 ≥ thr + 0.05（0.25× 量化余量；370×80 实测粗峰 0.979 vs
+    //   带宽 0.75，余量 0.23 远足）。常态 pad 给次峰余量，唯一候选不需要：
+    //   收窄后的 pad = ceil(1/sc)·1+2 仍盖住粗坐标回映误差（< 1/sc 原图像素）+
+    //   resize 舍入。**不变式**：精配仍在原 4 通道窗内重算，只改「窗多大」不改
+    //   「报什么」—— 差分门对 fast 路径逐字段比对（位置 + |Δconf| ≤ 2e-3）。
+    //   收窄 pad 的 CCOEFF 归一化分母随窗缩略有变化，conf 微移；探针实测
+    //   pad 10→6 在 370×80 上 conf 仍 1.0000 同位（饱和区，漂移 < 1e-4）。
+    //   与 kPadk=3 的关系：常态 pad = ceil(1/sc)·kPadk+2（上面已声明）；FastPath
+    //   的收窄 pad = ceil(1/sc)·1+2 是「唯一高置信候选」专用的一档，其余情形不变。
+    if (cands.size() == 1 && first_conf >= thr + 0.05) {
+        pad = static_cast<int>(std::ceil(1.0 / sc)) * 1 + 2;
+    }
     const cv::Rect frame(0, 0, h.cols, h.rows);
     MatchHit best{false, {0, 0}, -1.0};
     for (const cv::Point& c : cands) {

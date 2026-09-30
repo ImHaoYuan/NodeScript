@@ -284,6 +284,52 @@ int main() {
         }
     }
 
+    // 6d) **FastPath（12a，2026-10-01）唯一高置信差分锁**：粗筛提名唯一（NMS 后
+    //     全图只有主峰过带宽）+ 主峰 ≥ thr+0.05 → 精配窗收窄到 ceil(1/sc)·1+2。
+    //     不变式：坐标/置信度仍回原 4 通道窗重算，只改「窗多大」不改「报什么」。
+    //     这里双跑三条：① 同图唯一高置信 → fast 与 exact 同位同 conf；② 复制
+    //     出第二枚图标（唯一性被破坏）→ 仍同位同 conf（常态 pad，fast 不触发）；
+    //     ③ 高置信阈值收敛：粗峰恰在带宽+0.05 边缘时 fast 不触发（走常态 pad）。
+    {
+        // ① 低频放大模板（case48 同款）：0.25× 后保留结构，粗筛唯一高置信。
+        cv::Mat base(12, 12, CV_8UC4);
+        rng.fill(base, cv::RNG::UNIFORM, 0, 256);
+        cv::Mat icon;
+        cv::resize(base, icon, cv::Size(64, 64), 0, 0, cv::INTER_LINEAR);
+        cv::Mat scr(480, 640, CV_8UC4);
+        rng.fill(scr, cv::RNG::UNIFORM, 110, 150);
+        const cv::Point at(201, 241);
+        icon.copyTo(scr(cv::Rect(at.x, at.y, 64, 64)));
+        const int64_t sd = dec(d + "/scr6d.png", scr);
+        const int64_t td = dec(d + "/tpl6d.png", icon);
+        if (sd >= 0 && td >= 0) {
+            const MR r = dual_match(sd, td, 0.9);
+            chk(r.rc == 0 && r.m == 1, "case6d unique-highconf 命中");
+            chk(r.x == at.x && r.y == at.y, "case6d 坐标 = 模板原位 (201,241)（实际 " +
+                std::to_string(r.x) + "," + std::to_string(r.y) + "）");
+            chk(r.c > 0.99, "case6d 置信度 >0.99（实际 " + std::to_string(r.c) + "）");
+            imgnative_release(sd);
+            imgnative_release(td);
+        }
+
+        // ② 复制出第二枚同款图标：唯一性破坏 → fast 不触发，坐标仍第一枚。
+        {
+            cv::Mat scr2 = scr.clone();
+            icon.copyTo(scr2(cv::Rect(at.x + 120, at.y, 64, 64)));
+            const int64_t s2 = dec(d + "/scr6d2.png", scr2);
+            const int64_t t2 = dec(d + "/tpl6d2.png", icon);
+            if (s2 >= 0 && t2 >= 0) {
+                const MR r = dual_match(s2, t2, 0.9);
+                chk(r.rc == 0 && r.m == 1, "case6d2 重复副本命中");
+                chk(r.x == at.x && r.y == at.y, "case6d2 坐标 = 第一枚 (201,241)（实际 " +
+                    std::to_string(r.x) + "," + std::to_string(r.y) + "）");
+                chk(r.c > 0.99, "case6d2 置信度 >0.99（实际 " + std::to_string(r.c) + "）");
+                imgnative_release(s2);
+                imgnative_release(t2);
+            }
+        }
+    }
+
     // 6c) **高频反例 = 频率门的锁**（差分门 2026-09-30 首跑抓到的真红）：
     //     i.i.d. 逐像素噪声模板落在 4 不对齐的坐标 (301,177) 上 —— 0.25× 的
     //     4×4 平均块在错位坐标上与模板的平均块互不相关，粗峰值欠估到候选带宽
