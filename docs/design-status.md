@@ -40,6 +40,20 @@
 
 ## 流水（最新在上）
 
+### 2026-09-30 —— 外部审查整改·步骤 3：JSON 只留一个（DomainJson 合一）
+
+（§7.5 编解码面；选型拍板见 [`design-decisions.md`](design-decisions.md) 已拍板第 11 项）五子步各一提交：
+
+- **3a（f585c97）**：`NpmBridgeJson`（256 行）并入 `DomainJson` —— 字段读取族 `reqStr/reqObj/optStr/optLong/optBool/optStrList` 落位 `:domain`（KDoc 注明与 `bridge.Decode` 扩展同口径）；npm handler 30 处 + 测试 2 处调用换 `DomainJson.`。
+- **3b（da39278）**：`EngineBridgeJson`（221 行）并入 —— engines handler 22 处 + 测试 41 处 + A11y KDoc 提及随迁。
+- **3c（9ee1b19）**：`WorkManagerNamespaceHandler` 内联 `WmJson`（~180 行）并入 —— WM 27 处 + `quote(`→`encode(`；`:app:testDebugUnitTest`（带 env）绿。
+- **3d（8f9f885）**：`TinyJson`（152 行）删除 —— `JsonTransport` 编解码走 `DomainJson.encode(mapOf…)`/`decodeObject`，新增 `internal decodeFlat(text, allowed)` 承接原白名单语义（未知字段如实拒绝 = 传输层协议纪律，非 codec 能力）；`payloadOrNull`/`detailOrNull` 补 else 分支（六值族下裸对象/布尔照样整帧 IAE，「字符串|null」契约逐字不变）；`ConsoleCollector` 及其测试同步换 `decodeFlat`/`encode`。
+- **3e（d295ee9）**：`JsonLine`（149 行递归下降 Parser 整删，薄件 ~80 行）—— `parse` = `DomainJson.decodeObject` + 逐值 unwrap 到冻结行格式四型（布尔/嵌套对象照旧响亮拒绝），codec 的 IAE 一律包 IOException（「行损坏」错误类型与消费方 try/catch 口径不变）；`quote/quoteAll` → `DomainJson.encode`（转义族是超集，多 `\b` 与 `\uXXXX`）；字段强类型读取族（`str/long/optLong/optStr/optStrList`）原样保留。`:app-service:scheduler:test` 金样全绿。
+- **收尾断言**：5 个 codec 对象（`TinyJson|A11yBridgeJson|NpmBridgeJson|EngineBridgeJson|WmJson`）全仓 `grep` 清零；`JsonLine` 保留为协议薄件（拍板第 11 项边界，其 `Parser` 内类已删）；`:domain` 新增 `DomainJsonTest`（6 用例：转义族 round-trip 含超集 b/f/u 与裸控制符、结构 round-trip、读者族宽容/拒绝面、非法输入 IAE 面、`encodeParsed` 数字原文透传——`1.50`/大整数不被 Double 化）。
+- **兼容边（本步骤唯一行为收紧）**：`DomainJson.parseString` 拒未转义控制字符、`decode` 查尾部多余字符 —— 存量含裸控制符的 journal 行、带尾随垃圾的帧从「被接受」变「IAE/IOException 响亮拒绝」；测试面无依赖旧行为的用例。
+- **验证**：`:bridge:java:test`、`:app-service:scheduler:test`、`:domain:test` 各子步绿；收尾 CI 同源 12 任务 + `bridge/js` npm test 全绿（2026-09-30，同批核验）。
+
+
 ### 2026-09-30 —— 外部审查整改·步骤 1：机器路径 18 处清零 + 原生暂存入约定 + `:engine:sandbox` 空壳摘除
 
 （审查断言「硬编码路径 18 处」按 kts 6 + build-native.sh 6 + run-host-tests.sh 6 精确核实后全清；§4.1/§6 构建面）
