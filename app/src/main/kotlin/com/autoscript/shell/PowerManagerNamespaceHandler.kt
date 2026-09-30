@@ -3,6 +3,7 @@ package com.autoscript.shell
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.bridge.RpcNamespaceHandler
+import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
 
@@ -51,8 +52,8 @@ class PowerManagerNamespaceHandler(
 
     private fun payload(request: BridgeRequest): String? {
         return when (request.method) {
-            "acquire" -> acquire(WmJson.decodeObject(requirePayload(request)))
-            "release" -> release(WmJson.decodeObject(requirePayload(request)))
+            "acquire" -> acquire(DomainJson.decodeObject(requirePayload(request)))
+            "release" -> release(DomainJson.decodeObject(requirePayload(request)))
             "status" -> status()
             else -> throw AutojsException(
                 ErrorCode.ERR_NOT_IMPLEMENTED, "未知 power_manager 方法: ${request.method}",
@@ -60,8 +61,8 @@ class PowerManagerNamespaceHandler(
         }
     }
 
-    private fun acquire(f: Map<String, WmJson.Value>): String {
-        val timeoutMillis = (f["timeoutMillis"] as? WmJson.Value.N)?.raw?.toLongOrNull()
+    private fun acquire(f: Map<String, DomainJson.Value>): String {
+        val timeoutMillis = (f["timeoutMillis"] as? DomainJson.Value.N)?.raw?.toLongOrNull()
             ?: throw IllegalArgumentException("acquire 需要正整数 timeoutMillis（脚本锁必须限时，无期限只属框架）")
         if (timeoutMillis <= 0) {
             throw IllegalArgumentException("timeoutMillis 必须 > 0（0/负数等于要求立刻过期，疑似漏配），实际 $timeoutMillis")
@@ -76,16 +77,16 @@ class PowerManagerNamespaceHandler(
         // 补拉/收敛幂等：生产 ticker 常转时本调用无动作；冷沿时把服务补起来。
         // 返回的动作只作诊断 —— acquire 的成败只由上面的 hold 决定。
         keepalive?.renew()
-        return WmJson.encode(mapOf("token" to token))
+        return DomainJson.encode(mapOf("token" to token))
     }
 
-    private fun release(f: Map<String, WmJson.Value>): String {
-        val token = WmJson.reqStr(f, "token").takeIf { it.isNotBlank() }
+    private fun release(f: Map<String, DomainJson.Value>): String {
+        val token = DomainJson.reqStr(f, "token").takeIf { it.isNotBlank() }
             ?: throw IllegalArgumentException("token 不得为空白（空白 token 找不到持有方）")
         return ledger.release(token).toString()
     }
 
-    private fun status(): String = WmJson.encode(
+    private fun status(): String = DomainJson.encode(
         mapOf("held" to ledger.isHeld(), "holders" to ledger.heldTokens().size),
     )
 
