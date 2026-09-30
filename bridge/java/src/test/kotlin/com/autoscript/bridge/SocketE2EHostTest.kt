@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 /**
- * 真 socket E2E（docs/framework-design.md §7.5）：宿主 Node（bridge/js dist）
+ * 真 socket E2E（docs §7.5）：宿主 Node（bridge/js dist）
  * 经 loopback TCP ↔ 本 JVM 的 [NewlineFrameServer]+[BridgeRouter]+[ConsoleCollector]。
  *
  * 为什么不用 unix domain socket：本机 JDK 17（java.net.UnixDomainSocketAddress

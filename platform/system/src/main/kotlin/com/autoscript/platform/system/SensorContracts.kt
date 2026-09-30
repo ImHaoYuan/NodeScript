@@ -3,7 +3,7 @@ package com.autoscript.platform.system
 import com.autoscript.domain.bridge.HandleRef
 
 /**
- * `sensors` 命名空间契约（docs/framework-design.md §12.2；JS 对偶 `auto.sensors`，
+ * `sensors` 命名空间契约（docs §12.2；JS 对偶 `auto.sensors`，
  * 对标 AutoJsPro v9 `sensors.register/unregister/unregisterAll` + `SensorDelay` 四档）。
  *
  * 2026-09-30 审查步骤 6 自 `:domain` 迁入本模块（grep 判据同 [ClipboardContracts]）——

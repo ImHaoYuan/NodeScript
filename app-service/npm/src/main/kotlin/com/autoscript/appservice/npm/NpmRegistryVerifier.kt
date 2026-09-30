@@ -6,7 +6,7 @@ import java.net.URI
 import java.nio.charset.StandardCharsets
 
 /**
- * 多镜像 integrity 交叉校验（docs/framework-design.md §10.5-1）。
+ * 多镜像 integrity 交叉校验（docs §10.5-1）。
  *
  * 补的洞：npm 的 lock integrity 只锁**注册表内容**，锁不住「这个镜像给我的那份
  * 是不是官方那份」——一份第三方 lock 把包名指到别处也照样验得过（故另有

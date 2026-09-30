@@ -7,7 +7,7 @@ import com.autoscript.appservice.scheduler.core.TriggerSource
 import java.nio.file.Path
 
 /**
- * 意图日志原子存储操作（docs/framework-design.md §8.5「append-only + 崩溃持久」的最小接缝）。
+ * 意图日志原子存储操作（docs §8.5「append-only + 崩溃持久」的最小接缝）。
  *
  * 本接口是「意图日志语义」与「存储引擎」之间的唯一边界：
  * - JVM 本机/单测 → [JournalFileStore]（jsonl 追加 + fsync + 启动 replay）；

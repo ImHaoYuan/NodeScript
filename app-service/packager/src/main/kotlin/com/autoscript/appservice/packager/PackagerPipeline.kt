@@ -7,7 +7,7 @@ import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 
 /**
- * 打包管线装配器（docs/framework-design.md §14 P0「打包：模板 APK 改装 + 签名向导」）。
+ * 打包管线装配器（docs §14 P0「打包：模板 APK 改装 + 签名向导」）。
  *
  * 管线三个阶段（设计 §6 模块职责：模板 APK 改写、签名向导）：
  * 1. **模板复制**：[templateApk] → 工作目录（保留原始模板，防重复打包互相污染）；

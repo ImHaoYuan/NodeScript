@@ -19,7 +19,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 /**
- * npm 生产装配（docs/framework-design.md §10.2 存储布局 + §12.2 接线现状）。
+ * npm 生产装配（docs §10.2 存储布局 + §12.2 接线现状）。
  *
  * 把散在各处的目录约定收到一处（调用方只给 `filesDir`/`cacheDir`，不再逐个拼路径），
  * 产出直接喂 `AppShell.assemble(npmHandler = …)` 的挂载缝。纯 JVM、无 Android，

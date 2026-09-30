@@ -1,7 +1,7 @@
 package com.autoscript.platform.system
 
 /**
- * `settings` 系统设置契约（docs/framework-design.md §9.6，JS 对偶待建 `auto.settings`）。
+ * `settings` 系统设置契约（docs §9.6，JS 对偶待建 `auto.settings`）。
  *
  * 2026-09-30 审查步骤 6 自 `:domain` 迁入本模块（grep 判据同 [ClipboardContracts]）——
  * 与 [ZipArchiver] 同批；`com.autoscript.domain.storage.DataStore` 反例留 `:domain`

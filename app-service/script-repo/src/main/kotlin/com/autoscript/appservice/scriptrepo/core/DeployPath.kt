@@ -7,7 +7,7 @@ import java.nio.file.StandardOpenOption
 import java.security.MessageDigest
 
 /**
- * 部署目录/路径安全（docs/framework-design.md §9.6：assets→filesDir 原子部署 + 防逃逸）。
+ * 部署目录/路径安全（docs §9.6：assets→filesDir 原子部署 + 防逃逸）。
  * 全部相对路径写入前必须过 [isSafeRelPath] 与 [resolveIn]。
  */
 object DeployPath {

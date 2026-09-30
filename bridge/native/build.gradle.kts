@@ -3,7 +3,7 @@ plugins {
 }
 
 // C++ N-API addon 控制面 + libnode.so 装载（:nodeN 进程宿主引用）。
-// CI 构建；见 docs/framework-design.md §7.3。externalNativeBuild 由 :engine:node-process 集成时统一接入。
+// CI 构建；见 docs §7.3。externalNativeBuild 由 :engine:node-process 集成时统一接入。
 android {
     // namespace 不能含 Java 关键字 `native`（AGP 校验拒绝 com.autoscript.bridge.native）。
     // 模块路径 :bridge:native 由 §6 模块表冻结，此处只取合法包名变体；本模块零 JVM 源码（纯 C++），

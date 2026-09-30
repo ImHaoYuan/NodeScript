@@ -5,7 +5,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * 句柄注册表（generation + tombstone，docs/framework-design.md §7.4）。
+ * 句柄注册表（generation + tombstone，docs §7.4）。
  *
  * JS 侧代理对象持 HandleRef(refId, generation)；每次 acquire 提升 generation，
  * 使旧代理立即失效（ERR_STALE_HANDLE）；release 落 tombstone 拒绝后续访问；

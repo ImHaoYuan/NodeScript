@@ -35,7 +35,7 @@ const ROOT = (() => {
   throw new Error('找不到仓库根')
 })()
 
-const DOC = fs.readFileSync(path.join(ROOT, 'docs/framework-design.md'), 'utf8')
+const DOC = fs.readFileSync(path.join(ROOT, 'docs/design/12-js-api.md'), 'utf8')
 const SCHEMA = JSON.parse(fs.readFileSync(path.join(ROOT, 'bridge/schema/wire.schema.json'), 'utf8'))
 
 /** §12.2 接线现状表：从表头到第一个空行（后面是散文，混不得）。 */

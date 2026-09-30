@@ -3,7 +3,7 @@ package com.autoscript.domain.scripts
 import java.nio.file.Path
 
 /**
- * 脚本目录约定（docs/framework-design.md §9.6 / §10.2 的**单一事实来源**）。
+ * 脚本目录约定（docs §9.6 / §10.2 的**单一事实来源**）。
  *
  * 为什么这条约定必须住 `:domain` 而不是各模块各写一份：项目根这一个字符串被四个地方读
  * —— `:app-service:script-repo`（部署/索引）、`:app-service:npm`（npm 项目布局）、

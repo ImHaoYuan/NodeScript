@@ -1,7 +1,7 @@
 package com.autoscript.domain.engine
 
 /**
- * 引擎生命周期状态机（docs/framework-design.md §8）。
+ * 引擎生命周期状态机（docs §8）。
  * 纯逻辑：RuntimeController / ScriptEngine 实现方驱动，非法转移抛 [IllegalStateTransition]。
  *
  * IDLE → BOOTING → RUNNING → QUIESCING → STOPPED → IDLE（回收复用）

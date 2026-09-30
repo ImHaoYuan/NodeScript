@@ -6,7 +6,7 @@ import com.autoscript.domain.engine.ScriptEngine
 import com.autoscript.domain.engine.StopResult
 
 /**
- * 引擎进程池契约（docs/framework-design.md §8.1/§8.2）：
+ * 引擎进程池契约（docs §8.1/§8.2）：
  * 进程池 + 每脚本一进程；并发上限 = 池容量，超载排队（§8.6：绝不静默丢任务）。
  * 槽位宿主即 [ScriptEngine]（:engine:node-process 实现），本层只做生命周期仲裁。
  */

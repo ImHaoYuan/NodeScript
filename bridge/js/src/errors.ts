@@ -1,5 +1,5 @@
 /**
- * 错误目录（docs/framework-design.md §7.6 / §12.1）。
+ * 错误目录（docs §7.6 / §12.1）。
  * 与 :domain 的 ErrorCode 目录一一致：JS 侧 instanceof AutojsError 可策略化 try/catch。
  * 新增错误码需同步 §7.6 与 :domain:core.ErrorCode。
  */

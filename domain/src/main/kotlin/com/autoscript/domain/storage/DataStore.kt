@@ -1,7 +1,7 @@
 package com.autoscript.domain.storage
 
 /**
- * `datastore` 领域契约（docs/framework-design.md §9.6）：SQLite-backed KV +
+ * `datastore` 领域契约（docs §9.6）：SQLite-backed KV +
  * serializer 适配（JSON / native 对象 / byte）、事务语义。
  *
  * 为什么住 `:domain`：真实现要碰 SQLite（Android），§6 要求 `:platform:*` 只依赖

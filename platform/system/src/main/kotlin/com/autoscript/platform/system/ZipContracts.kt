@@ -3,7 +3,7 @@ package com.autoscript.platform.system
 import java.nio.file.Path
 
 /**
- * `zip` 归档契约（docs/framework-design.md §9.6，JS 对偶待建 `auto.zip`）。
+ * `zip` 归档契约（docs §9.6，JS 对偶待建 `auto.zip`）。
  *
  * 2026-09-30 审查步骤 6 自 `:domain` 迁入实现同模块 `:platform:system`（grep 判据：
  * 仅 handler+impl 消费）—— 契约与 `JdkZipArchiver` 实现仍切两类型：「要什么操作」

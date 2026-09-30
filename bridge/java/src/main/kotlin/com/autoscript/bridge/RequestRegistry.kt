@@ -8,7 +8,7 @@ import com.autoscript.domain.core.SystemClock
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * 请求注册表（TTL 语义，docs/framework-design.md §7.5）。
+ * 请求注册表（TTL 语义，docs §7.5）。
  *
  * 职责：
  * - register：requestId → 待完成请求 + 到期时间（TTL 默认 [DEFAULT_TTL_MILLIS]）；

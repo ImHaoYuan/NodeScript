@@ -9,7 +9,7 @@ import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
 /**
- * lockfile 带外签名（docs/framework-design.md §10.5-1 · `files/.autojs/lock.sig`）。
+ * lockfile 带外签名（docs §10.5-1 · `files/.autojs/lock.sig`）。
  *
  * 防的是什么：npm 的 lock integrity 只锁**注册表内容**（tarball sha512），锁不住
  * 「这份 lock 是不是本机认可的」——第三方/市场项目塞一份把包名指到别处的 lock，

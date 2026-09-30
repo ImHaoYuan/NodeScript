@@ -8,7 +8,7 @@ import java.nio.file.StandardOpenOption
 import java.util.Base64
 
 /**
- * 精选缓存种子部署器（docs/framework-design.md §10.2 存储布局 · `cacheDir/npm-cache-seed`，
+ * 精选缓存种子部署器（docs §10.2 存储布局 · `cacheDir/npm-cache-seed`，
  * §10.11 P0「精选缓存种子 + 离线首装 + `--prefer-offline`」）。
  *
  * **首启播种面**（§10.9 UX 6「原子部署 assets/npm CLI + 播种精选缓存」）：

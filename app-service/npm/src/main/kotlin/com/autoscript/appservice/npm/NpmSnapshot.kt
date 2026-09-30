@@ -18,7 +18,7 @@ import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
 
 /**
- * 高信任快照导出/验签（docs/framework-design.md §10.9.4 + §10.7 [SnapshotRef]）。
+ * 高信任快照导出/验签（docs §10.9.4 + §10.7 [SnapshotRef]）。
  *
  * 产物 = `node_modules.zip`（含 `package.json` + `package-lock.json` + `node_modules` 全树
  * + `ledger/` 审批账本/审计史 + 随包同行的 `lock.sig`），外加一条 `snapshot.sig`：

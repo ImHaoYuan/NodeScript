@@ -3,7 +3,7 @@ package com.autoscript.bridge
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * 事件总线（seq 游标 + 有界背压，docs/framework-design.md §7/§9.1 UiEventStream 对齐）。
+ * 事件总线（seq 游标 + 有界背压，docs §7/§9.1 UiEventStream 对齐）。
  *
  * 语义：
  * - 每 topic 一条按 seq 递增的有界历史；消费者持自己的游标，drain(topic, sinceSeq) 拉取增量；

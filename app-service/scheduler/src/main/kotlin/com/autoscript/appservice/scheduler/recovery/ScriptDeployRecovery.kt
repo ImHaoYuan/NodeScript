@@ -6,7 +6,7 @@ import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 
 /**
- * 装配期的脚本补部署（docs/framework-design.md §9.6：`files/scripts/<projectId>/` 标准化）。
+ * 装配期的脚本补部署（docs §9.6：`files/scripts/<projectId>/` 标准化）。
  *
  * **它补的是哪条缝**：调度侧的持久化只覆盖「任务排期」与「未完成意向」两个寄存器，
  * 都不含**脚本内容**。而 `filesDir` 在真机上会被清（用户"清除数据"、系统回收空间、

@@ -1,7 +1,7 @@
 package com.autoscript.domain.bridge
 
 /**
- * 跨进程桥消息契约（docs/framework-design.md §7.4/§7.5）。
+ * 跨进程桥消息契约（docs §7.4/§7.5）。
  * 控制面：小对象走 JSON；大二进制（Bitmap/像素）走 §7.4 ByteBuffer 直传通道，不入本 payload。
  */
 data class BridgeRequest(

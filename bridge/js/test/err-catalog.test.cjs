@@ -4,7 +4,7 @@
  *
  * 目录有三处落字：`:domain` `core/Error.kt` 的 `ErrorCode` 枚举（宿主抛码的唯一出处）、
  * `src/errors.ts` 的 `ErrCode` const enum + `ERROR_CODES` 字面量表（同文件两份手工同步，
- * const enum 编译期内联所以运行期只剩 ERROR_CODES）、以及 `docs/framework-design.md`
+ * const enum 编译期内联所以运行期只剩 ERROR_CODES）、以及 `docs/design/*.md`（拼接）
  * 散文里提到的码（示例/口径都引用它）。三处都是手工维护，跨语言那次同步历史上
  * 已经漂过一次：`ERR_IO` 在 Kotlin 与全部宿主/文档里服役多时，JS 目录独缺——
  * 脚本 `ERROR_CODES.includes('ERR_IO')` 为 false，而宿主天天抛它。
@@ -36,7 +36,12 @@ const KT = fs.readFileSync(
   'utf8',
 )
 const TS = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'errors.ts'), 'utf8')
-const DOC = fs.readFileSync(path.join(ROOT, 'docs/framework-design.md'), 'utf8')
+const DOC = fs
+  .readdirSync(path.join(ROOT, 'docs', 'design'))
+  .filter((f) => f.endsWith('.md'))
+  .sort()
+  .map((f) => fs.readFileSync(path.join(ROOT, 'docs', 'design', f), 'utf8'))
+  .join('\n')
 const { ERROR_CODES } = require(path.resolve(__dirname, '..', 'dist', 'index.js'))
 
 /** `ERR_X` / `ERR_X_1` 这种整码；`ERR_`、`ERR_NPM_` 这类前缀片段不算（词边界挡掉尾下划线）。 */

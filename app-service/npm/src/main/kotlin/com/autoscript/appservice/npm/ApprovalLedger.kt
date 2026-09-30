@@ -10,7 +10,7 @@ import com.autoscript.domain.npm.PackageManagerFacade
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * 审批账本（docs/framework-design.md §10.5 人机分离）：
+ * 审批账本（docs §10.5 人机分离）：
  *
  * - [requestApprove] 只入队（PENDING），永不执行；
  * - [resolveApproval] 仅 UI 审批卡回调可携人工决定落账——PENDING→APPROVED/REJECTED 单向；

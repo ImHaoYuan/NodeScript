@@ -7,7 +7,7 @@ import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
 
 /**
- * vendored npm CLI 部署器（docs/framework-design.md §10.2 存储布局 · `files/npm/`）：
+ * vendored npm CLI 部署器（docs §10.2 存储布局 · `files/npm/`）：
  * assets 里的 npm CLI（~8–9MB）**原子部署**到 filesDir（tmp 写逐文件 + 全量 sha256 校验 + rename）。
  *
  * 幂等（防每次开机重复解 9MB）：目标 `bin/npm-cli.js` 旁写 `.cli-manifest.sha256`

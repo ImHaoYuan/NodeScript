@@ -34,7 +34,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * 安装协调器（docs/framework-design.md §10.2 InstallCoordinator）：全局唯一安装调度器。
+ * 安装协调器（docs §10.2 InstallCoordinator）：全局唯一安装调度器。
  *
  * P0 边界（诚实口径）：
  * - **门禁/队列/事务/journal/轻操作/审批** 全部落地且 JVM 可测；

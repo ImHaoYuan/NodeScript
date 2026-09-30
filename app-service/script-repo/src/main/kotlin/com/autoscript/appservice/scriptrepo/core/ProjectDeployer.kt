@@ -3,7 +3,7 @@ package com.autoscript.appservice.scriptrepo.core
 import java.nio.file.Path
 
 /**
- * 项目部署门面（docs/framework-design.md §9.6）：把若干相对路径文件原子写入项目 root。
+ * 项目部署门面（docs §9.6）：把若干相对路径文件原子写入项目 root。
  * 每个项目一个 [AtomicDeployer]（journal 随项目目录走，移动/删除自洽），启动时先 [recover]。
  */
 class ProjectDeployer(private val store: ProjectStore) {

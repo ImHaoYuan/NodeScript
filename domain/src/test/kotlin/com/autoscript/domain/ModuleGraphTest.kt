@@ -6,7 +6,7 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 /**
- * 全仓模块依赖图守护（docs/framework-design.md §4.1 依赖方向铁律 + §6 模块表 + §6 末「依赖方向无环」）。
+ * 全仓模块依赖图守护（docs §4.1 依赖方向铁律 + §6 模块表 + §6 末「依赖方向无环」）。
  *
  * 与各模块内 archUnit 测试的分工：
  * - **模块内 archUnit**：按字节码校验该模块的包没有 import 不该碰的包 —— 只对有 class 的模块有效；

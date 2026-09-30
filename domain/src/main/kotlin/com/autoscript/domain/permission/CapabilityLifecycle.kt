@@ -1,7 +1,7 @@
 package com.autoscript.domain.permission
 
 /**
- * 能力生命周期辅助（docs/framework-design.md §9.5）。
+ * 能力生命周期辅助（docs §9.5）。
  * 纯逻辑：三态之间的允许转移与"是否可申请"判断；能力中心 UI / PermissionFacade 实现方消费。
  */
 object CapabilityLifecycle {

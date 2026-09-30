@@ -41,7 +41,7 @@ import kotlinx.coroutines.launch
 import java.nio.file.Path
 
 /**
- * 启动装配（docs/framework-design.md §4.1 Composition Root，手写 DI，不用 Hilt）。
+ * 启动装配（docs §4.1 Composition Root，手写 DI，不用 Hilt）。
  *
  * 进程启动时最先跑的是这里，所以它是**唯一**能保证"闹钟到了就有人接"的地方：
  * 精确闹钟可能在壳装配完成前、装配后被系统回收又重启时、或进程刚好在重建中时响

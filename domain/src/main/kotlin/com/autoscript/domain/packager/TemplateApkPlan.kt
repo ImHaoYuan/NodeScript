@@ -3,7 +3,7 @@ package com.autoscript.domain.packager
 import java.security.MessageDigest
 
 /**
- * 打包 APK 身份补丁（docs/framework-design.md §3 打包行 / §14 P0 打包：
+ * 打包 APK 身份补丁（docs §3 打包行 / §14 P0 打包：
  * 模板 APK 改写时替换 application 身份的一组字段）。
  *
  * P0 切片：纯 Kotlin 领域模型（零 Android 依赖、JVM 可单测）。

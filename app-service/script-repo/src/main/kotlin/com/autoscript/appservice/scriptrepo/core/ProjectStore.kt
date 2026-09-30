@@ -5,7 +5,7 @@ import java.nio.file.Path
 import java.util.stream.Collectors
 
 /**
- * 项目仓库（docs/framework-design.md §9）：id → 目录（files/scripts/<id>）。
+ * 项目仓库（docs §9）：id → 目录（files/scripts/<id>）。
  * id 白名单校验 + 目录解析二次校验，杜绝穿越仓库根（同 [DeployPath] 的防逃逸纪律）。
  */
 interface ProjectStore {

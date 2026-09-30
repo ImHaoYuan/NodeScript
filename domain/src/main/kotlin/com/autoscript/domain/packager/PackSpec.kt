@@ -1,7 +1,7 @@
 package com.autoscript.domain.packager
 
 /**
- * 打包规格与资产清单（docs/framework-design.md §14 P0 打包：模板 APK 改装 + 资产注入 + 签名向导）。
+ * 打包规格与资产清单（docs §14 P0 打包：模板 APK 改装 + 资产注入 + 签名向导）。
  *
  * P0 切片：纯 Kotlin 领域模型（零 Android 依赖、JVM 可单测）。
  * 真机改写（AXML/ARSC 编辑、apksigner 调用）是 Android 侧实现细节，

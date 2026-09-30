@@ -1,7 +1,7 @@
 package com.autoscript.appservice.scheduler.core
 
 /**
- * 触发源五类（docs/framework-design.md §8.6）。
+ * 触发源五类（docs §8.6）。
  * 所有路径归一为 [fire] 进入调度：触发 → 拉起引擎进程 → 注入 API → 归意图日志。
  */
 enum class TriggerSource {

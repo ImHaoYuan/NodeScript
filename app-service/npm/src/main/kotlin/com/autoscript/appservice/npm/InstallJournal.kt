@@ -8,7 +8,7 @@ import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
 
 /**
- * 安装事务日记（docs/framework-design.md §10.4 事务化安装与崩溃自愈）。
+ * 安装事务日记（docs §10.4 事务化安装与崩溃自愈）。
  *
  * 记录格式（jsonl，与 scheduler JournalFileStore 同款持久化纪律：追加 + fsync + 半行容忍）：
  * - `{"op":"begin","nonce":N,"projectId":P,"stageDir":"node_modules.part-<ts>","at":M}`

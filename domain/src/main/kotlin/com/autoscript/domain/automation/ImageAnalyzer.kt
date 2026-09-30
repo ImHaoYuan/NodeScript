@@ -3,7 +3,7 @@ package com.autoscript.domain.automation
 import com.autoscript.domain.bridge.HandleRef
 
 /**
- * 图像分析契约（docs/framework-design.md §9.2；JS 对偶 `auto.images`，
+ * 图像分析契约（docs §9.2；JS 对偶 `auto.images`，
  * 对标 AutoJsPro v9 `images.matchTemplate/findImage` + `@autojs/opencv`）。
  *
  * 为什么住 `:domain`：与 [FrameSource] / `com.autoscript.platform.system.SensorSource`

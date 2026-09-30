@@ -1,6 +1,6 @@
 'use strict'
 /**
- * SocketBootstrap 闭环测试（docs/framework-design.md §7.5 Transport）：
+ * SocketBootstrap 闭环测试（docs §7.5 Transport）：
  * - unix socket + newline frame：request 出 / response 入（ok + err）→ 全异步 requestId 结算；
  * - 未连接投递 → 快速 ERR_ENGINE_STOPPED（不悬挂）。
  * 独立进程跑（node --test 每文件一进程），与 facade.test 的安装互不干扰。

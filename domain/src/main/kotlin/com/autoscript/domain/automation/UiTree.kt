@@ -3,7 +3,7 @@ package com.autoscript.domain.automation
 import com.autoscript.domain.bridge.HandleRef
 
 /**
- * 无障碍窗口树读 SPI（docs/framework-design.md §9.1）。
+ * 无障碍窗口树读 SPI（docs §9.1）。
  * 实现位于 :platform:capabilities：紧凑索引树 + 属性按需二次查询。
  * UI 对象 = JS 侧代理（HandleRef），generation 失配 → ERR_STALE_HANDLE。
  */

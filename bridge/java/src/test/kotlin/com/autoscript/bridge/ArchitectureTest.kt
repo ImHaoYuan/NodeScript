@@ -5,7 +5,7 @@ import com.tngtech.archunit.junit.ArchTest
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses
 
 /**
- * 桥基础层架构门（docs/framework-design.md §4.1/§6）：
+ * 桥基础层架构门（docs §4.1/§6）：
  * :bridge:java 依赖 :domain，禁 Android / 禁 UI；实现不得落入平台/引擎包。
  */
 @AnalyzeClasses(packages = ["com.autoscript.bridge"])

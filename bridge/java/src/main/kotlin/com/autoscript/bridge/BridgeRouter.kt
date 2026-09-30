@@ -28,7 +28,7 @@ import java.util.concurrent.ConcurrentHashMap
 typealias RequestHandler = com.autoscript.domain.bridge.NamespaceHandler
 
 /**
- * 桥路由器（docs/framework-design.md §7.5）：
+ * 桥路由器（docs §7.5）：
  * - 按 namespace 路由，走 TTL 注册表（去重 + 到期收割）；
  * - 同步 dispatch：handler 在 TTL 内返回即回，超时 → ERR_TIMEOUT；
  * - 后台扫描线程按 [SWEEP_INTERVAL_MILLIS] 收割过期请求。

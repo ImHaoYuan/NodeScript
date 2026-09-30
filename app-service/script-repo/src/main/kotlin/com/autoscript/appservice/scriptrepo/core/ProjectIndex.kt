@@ -7,7 +7,7 @@ import java.nio.file.Path
 import java.nio.file.attribute.BasicFileAttributes
 
 /**
- * 项目索引（docs/framework-design.md §9.6）：由仓库布局派生轻量元数据 → [:domain] 的 [ScriptProject]。
+ * 项目索引（docs §9.6）：由仓库布局派生轻量元数据 → [:domain] 的 [ScriptProject]。
  * 骨架实现：入口来自 package.json 的 main 字段，缺省回退 main.js/ index.js。
  * 完整清单（资源哈希、版本语义化）留给 :app-service:packager（§9 packager，P1）。
  */

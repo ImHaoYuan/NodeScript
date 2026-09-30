@@ -1,7 +1,7 @@
 package com.autoscript.appservice.scheduler.core
 
 /**
- * 触发源注册 SPI（docs/framework-design.md §8.6 / §13 Provider·Strategy）：
+ * 触发源注册 SPI（docs §8.6 / §13 Provider·Strategy）：
  * 同一接口可平切 WorkManager 之外的实现（保活场景自持 alarm + 注册 receiver）。
  * Android 实现（AlarmManager setExactAndAllowWhileIdle → receiver）在 :app 装配层，
  * 本模块只依赖 :domain，不引入 android.*。

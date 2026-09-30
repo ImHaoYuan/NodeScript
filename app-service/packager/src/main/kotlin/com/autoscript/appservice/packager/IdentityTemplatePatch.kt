@@ -10,7 +10,7 @@ import java.nio.file.Path
 
 /**
  * **真实**的模板改写补丁：把模板 APK 的 application 身份换成 [identity]，并按新身份落地
- * 组件类名与启动图标（docs/framework-design.md §14 P0「模板 APK 改装」；接在
+ * 组件类名与启动图标（docs §14 P0「模板 APK 改装」；接在
  * [PackagerPipeline.TemplatePatch] 缝上）。一次 [ApkRepacker.rewrite] 同趟出包。
  *
  * 改写内容：

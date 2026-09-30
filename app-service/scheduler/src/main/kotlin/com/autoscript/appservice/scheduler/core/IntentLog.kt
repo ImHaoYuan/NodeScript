@@ -1,7 +1,7 @@
 package com.autoscript.appservice.scheduler.core
 
 /**
- * checkpoint 意图日志（docs/framework-design.md §8.5）：
+ * checkpoint 意图日志（docs §8.5）：
  * `RUN_START(projectId, entry, runNonce, scheduledAt, screen) → …execute… → COMMIT(result)`。
  *
  * - append-only：状态只能从 STARTED 前进到 COMMITTED，不允许改写/删除历史行

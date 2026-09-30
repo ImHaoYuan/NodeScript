@@ -29,7 +29,7 @@ import java.nio.file.Path
 import com.autoscript.platform.capabilities.CapabilityNamespaces
 
 /**
- * Android 侧装壳配方（docs/framework-design.md §4.1 Composition Root 的**真调用点**）。
+ * Android 侧装壳配方（docs §4.1 Composition Root 的**真调用点**）。
  *
  * 为什么单独一个文件而不是写在 [com.autoscript.AppShellApplication] 里：装壳要碰
  * `:app-service:*` 五个模块的目录约定（意图日志 / 运行档案 / npm 三份 `.autojs` 与

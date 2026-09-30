@@ -1,5 +1,5 @@
 /**
- * 命名空间根（docs/framework-design.md §12.1 唯一入口）：脚本 `require('auto')` 返回
+ * 命名空间根（docs §12.1 唯一入口）：脚本 `require('auto')` 返回
  * 结构化命名空间对象；模块层各自走 runtimeBridge 到 :main Router。
  *
  * 导入形态（实测契约，勿"顺手统一"）：

@@ -1,6 +1,6 @@
 name: image-native
 
-# libopencv.so 构建（docs/framework-design.md §9.2 / §16）
+# libopencv.so 构建（docs §9.2 / §16）
 #
 # 与 ci.yml 的分工：本文件**只**跑 OpenCV 静态链接 + 我们的桥面 C++ → 单个
 # libopencv.so（arm64-android26），跑 node-runtime-build/scripts/build-opencv.sh

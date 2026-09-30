@@ -1,5 +1,5 @@
 /**
- * 无障碍选择器（docs/framework-design.md §9.1 / §12.3 a11y 选择器）：
+ * 无障碍选择器（docs §9.1 / §12.3 a11y 选择器）：
  * Promise + 超时；findOne 无匹配抛 NotFoundError。
  * 类型面对应 :domain:automation。P0 实现走 RuntimeBridge.invoke 到 :main Router。
  */
