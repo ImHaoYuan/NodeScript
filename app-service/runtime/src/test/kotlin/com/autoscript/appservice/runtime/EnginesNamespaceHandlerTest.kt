@@ -3,6 +3,7 @@ package com.autoscript.appservice.runtime
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.engine.EngineId
+import com.autoscript.domain.json.DomainJson
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
@@ -36,11 +37,11 @@ class EnginesNamespaceHandlerTest {
             BridgeResponse.Ok::class.java,
             h.handle(enginesReq(1, "exec", """{"projectId":"p1","scriptPath":"a.js","args":["x","y"],"runNonce":"n1"}""")),
         )
-        val o = EngineBridgeJson.decodeObject(resp.payload!!)
-        val runId = (o["runId"] as EngineBridgeJson.Value.N).raw.toLong()
-        val handle = o["handle"] as EngineBridgeJson.Value.Obj
-        assertEquals(runId, ((handle.fields["refId"] as EngineBridgeJson.Value.N).raw.toLong()))
-        assertEquals("1", (handle.fields["generation"] as EngineBridgeJson.Value.N).raw)
+        val o = DomainJson.decodeObject(resp.payload!!)
+        val runId = (o["runId"] as DomainJson.Value.N).raw.toLong()
+        val handle = o["handle"] as DomainJson.Value.Obj
+        assertEquals(runId, ((handle.fields["refId"] as DomainJson.Value.N).raw.toLong()))
+        assertEquals("1", (handle.fields["generation"] as DomainJson.Value.N).raw)
         // 幂等锚点透传引擎（§8.5）
         assertEquals("n1", engines[0].executed.single().runNonce)
         assertEquals(listOf("x", "y"), engines[0].executed.single().args)
@@ -73,7 +74,7 @@ class EnginesNamespaceHandlerTest {
             h.handle(enginesReq(1, "exec", execPayload())),
         )
         val held =
-            (EngineBridgeJson.decodeObject(first.payload!!)["runId"] as EngineBridgeJson.Value.N).raw.toLong()
+            (DomainJson.decodeObject(first.payload!!)["runId"] as DomainJson.Value.N).raw.toLong()
         // 排队上限 = payload waitTimeoutMillis 优先，否则桥侧 TTL：槽位被 held 占着，
         // 第二个请求未带显式上限，等满 300ms TTL → ERR_TIMEOUT，绝不无限挂住（§7.4 每次跨进程操作必有 TTL）。
         val queued = assertInstanceOf(
@@ -103,7 +104,7 @@ class EnginesNamespaceHandlerTest {
             ),
         )
         val retryId =
-            (EngineBridgeJson.decodeObject(retry.payload!!)["runId"] as EngineBridgeJson.Value.N).raw.toLong()
+            (DomainJson.decodeObject(retry.payload!!)["runId"] as DomainJson.Value.N).raw.toLong()
         assertTrue(retryId != held, "释放后的槽位应分配给新 run")
         Unit                                           // 显式收尾：void 返回值才被 JUnit5 视为测试
     }
@@ -116,7 +117,7 @@ class EnginesNamespaceHandlerTest {
             h.handle(enginesReq(1, "exec", execPayload())),
         )
         val held =
-            (EngineBridgeJson.decodeObject(first.payload!!)["runId"] as EngineBridgeJson.Value.N).raw.toLong()
+            (DomainJson.decodeObject(first.payload!!)["runId"] as DomainJson.Value.N).raw.toLong()
         val begin = System.currentTimeMillis()
         val queued = assertInstanceOf(
             BridgeResponse.Err::class.java,
@@ -173,7 +174,7 @@ class EnginesNamespaceHandlerTest {
             BridgeResponse.Ok::class.java,
             h.handle(enginesReq(1, "exec", execPayload())),
         )
-        val runId = (EngineBridgeJson.decodeObject(exec.payload!!)["runId"] as EngineBridgeJson.Value.N).raw
+        val runId = (DomainJson.decodeObject(exec.payload!!)["runId"] as DomainJson.Value.N).raw
         val stopped = assertInstanceOf(
             BridgeResponse.Ok::class.java,
             h.handle(enginesReq(2, "stop", """{"runId":$runId}""")),
@@ -205,7 +206,7 @@ class EnginesNamespaceHandlerTest {
             BridgeResponse.Ok::class.java,
             h.handle(enginesReq(2, "exec", execPayload())),
         )
-        val runId = (EngineBridgeJson.decodeObject(exec.payload!!)["runId"] as EngineBridgeJson.Value.N).raw
+        val runId = (DomainJson.decodeObject(exec.payload!!)["runId"] as DomainJson.Value.N).raw
         val during = assertInstanceOf(
             BridgeResponse.Ok::class.java,
             h.handle(enginesReq(3, "poolStats", null)),
@@ -235,7 +236,7 @@ class EnginesNamespaceHandlerTest {
             BridgeResponse.Ok::class.java,
             h.handle(enginesReq(1, "exec", execPayload())),
         )
-        val runId = (EngineBridgeJson.decodeObject(exec.payload!!)["runId"] as EngineBridgeJson.Value.N).raw.toLong()
+        val runId = (DomainJson.decodeObject(exec.payload!!)["runId"] as DomainJson.Value.N).raw.toLong()
 
         val first = assertInstanceOf(
             BridgeResponse.Ok::class.java,
@@ -274,7 +275,7 @@ class EnginesNamespaceHandlerTest {
             BridgeResponse.Ok::class.java,
             h.handle(enginesReq(1, "exec", execPayload())),
         )
-        val runId = (EngineBridgeJson.decodeObject(exec.payload!!)["runId"] as EngineBridgeJson.Value.N).raw
+        val runId = (DomainJson.decodeObject(exec.payload!!)["runId"] as DomainJson.Value.N).raw
 
         val live = assertInstanceOf(
             BridgeResponse.Ok::class.java,
@@ -313,9 +314,9 @@ class EnginesNamespaceHandlerTest {
             BridgeResponse.Ok::class.java,
             h.handle(enginesReq(1, "channel", """{"name":"progress"}""")),
         )
-        val co = EngineBridgeJson.decodeObject(created.payload!!)
-        assertEquals("progress", (co["name"] as EngineBridgeJson.Value.S).v)
-        val channelId = (co["channelId"] as EngineBridgeJson.Value.N).raw
+        val co = DomainJson.decodeObject(created.payload!!)
+        assertEquals("progress", (co["name"] as DomainJson.Value.S).v)
+        val channelId = (co["channelId"] as DomainJson.Value.N).raw
         val again = assertInstanceOf(
             BridgeResponse.Ok::class.java,
             h.handle(enginesReq(2, "channel", """{"name":"progress"}""")),
@@ -331,17 +332,17 @@ class EnginesNamespaceHandlerTest {
             BridgeResponse.Ok::class.java,
             h.handle(enginesReq(5, "channelDrain", """{"channelId":$channelId,"sinceSeq":0,"max":1}""")),
         )
-        val p1 = EngineBridgeJson.decodeObject(page1.payload!!)
-        assertEquals("1", (p1["last"] as EngineBridgeJson.Value.N).raw)
-        assertEquals(1, (p1["events"] as EngineBridgeJson.Value.Arr).items.size)
-        val last1 = (p1["last"] as EngineBridgeJson.Value.N).raw.toLong()
+        val p1 = DomainJson.decodeObject(page1.payload!!)
+        assertEquals("1", (p1["last"] as DomainJson.Value.N).raw)
+        assertEquals(1, (p1["events"] as DomainJson.Value.Arr).items.size)
+        val last1 = (p1["last"] as DomainJson.Value.N).raw.toLong()
         val page2 = assertInstanceOf(
             BridgeResponse.Ok::class.java,
             h.handle(enginesReq(6, "channelDrain", """{"channelId":$channelId,"sinceSeq":$last1}""")),
         )
-        val p2 = EngineBridgeJson.decodeObject(page2.payload!!)
-        assertEquals(1, (p2["events"] as EngineBridgeJson.Value.Arr).items.size)
-        assertEquals("2", (p2["last"] as EngineBridgeJson.Value.N).raw)
+        val p2 = DomainJson.decodeObject(page2.payload!!)
+        assertEquals(1, (p2["events"] as DomainJson.Value.Arr).items.size)
+        assertEquals("2", (p2["last"] as DomainJson.Value.N).raw)
 
         // 关 → 再发/拉如实 NOT_FOUND；同名重建得新 id
         val closed = assertInstanceOf(
@@ -358,7 +359,7 @@ class EnginesNamespaceHandlerTest {
             BridgeResponse.Ok::class.java,
             h.handle(enginesReq(9, "channel", """{"name":"progress"}""")),
         )
-        val newId = (EngineBridgeJson.decodeObject(rebuilt.payload!!)["channelId"] as EngineBridgeJson.Value.N).raw
+        val newId = (DomainJson.decodeObject(rebuilt.payload!!)["channelId"] as DomainJson.Value.N).raw
         assertTrue(newId != channelId, "关闭后重建得新 id")
     }
 
@@ -388,7 +389,7 @@ class EnginesNamespaceHandlerTest {
             BridgeResponse.Ok::class.java,
             h.handle(enginesReq(1, "channel", """{"name":"c"}""")),
         )
-        val channelId = (EngineBridgeJson.decodeObject(created.payload!!)["channelId"] as EngineBridgeJson.Value.N).raw
+        val channelId = (DomainJson.decodeObject(created.payload!!)["channelId"] as DomainJson.Value.N).raw
         repeat(4) { i ->
             h.handle(enginesReq(10L + i, "channelEmit", """{"channelId":$channelId,"event":"e$i"}"""))
         }
@@ -396,9 +397,9 @@ class EnginesNamespaceHandlerTest {
             BridgeResponse.Ok::class.java,
             h.handle(enginesReq(20, "channelDrain", """{"channelId":$channelId,"sinceSeq":0}""")),
         )
-        val events = (EngineBridgeJson.decodeObject(drained.payload!!)["events"] as EngineBridgeJson.Value.Arr).items
+        val events = (DomainJson.decodeObject(drained.payload!!)["events"] as DomainJson.Value.Arr).items
         assertEquals(2, events.size)
-        val names = events.map { ((it as EngineBridgeJson.Value.Obj).fields["event"] as EngineBridgeJson.Value.S).v }
+        val names = events.map { ((it as DomainJson.Value.Obj).fields["event"] as DomainJson.Value.S).v }
         assertEquals(listOf("e2", "e3"), names)
     }
 
@@ -409,7 +410,7 @@ class EnginesNamespaceHandlerTest {
             BridgeResponse.Ok::class.java,
             h.handle(enginesReq(1, "channel", """{"name":"cc"}""")),
         )
-        val channelId = (EngineBridgeJson.decodeObject(created.payload!!)["channelId"] as EngineBridgeJson.Value.N).raw
+        val channelId = (DomainJson.decodeObject(created.payload!!)["channelId"] as DomainJson.Value.N).raw
         (1..50).map { i ->
             async {
                 h.handle(enginesReq(100L + i, "channelEmit", """{"channelId":$channelId,"event":"e$i"}"""))
@@ -419,7 +420,7 @@ class EnginesNamespaceHandlerTest {
             BridgeResponse.Ok::class.java,
             h.handle(enginesReq(200, "channelDrain", """{"channelId":$channelId,"sinceSeq":0,"max":100}""")),
         )
-        val events = (EngineBridgeJson.decodeObject(drained.payload!!)["events"] as EngineBridgeJson.Value.Arr).items
+        val events = (DomainJson.decodeObject(drained.payload!!)["events"] as DomainJson.Value.Arr).items
         assertEquals(50, events.size)
     }
 }

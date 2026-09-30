@@ -4,6 +4,7 @@ import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.bridge.RpcNamespaceHandler
 import com.autoscript.domain.core.ErrorCode
+import com.autoscript.domain.json.DomainJson
 
 /**
  * `engines` namespace 桥处理器（docs §8 / §12.3）：JS `engines.*` 面的 Kotlin 对偶。
@@ -11,8 +12,8 @@ import com.autoscript.domain.core.ErrorCode
  * 归属说明：本类住在 `:app-service:runtime`（不是 `:bridge:java`），因为它直接驱动
  * [RuntimeController]/[EnginePool]；本类即 `NamespaceHandler`（承 [RpcNamespaceHandler]），
  * `:app` 装配层 `router.register("engines", it)` 直挂 `BridgeRouter`。
- * 载荷编解码用本模块内 [EngineBridgeJson]（见该文件注释：不碰 `:bridge:java` 的
- * internal TinyJson，架构门禁见 ArchitectureTest）。
+ * 载荷编解码用 `:domain` 的 [DomainJson]（审查步骤 3 合一后的仓内唯一 codec ——
+ * 原 EngineBridgeJson 已删，不再有「各模块自带一份」的形状）。
  *
  * 方法表（与 `bridge/js` engines.ts 一一对应）：
  * - `exec`：payload `{projectId,scriptPath,args?,runNonce?,timeoutMillis?,waitTimeoutMillis?}` →
@@ -49,7 +50,7 @@ class EnginesNamespaceHandler(
     override suspend fun dispatch(request: BridgeRequest): BridgeResponse = when (request.method) {
         "exec" -> exec(request)
         "stop" -> stop(request)
-        "poolStats" -> ok(request, EngineBridgeJson.encode(poolStatsPayload()))
+        "poolStats" -> ok(request, DomainJson.encode(poolStatsPayload()))
         "status" -> status(request)
         "heartbeat" -> heartbeat(request)
         "channel" -> channel(request)
@@ -67,7 +68,7 @@ class EnginesNamespaceHandler(
         return when (val outcome = controller.start(bounded)) {
             is RuntimeController.StartOutcome.Started -> ok(
                 request,
-                EngineBridgeJson.encode(
+                DomainJson.encode(
                     mapOf(
                         "runId" to outcome.runId,
                         // 会话句柄身份 = runId（单次 exec→stop 生命周期，无 re-acquire，
@@ -107,7 +108,7 @@ class EnginesNamespaceHandler(
         val runId = requiredLong(decodePayload(request.payload), "runId")
         val st = controller.probeStatus(runId)
             ?: return err(request, ErrorCode.ERR_NOT_FOUND, "未知 runId: $runId")
-        return ok(request, EngineBridgeJson.encode(st.name))
+        return ok(request, DomainJson.encode(st.name))
     }
 
     private fun poolStatsPayload(): Map<String, Any?> {
@@ -126,7 +127,7 @@ class EnginesNamespaceHandler(
         val runId = requiredLong(o, "runId")
         val seq = requiredLong(o, "seq")
         val accepted = controller.heartbeat(runId, seq)
-        return ok(request, EngineBridgeJson.encode(accepted))
+        return ok(request, DomainJson.encode(accepted))
     }
 
     private fun parseExec(payload: String?): PoolAcquireRequest {
@@ -182,7 +183,7 @@ class EnginesNamespaceHandler(
                 nid
             }
         }
-        return ok(request, EngineBridgeJson.encode(mapOf("name" to name, "channelId" to id)))
+        return ok(request, DomainJson.encode(mapOf("name" to name, "channelId" to id)))
     }
 
     private fun channelEmit(request: BridgeRequest): BridgeResponse {
@@ -220,7 +221,7 @@ class EnginesNamespaceHandler(
         }
         return ok(
             request,
-            EngineBridgeJson.encode(
+            DomainJson.encode(
                 mapOf(
                     "last" to last,
                     "events" to picked.map {
@@ -244,37 +245,37 @@ class EnginesNamespaceHandler(
 
     // ── 载荷读取 ─────────────────────────────────────────────────────────
 
-    private fun decodePayload(payload: String?): Map<String, EngineBridgeJson.Value> {
+    private fun decodePayload(payload: String?): Map<String, DomainJson.Value> {
         if (payload == null) throw IllegalArgumentException("缺 payload")
-        return EngineBridgeJson.decodeObject(payload)
+        return DomainJson.decodeObject(payload)
     }
 
-    private fun requiredStr(o: Map<String, EngineBridgeJson.Value>, key: String): String =
-        (o[key] as? EngineBridgeJson.Value.S)?.v ?: throw IllegalArgumentException("缺字符串字段 $key")
+    private fun requiredStr(o: Map<String, DomainJson.Value>, key: String): String =
+        (o[key] as? DomainJson.Value.S)?.v ?: throw IllegalArgumentException("缺字符串字段 $key")
 
-    private fun optStr(o: Map<String, EngineBridgeJson.Value>, key: String): String? {
+    private fun optStr(o: Map<String, DomainJson.Value>, key: String): String? {
         val v = o[key] ?: return null
-        if (v is EngineBridgeJson.Value.Null) return null
-        return (v as? EngineBridgeJson.Value.S)?.v ?: throw IllegalArgumentException("字段 $key 必须是字符串")
+        if (v is DomainJson.Value.Null) return null
+        return (v as? DomainJson.Value.S)?.v ?: throw IllegalArgumentException("字段 $key 必须是字符串")
     }
 
-    private fun requiredLong(o: Map<String, EngineBridgeJson.Value>, key: String): Long =
-        (o[key] as? EngineBridgeJson.Value.N)?.raw?.toLongOrNull()
+    private fun requiredLong(o: Map<String, DomainJson.Value>, key: String): Long =
+        (o[key] as? DomainJson.Value.N)?.raw?.toLongOrNull()
             ?: throw IllegalArgumentException("缺数字字段 $key")
 
-    private fun optLong(o: Map<String, EngineBridgeJson.Value>, key: String): Long? {
+    private fun optLong(o: Map<String, DomainJson.Value>, key: String): Long? {
         val v = o[key] ?: return null
-        if (v is EngineBridgeJson.Value.Null) return null
-        return (v as? EngineBridgeJson.Value.N)?.raw?.toLongOrNull()
+        if (v is DomainJson.Value.Null) return null
+        return (v as? DomainJson.Value.N)?.raw?.toLongOrNull()
             ?: throw IllegalArgumentException("字段 $key 必须是数字")
     }
 
-    private fun optStrList(o: Map<String, EngineBridgeJson.Value>, key: String): List<String> {
+    private fun optStrList(o: Map<String, DomainJson.Value>, key: String): List<String> {
         val v = o[key] ?: return emptyList()
-        if (v is EngineBridgeJson.Value.Null) return emptyList()
-        if (v !is EngineBridgeJson.Value.Arr) throw IllegalArgumentException("字段 $key 必须是数组")
+        if (v is DomainJson.Value.Null) return emptyList()
+        if (v !is DomainJson.Value.Arr) throw IllegalArgumentException("字段 $key 必须是数组")
         return v.items.map {
-            (it as? EngineBridgeJson.Value.S)?.v ?: throw IllegalArgumentException("字段 $key 数组元素必须是字符串")
+            (it as? DomainJson.Value.S)?.v ?: throw IllegalArgumentException("字段 $key 数组元素必须是字符串")
         }
     }
 

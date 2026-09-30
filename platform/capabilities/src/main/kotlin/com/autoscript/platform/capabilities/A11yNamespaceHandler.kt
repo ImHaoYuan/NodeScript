@@ -27,8 +27,8 @@ import com.autoscript.domain.core.ErrorCode
  * 只需实现这三块 SPI 即可替换内存树/输入 —— 本类逐行逻辑不变（替换 = 调
  * `CapabilityNamespaces.a11y` 时换 tree/actions/input/events 四个参数）。
  *
- * `:app` 装配层薄转接挂 BridgeRouter。载荷用本模块内 [DomainJson]
- *（:bridge:java 的 TinyJson 是 internal，跨模块不可见；见 runtime 的 EngineBridgeJson 同例）。
+ * `:app` 装配层薄转接挂 BridgeRouter。载荷用 `:domain` 的 [DomainJson]（审查步骤 3
+ * 合一后的仓内唯一 codec —— 各模块自带 codec 的旧形状已全部删除）。
  *
  * 方法表（与 `bridge/js` a11y.ts 一一对应）：
  * - `findOne`：payload `{conditions:{text?,desc?,id?,className?,packageName?,clickable?},
