@@ -18,13 +18,17 @@
 //
 // 跑法见 test/cpp/run-host-tests.sh（OpenCV 4.14.0 按 build-opencv.sh 同款
 // commit 固定，kleidicv OFF —— host 是 x86_64，那条加速面只在 aarch64 上）。
+#include <algorithm>
+#include <atomic>
 #include <cerrno>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <vector>
 
 #include <opencv2/core.hpp>
 #include <opencv2/imgcodecs.hpp>
@@ -39,6 +43,9 @@ int imgnative_match(int64_t haystack, int64_t needle, double threshold,
 int imgnative_release(int64_t ref);
 }
 
+// 金字塔路径 kill switch（imgnative.cpp 定义，外部链接）：差分双跑要逐 case 翻它。
+extern std::atomic<bool> g_force_exact;
+
 static int fails = 0, checks = 0;
 static void chk(bool ok, const std::string& w) { ++checks; if (!ok) { ++fails; std::printf("  [FAIL] %s\n", w.c_str()); } }
 
@@ -49,6 +56,53 @@ static int64_t dec(const std::string& p, const cv::Mat& m) {
     const int rc = imgnative_decode(p.c_str(), &ref, &w, &h);
     chk(rc == 0, "decode " + p);
     return rc == 0 ? ref : -1;
+}
+
+/** 一次 imgnative_match 的完整返回面（差分双跑要逐字段比）。 */
+struct MR { int rc; int32_t x, y, w, h, m; double c; };
+static MR call_match(int64_t hh, int64_t nn, double thr) {
+    MR r{-1, -1, -1, -1, -1, -1, -1.0};
+    r.rc = imgnative_match(hh, nn, thr, &r.x, &r.y, &r.w, &r.h, &r.c, &r.m);
+    return r;
+}
+
+/**
+ * 差分双跑（2026-09-30 评审第 2 条）：同一输入先强制精确路径、再走默认（金字塔）
+ * 路径，断言同 rc、同命中/同未命中、同位置且 |Δconf| ≤ 2e-3 —— 假 miss / 坐标漂
+ * 移在这里被**直接计数**，比只读旧断言的通过与否强。
+ *
+ * `equiv` 非空 = 已知等价重复位置集（同形副本各一处）：两条路径在完全相同的副本
+ * 间允许挑到不同那一处 —— 精确路径的 argmax 在重复峰之间由 FFT 浮点噪声决定，
+ * 本来就不可复现（评审第 3 条）。这种 case 只钉「落在集合内 + 置信度一致」。
+ * 返回精确路径的结果（它是语义基准），用例自己的断言接在它上面。
+ */
+static MR dual_match(int64_t hh, int64_t nn, double thr,
+                     const std::vector<cv::Point>* equiv = nullptr) {
+    g_force_exact.store(true);
+    const MR e = call_match(hh, nn, thr);
+    g_force_exact.store(false);
+    const MR p = call_match(hh, nn, thr);
+    chk(e.rc == p.rc, "差分 rc 一致（" + std::to_string(e.rc) + " vs " + std::to_string(p.rc) + "）");
+    if (e.rc != 0) return p;
+    if (e.m == 0 && p.m == 0) return p;                 // 同为未命中 = 差分通过
+    chk(e.m == 1 && p.m == 1, "差分命中一致（精确=" + std::to_string(e.m) +
+                              " 金字塔=" + std::to_string(p.m) + "，假 miss/假中在此计数）");
+    chk(std::fabs(e.c - p.c) <= 2e-3, "差分置信度 ≤2e-3（实际 " +
+        std::to_string(e.c) + " vs " + std::to_string(p.c) + "）");
+    if (e.m == 1 && p.m == 1) {
+        if (equiv != nullptr) {
+            const auto in_set = [&](const MR& r) {
+                return std::find(equiv->begin(), equiv->end(), cv::Point(r.x, r.y)) != equiv->end();
+            };
+            chk(in_set(e), "精确路径位置 ∈ 等价集（实际 " + std::to_string(e.x) + "," + std::to_string(e.y) + "）");
+            chk(in_set(p), "金字塔路径位置 ∈ 等价集（实际 " + std::to_string(p.x) + "," + std::to_string(p.y) + "）");
+        } else {
+            chk(e.x == p.x && e.y == p.y, "差分同位置（精确 " +
+                std::to_string(e.x) + "," + std::to_string(e.y) + " vs 金字塔 " +
+                std::to_string(p.x) + "," + std::to_string(p.y) + "）");
+        }
+    }
+    return p;
 }
 
 int main() {
@@ -74,8 +128,12 @@ int main() {
 
     // 1) 命中：阈值放低让"确实在"这个事实先立住，坐标/尺寸/置信度逐字段钉
     {
-        int32_t x = -1, y = -1, w = -1, h = -1, m = -1; double c = -1;
-        const int rc = imgnative_match(h_ref, n_ref, 0.5, &x, &y, &w, &h, &c, &m);
+        // 双跑（评审第 2 条）：3×2 模板短边 < min_templ_side，两条路径都恒走
+        // 精确 —— 这里钉的是"小模板无分岔"，真粗筛覆盖在 case 6/7。
+        const MR d = dual_match(h_ref, n_ref, 0.5);
+        const int rc = d.rc;
+        const int32_t x = d.x, y = d.y, w = d.w, h = d.h, m = d.m;
+        const double c = d.c;
         chk(rc == 0, "match 成功");
         chk(m == 1, "命中（out_match=1）");
         chk(x == 2 && y == 3, "命中坐标 = 模板左上角 (2,3)（实际 " + std::to_string(x) + "," + std::to_string(y) + "）");
@@ -92,8 +150,10 @@ int main() {
         // 保底不同于 big 的任何 3×2 窗：随机也可能撞上一模一样的概率极低，但
         // 真撞上这条就会以"置信度为何接近 1"的方式红，比静默通过好。
         const int64_t o_ref = dec(d + "/other.png", other);
-        int32_t x = -1, y = -1, w = -1, h = -1, m = -1; double c = -1;
-        const int rc = imgnative_match(h_ref, o_ref, 0.9, &x, &y, &w, &h, &c, &m);
+        const MR d = dual_match(h_ref, o_ref, 0.9);      // 未命中也双跑：数假中/假 miss
+        const int rc = d.rc;
+        const int32_t x = d.x, y = d.y, w = d.w, h = d.h, m = d.m;
+        const double c = d.c;
         chk(rc == 0, "未匹配时 status 仍是 OK（答案不是异常）");
         chk(m == 0, "out_match=0（未达阈值）");
         chk(x == 0 && y == 0 && w == 0 && h == 0 && c == 0.0,
@@ -105,9 +165,9 @@ int main() {
     // 3) 阈值边界：maxv == threshold 判命中（契约"≥ 阈值即命中"）。第 1 条的
     //    置信度取来当阈值本身，等于把边界钉在这个具体数值上 —— 比写 0.99 稳。
     {
-        int32_t x = -1, y = -1, w = -1, h = -1, m = -1; double c = -1;
-        imgnative_match(h_ref, n_ref, 0.5, &x, &y, &w, &h, &c, &m);   // 拿真置信度
-        const double exact = c;
+        const MR d = dual_match(h_ref, n_ref, 0.5);      // 拿真置信度（顺带差分）
+        const double exact = d.c;
+        const int32_t m = d.m;
         chk(m == 1, "第 1 条先确认命中，取其置信度 " + std::to_string(exact) + " 作边界");
         int32_t mx = -1, my = -1, mw = -1, mh = -1, mm = -1; double mc = -1;
         chk(imgnative_match(h_ref, n_ref, exact, &mx, &my, &mw, &mh, &mc, &mm) == 0, "等值阈值可用");
@@ -149,6 +209,102 @@ int main() {
             "haystack 已释放同样 STALE（两个方向都钉）");
         imgnative_release(h_ref);
     }
+
+    // 6) **差分主战场**：640×480 平滑纹理屏 + 128×96 模板（短边 96 ≥ 80、
+    //    96×0.25=24 ≥ 24 → 真走 0.25× 粗筛）。纹理先造小图再放大 = 低频频谱，
+    //    形如 UI/图标/文字 —— 这是粗筛**真开动**且必须赢的形态（白噪声是反例，
+    //    见 6c）。命中位置唯一（纹理不重复），差分断言严格同位置；未匹配同样
+    //    双跑，数假 miss。
+    {
+        cv::Mat base(60, 80, CV_8UC4);
+        rng.fill(base, cv::RNG::UNIFORM, 0, 256);
+        cv::Mat scr;
+        cv::resize(base, scr, cv::Size(640, 480), 0, 0, cv::INTER_LINEAR);
+        const cv::Rect at(301, 177, 128, 96);
+        cv::Mat tpl = scr(at).clone();                   // 独立成帧（imwrite 要独立 Mat）
+        const int64_t s6 = dec(d + "/scr6.png", scr);
+        const int64_t t6 = dec(d + "/tpl6.png", tpl);
+        if (s6 >= 0 && t6 >= 0) {
+            const MR r = dual_match(s6, t6, 0.9);
+            chk(r.rc == 0, "case6 match 成功");
+            chk(r.m == 1, "case6 命中");
+            chk(r.x == 301 && r.y == 177, "case6 坐标 = 模板原位 (301,177)（实际 " +
+                std::to_string(r.x) + "," + std::to_string(r.y) + "）");
+            chk(r.w == 128 && r.h == 96, "case6 w/h = 模板尺寸");
+            chk(r.c > 0.99, "case6 置信度 >0.99（实际 " + std::to_string(r.c) + "）");
+
+            // 未匹配同双跑：不同内容的 128×96，两条路径必须**同时**判未命中。
+            cv::Mat other(96, 128, CV_8UC4);
+            rng.fill(other, cv::RNG::UNIFORM, 0, 256);
+            const int64_t o6 = dec(d + "/other6.png", other);
+            if (o6 >= 0) {
+                const MR miss = dual_match(s6, o6, 0.9);
+                chk(miss.rc == 0 && miss.m == 0, "case6b 未匹配 status=OK answer");
+                chk(miss.x == 0 && miss.y == 0 && miss.c == 0.0, "case6b 未命中字段全 0");
+                imgnative_release(o6);
+            }
+            imgnative_release(s6);
+            imgnative_release(t6);
+        }
+    }
+
+    // 6c) **高频反例 = 频率门的锁**（差分门 2026-09-30 首跑抓到的真红）：
+    //     i.i.d. 逐像素噪声模板落在 4 不对齐的坐标 (301,177) 上 —— 0.25× 的
+    //     4×4 平均块在错位坐标上与模板的平均块互不相关，粗峰值欠估到候选带宽
+    //     之下 → 零候选 → **假 miss**（当时差分直接数出来了：精确=1 金字塔=0）。
+    //     修法 = coarse_scale 里的频率自检门（模板缩小再放大互相关 <0.8 → 精确
+    //     路径）。这条 case 是那个守卫的锁：门被拆掉/阈值漂走，这里立刻红。
+    {
+        cv::Mat scr(480, 640, CV_8UC4);
+        rng.fill(scr, cv::RNG::UNIFORM, 0, 256);
+        cv::Mat tpl = scr(cv::Rect(301, 177, 128, 96)).clone();
+        const int64_t s6c = dec(d + "/scr6c.png", scr);
+        const int64_t t6c = dec(d + "/tpl6c.png", tpl);
+        if (s6c >= 0 && t6c >= 0) {
+            const MR r = dual_match(s6c, t6c, 0.9);
+            chk(r.rc == 0 && r.m == 1, "case6c 高频模板仍命中（频率门挡去精确路径）");
+            chk(r.x == 301 && r.y == 177, "case6c 坐标 (301,177)（实际 " +
+                std::to_string(r.x) + "," + std::to_string(r.y) + "）");
+            imgnative_release(s6c);
+            imgnative_release(t6c);
+        }
+    }
+
+    // 7) **重复图标格**（评审第 3 条）：12 枚一模一样的 100×100 图标铺在噪底上。
+    //    位置在 12 枚之间不可钉（精确路径 argmax 由 FFT 噪声挑，金字塔路径在提名
+    //    到的 8 枚里取行先序 —— 两者都合法），差分改用等价位置集：两条路径各自
+    //    落在图标格点上、置信度 ≤2e-3。这同时压测 NMS：12 峰 > K=8，压窗必须
+    //    放过互不重叠的峰，否则 8 个名额被一枚图标附近的旁瓣占满、远处副本漏提。
+    {
+        cv::Mat scr(480, 640, CV_8UC4);
+        rng.fill(scr, cv::RNG::UNIFORM, 100, 160);       // 低幅噪底：避开纯平背景的 0/0 方差区
+        cv::Mat icon_base(12, 12, CV_8UC4);              // 小图放大 = 平滑图标（粗筛真开动）
+        rng.fill(icon_base, cv::RNG::UNIFORM, 0, 256);
+        cv::Mat icon;
+        cv::resize(icon_base, icon, cv::Size(100, 100), 0, 0, cv::INTER_LINEAR);
+        std::vector<cv::Point> origins;
+        for (int gy = 0; gy < 3; ++gy) {
+            for (int gx = 0; gx < 4; ++gx) {
+                const int ox = 40 + gx * 130, oy = 50 + gy * 150;
+                icon.copyTo(scr(cv::Rect(ox, oy, 100, 100)));
+                origins.emplace_back(ox, oy);
+            }
+        }
+        const int64_t s7 = dec(d + "/scr7.png", scr);
+        const int64_t t7 = dec(d + "/icon.png", icon);
+        if (s7 >= 0 && t7 >= 0) {
+            const MR r = dual_match(s7, t7, 0.9, &origins);
+            chk(r.rc == 0, "case7 match 成功");
+            chk(r.m == 1, "case7 命中（12 枚等价副本中的一枚）");
+            chk(r.c > 0.99, "case7 置信度 >0.99（实际 " + std::to_string(r.c) + "）");
+            imgnative_release(s7);
+            imgnative_release(t7);
+        }
+    }
+
+    // 差分跑完复位 kill switch（dual_match 尾态即 false，显式钉一次防回归时把
+    // 别的 case 悄悄圈进强制精确路径）。
+    g_force_exact.store(false);
 
     std::printf("\nchecks=%d failures=%d\n", checks, fails);
     return fails == 0 ? 0 : 1;
