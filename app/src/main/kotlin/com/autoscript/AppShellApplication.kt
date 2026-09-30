@@ -42,6 +42,12 @@ import com.autoscript.shell.WakeLockLedger
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import java.nio.file.Path
+import com.autoscript.platform.capabilities.CapabilityNamespaces
+import com.autoscript.platform.capabilities.a11y.AndroidUiTree
+import com.autoscript.platform.capabilities.a11y.SystemA11yBridge
+import com.autoscript.platform.capabilities.screen.AndroidFrameProducer
+import com.autoscript.platform.capabilities.screen.AndroidGestureInput
+import com.autoscript.platform.capabilities.screen.ScreenshotSource
 
 /**
  * 启动装配（docs/framework-design.md §4.1 Composition Root，手写 DI，不用 Hilt）。

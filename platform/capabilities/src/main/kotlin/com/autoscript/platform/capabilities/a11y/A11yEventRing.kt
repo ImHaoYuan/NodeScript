@@ -1,4 +1,4 @@
-package com.autoscript.platform.capabilities
+package com.autoscript.platform.capabilities.a11y
 
 import com.autoscript.domain.automation.UiEvent
 import com.autoscript.domain.automation.UiEventBatch

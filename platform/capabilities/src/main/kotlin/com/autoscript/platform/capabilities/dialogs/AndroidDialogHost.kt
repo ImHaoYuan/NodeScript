@@ -1,4 +1,4 @@
-package com.autoscript.platform.capabilities
+package com.autoscript.platform.capabilities.dialogs
 
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
@@ -10,6 +10,7 @@ import com.autoscript.domain.system.DialogChooseRequest
 import com.autoscript.domain.system.DialogPromptRequest
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CompletableDeferred
+import com.autoscript.platform.capabilities.device.SystemDialogOps
 
 /**
  * `dialogs` 宿主的 Android 编排层（docs §9.4 / domain [DialogHost] KDoc：实现住本模块）。

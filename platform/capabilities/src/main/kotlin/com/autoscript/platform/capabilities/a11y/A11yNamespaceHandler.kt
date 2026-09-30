@@ -1,4 +1,4 @@
-package com.autoscript.platform.capabilities
+package com.autoscript.platform.capabilities.a11y
 
 import com.autoscript.domain.bridge.RpcNamespaceHandler
 import com.autoscript.domain.bridge.BridgeResponse
@@ -17,6 +17,9 @@ import com.autoscript.domain.automation.UiSelectorDsl
 import com.autoscript.domain.bridge.HandleRef
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
+import com.autoscript.platform.capabilities.CapabilityNamespaces
+import com.autoscript.platform.capabilities.screen.AndroidGestureInput
+import com.autoscript.platform.capabilities.screen.InMemoryInputProvider
 
 /**
  * `a11y` namespace 桥处理器（docs §9.1 / §12.3）：JS `a11y.*` 面的 Kotlin 对偶。

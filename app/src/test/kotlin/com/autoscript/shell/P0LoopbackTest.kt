@@ -8,7 +8,7 @@ import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.scripts.ScriptPaths
 import com.autoscript.platform.capabilities.CapabilityNamespaces
-import com.autoscript.platform.capabilities.InMemoryUiTree
+import com.autoscript.platform.capabilities.a11y.InMemoryUiTree
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
 import java.nio.file.Path
+import com.autoscript.platform.capabilities.a11y.A11yNamespaceHandler
 
 /**
  * P0 回环（docs §19 切片 3+4 的最小闭合，一次装配走完全链）：

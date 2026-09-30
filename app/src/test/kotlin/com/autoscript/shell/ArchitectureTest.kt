@@ -4,6 +4,7 @@ import com.tngtech.archunit.core.domain.JavaClasses
 import com.tngtech.archunit.core.importer.ClassFileImporter
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition
 import org.junit.jupiter.api.Test
+import com.autoscript.platform.capabilities.CapabilityNamespaces
 
 /**
  * 依赖方向守护（docs §6 模块表 + Composition Root **包级例外两则**）：

@@ -1,4 +1,4 @@
-package com.autoscript.platform.capabilities
+package com.autoscript.platform.system
 
 import com.autoscript.domain.bridge.decodeObject
 import com.autoscript.domain.bridge.optLong

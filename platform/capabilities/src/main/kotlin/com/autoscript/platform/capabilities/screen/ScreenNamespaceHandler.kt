@@ -1,4 +1,4 @@
-package com.autoscript.platform.capabilities
+package com.autoscript.platform.capabilities.screen
 
 import com.autoscript.domain.bridge.RpcNamespaceHandler
 import com.autoscript.domain.bridge.BridgeResponse
@@ -10,6 +10,7 @@ import com.autoscript.domain.automation.ScreenCaptureSession
 import com.autoscript.domain.bridge.HandleRef
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
+import com.autoscript.platform.capabilities.CapabilityNamespaces
 
 /**
  * `screen` namespace 桥处理器（docs §9.2 / §8.8 / §12.3）：JS `screen.*` 面的 Kotlin 对偶。

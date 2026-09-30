@@ -1,4 +1,4 @@
-package com.autoscript.platform.capabilities
+package com.autoscript.platform.system
 
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
@@ -76,7 +76,7 @@ class SettingsNamespaceHandlerTest {
     }
 
     private val fake = FakeSettings()
-    private val handler = CapabilityNamespaces.settings(fake)
+    private val handler = SystemNamespaces.settings(fake)
 
     private suspend fun call(method: String, payload: String?): BridgeResponse =
         handler.handle(BridgeRequest(1, "settings", method, payload, 5_000))

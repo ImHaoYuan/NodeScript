@@ -8,6 +8,9 @@ import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import com.autoscript.platform.capabilities.a11y.A11yNamespaceHandler
+import com.autoscript.platform.capabilities.a11y.InMemoryUiTree
+import com.autoscript.platform.capabilities.screen.InMemoryInputProvider
 
 class A11yNamespaceHandlerTest {
 

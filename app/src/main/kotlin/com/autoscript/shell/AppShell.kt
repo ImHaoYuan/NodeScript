@@ -21,6 +21,7 @@ import com.autoscript.domain.engine.EngineId
 import com.autoscript.domain.bridge.NamespaceHandler
 import com.autoscript.domain.engine.ScriptEngine
 import com.autoscript.domain.scripts.RunArchive
+import com.autoscript.platform.capabilities.CapabilityNamespaces
 
 /**
  * :app 装配根（docs §4.1 Composition Root，手写 DI，不用 Hilt）。

@@ -1,4 +1,4 @@
-package com.autoscript.platform.capabilities
+package com.autoscript.platform.system
 
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
@@ -25,7 +25,7 @@ import org.junit.jupiter.api.Test
 class DatastoreNamespaceHandlerTest {
 
     private val store = InMemoryDataStore()
-    private val handler = CapabilityNamespaces.datastore(store)
+    private val handler = SystemNamespaces.datastore(store)
 
     private suspend fun call(method: String, payload: String?): BridgeResponse =
         handler.handle(BridgeRequest(1, "datastore", method, payload, 5_000))

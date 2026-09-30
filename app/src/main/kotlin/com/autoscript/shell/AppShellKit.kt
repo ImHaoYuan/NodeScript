@@ -26,6 +26,7 @@ import com.autoscript.domain.scripts.RunArchive
 import com.autoscript.domain.scripts.RunRecord
 import java.nio.file.Files
 import java.nio.file.Path
+import com.autoscript.platform.capabilities.CapabilityNamespaces
 
 /**
  * Android 侧装壳配方（docs/framework-design.md §4.1 Composition Root 的**真调用点**）。

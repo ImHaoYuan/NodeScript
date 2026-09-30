@@ -1,4 +1,4 @@
-package com.autoscript.platform.capabilities
+package com.autoscript.platform.capabilities.a11y
 
 import com.autoscript.domain.automation.GestureInput
 import com.autoscript.domain.automation.ScrollDirection
@@ -6,6 +6,9 @@ import com.autoscript.domain.automation.UiBounds
 import com.autoscript.domain.automation.WindowScope
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
+import com.autoscript.platform.capabilities.device.AutoScriptAccessibilityService
+import com.autoscript.platform.capabilities.screen.AndroidGestureInput
+import com.autoscript.platform.capabilities.screen.ProducedFrame
 
 /**
  * 无障碍服务侧缝（docs §9.1 Android 真实现的可测接缝）。

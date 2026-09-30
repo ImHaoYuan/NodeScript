@@ -1,4 +1,4 @@
-package com.autoscript.platform.capabilities
+package com.autoscript.platform.capabilities.a11y
 
 import com.autoscript.domain.automation.ScrollDirection
 import com.autoscript.domain.automation.UiActionExecutor
@@ -14,6 +14,7 @@ import com.autoscript.domain.core.ErrorCode
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import com.autoscript.platform.capabilities.device.AutoScriptAccessibilityService
 
 /**
  * Android 真实现的窗口树（docs §9.1；`InMemoryUiTree` 的系统侧对偶）。

@@ -1,6 +1,9 @@
-package com.autoscript.platform.capabilities
+package com.autoscript.platform.capabilities.screen
 
 import com.autoscript.domain.automation.ScreenSnapshot
+import com.autoscript.platform.capabilities.CapabilityNamespaces
+import com.autoscript.platform.capabilities.a11y.A11yBridge
+import com.autoscript.platform.capabilities.a11y.SystemA11yBridge
 
 /**
  * 截图帧源的 Android 生产者（docs §9.2 a11y 截图路径 / §8.8 分类错误）。

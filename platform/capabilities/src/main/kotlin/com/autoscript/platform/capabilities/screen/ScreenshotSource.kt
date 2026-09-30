@@ -1,4 +1,4 @@
-package com.autoscript.platform.capabilities
+package com.autoscript.platform.capabilities.screen
 
 import com.autoscript.domain.automation.ImageAnalyzer
 import com.autoscript.domain.automation.ImageFrame

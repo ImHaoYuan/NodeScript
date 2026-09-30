@@ -1,7 +1,7 @@
 package com.autoscript.platform.capabilities.device
 
-import com.autoscript.platform.capabilities.DialogResultRouter
-import com.autoscript.platform.capabilities.DialogOps
+import com.autoscript.platform.capabilities.dialogs.DialogResultRouter
+import com.autoscript.platform.capabilities.dialogs.DialogOps
 
 import android.app.AlertDialog
 import android.app.Dialog
@@ -25,6 +25,7 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import com.autoscript.platform.capabilities.dialogs.AndroidDialogHost
 
 /** 通知回投的 extras / 动作 / 通道（ops 与 receiver 共用，防两处字面量漂移）。 */
 internal object DialogExtras {

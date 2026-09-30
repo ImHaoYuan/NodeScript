@@ -7,6 +7,9 @@ import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
+import com.autoscript.platform.capabilities.a11y.A11yBridge
+import com.autoscript.platform.capabilities.screen.AndroidFrameProducer
+import com.autoscript.platform.capabilities.screen.ScreenshotSource
 
 /**
  * [AndroidFrameProducer] 经假 [A11yBridge] 的采集链（语义面 = 真 [ScreenshotSource]，

@@ -19,6 +19,9 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import com.autoscript.platform.capabilities.a11y.A11yNamespaceHandler
+import com.autoscript.platform.capabilities.a11y.InMemoryUiTree
+import com.autoscript.platform.capabilities.screen.InMemoryInputProvider
 
 /**
  * 接缝证明（§9.1）：[A11yNamespaceHandler] 只依赖 `:domain` 的三条 SPI，

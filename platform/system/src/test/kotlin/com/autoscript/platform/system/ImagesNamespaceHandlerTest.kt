@@ -1,4 +1,4 @@
-package com.autoscript.platform.capabilities
+package com.autoscript.platform.system
 
 import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.automation.ColorHit
@@ -202,7 +202,7 @@ class ImagesNamespaceHandlerTest {
     }
 
     private val fake = FakeAnalyzer()
-    private val handler = CapabilityNamespaces.images(fake)
+    private val handler = SystemNamespaces.images(fake)
 
     private suspend fun call(method: String, payload: String?): BridgeResponse =
         handler.handle(BridgeRequest(1, "images", method, payload, 5_000))
@@ -632,61 +632,4 @@ class ImagesNamespaceHandlerTest {
         Unit
     }
 
-    // ── 跨命名空间（§18-8(b) 2026-09-25 拍板："帧不通用"那条纪律取消）───────
-    // 两个 handler 共用**同一个** fake = 生产侧 `PlatformWiring` 把同一个 analyzer
-    // 同时喂给 `images` 与 `ScreenshotSource` 的形态。判据是"互认"：
-    // 截屏帧当 haystack 能匹配、能被 `images.release` 放掉、放掉后再用 STALE。
-
-    private fun rgbaProducer(w: Int, h: Int): ScreenshotSource.FrameProducer =
-        object : ScreenshotSource.FrameProducer {
-            override suspend fun snapshot(): ScreenSnapshot =
-                ScreenSnapshot(locked = false, secureForeground = false, hasWindows = true)
-
-            override suspend fun produce(width: Int, height: Int): ProducedFrame =
-                ProducedFrame(ByteArray(w * h * 4), w, h)
-        }
-
-
-    @Test
-    fun `截屏帧与 decode 帧同一张表——findImage 通、images 能放 screen 的帧`() = runBlocking {
-        val shared = FakeAnalyzer()
-        val images = CapabilityNamespaces.images(shared)
-        // 可控时钟：capture 走 333ms 节流，别让用例撞在窗口上
-        var now = 1_000L
-        val screen = ScreenshotSource(rgbaProducer(4, 4), clock = { now }, analyzer = shared)
-
-        val shot = screen.capture()
-        assertEquals(1L, shot.handle.refId, "截屏帧进的是 images 那张表（号段从 1 起）")
-
-        val iconPayload = ok(images.handle(BridgeRequest(2, "images", "decode", """{"path":"/sdcard/icon.png"}""", 5_000)))
-        val iconFields = (DomainJson.decodeObject(iconPayload)["ref"] as DomainJson.Value.Obj).fields
-        val icon = HandleRef(
-            (iconFields["refId"] as DomainJson.Value.N).raw.toLong(),
-            (iconFields["generation"] as DomainJson.Value.N).raw.toLong(),
-        )
-        assertEquals(2L, icon.refId, "decode 接着截屏帧往下发号 —— 同一段，不是两张表")
-
-        // 互认的核心：截屏帧当 haystack 不是 ERR_STALE_HANDLE
-        val matched = ok(
-            images.handle(
-                BridgeRequest(3, "images", "findImage", matchJson(shot.handle, icon, "0.9"), 5_000),
-            ),
-        )
-        assertEquals("null", matched, "跨来源两帧都认得（fake 未设命中 → 裸 null，不是 STALE）")
-
-        // `images.release` 放得掉一帧截屏（曾经：这张表里根本没有它）
-        assertEquals("true", ok(images.handle(BridgeRequest(4, "images", "release", refJson(shot.handle), 5_000))))
-        assertEquals(
-            "ERR_STALE_HANDLE",
-            errCode(images.handle(BridgeRequest(5, "images", "release", refJson(shot.handle), 5_000))),
-            "放掉即离场：两边同一口径",
-        )
-        // screen 侧再 recycle 同一帧 → 同码（同一张表、同一个"已释放"事实）
-        val e = assertThrows<AutojsException> { runBlocking { screen.recycle(shot.handle) } }
-        assertEquals(ErrorCode.ERR_STALE_HANDLE, e.error)
-
-        // 截屏帧放掉后，decode 帧照常在场可放（两帧互不牵连）
-        assertEquals("true", ok(images.handle(BridgeRequest(6, "images", "release", refJson(icon), 5_000))))
-        Unit
-    }
 }

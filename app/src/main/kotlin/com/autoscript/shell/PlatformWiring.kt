@@ -4,16 +4,20 @@ import android.content.Context
 import com.autoscript.domain.automation.ImageAnalyzer
 import com.autoscript.domain.bridge.NamespaceHandler
 import com.autoscript.domain.system.DialogHost
-import com.autoscript.platform.capabilities.AndroidDialogHost
-import com.autoscript.platform.capabilities.AndroidFrameProducer
-import com.autoscript.platform.capabilities.AndroidGestureInput
-import com.autoscript.platform.capabilities.AndroidUiTree
+import com.autoscript.platform.capabilities.dialogs.AndroidDialogHost
+import com.autoscript.platform.capabilities.screen.AndroidFrameProducer
+import com.autoscript.platform.capabilities.screen.AndroidGestureInput
+import com.autoscript.platform.capabilities.a11y.AndroidUiTree
 import com.autoscript.platform.capabilities.CapabilityNamespaces
-import com.autoscript.platform.capabilities.ScreenshotSource
+import com.autoscript.platform.capabilities.screen.ScreenshotSource
 import com.autoscript.platform.capabilities.device.SystemDialogOps
 import com.autoscript.platform.system.JniOps
 import com.autoscript.platform.system.NativeImageAnalyzer
+import com.autoscript.platform.system.SystemNamespaces
 import com.autoscript.platform.system.SystemSpis
+import com.autoscript.platform.capabilities.a11y.A11yEventRing
+import com.autoscript.platform.capabilities.a11y.InMemoryUiTree
+import com.autoscript.platform.capabilities.a11y.SystemA11yBridge
 
 /**
  * 生产能力装配：`SystemSpis` + `CapabilityNamespaces` → `AppShellKit.assemble` 的注入束
@@ -92,21 +96,21 @@ object PlatformWiring {
         systemHandlers = SystemHandlers(
             // 缺省 null（未提供）→ 如实 ERR_NOT_IMPLEMENTED；生产由 of() 传真宿主。
             dialogs = dialogs?.let { CapabilityNamespaces.dialogs(it) },
-            shell = CapabilityNamespaces.shell(spis.shell),
-            device = CapabilityNamespaces.device(spis.device),
-            app = CapabilityNamespaces.app(spis.app),
-            floatingWindow = CapabilityNamespaces.floatingWindow(spis.floatingWindow),
+            shell = SystemNamespaces.shell(spis.shell),
+            device = SystemNamespaces.device(spis.device),
+            app = SystemNamespaces.app(spis.app),
+            floatingWindow = SystemNamespaces.floatingWindow(spis.floatingWindow),
         ),
-        datastoreHandler = CapabilityNamespaces.datastore(spis.datastore),
-        zipHandler = CapabilityNamespaces.zip(spis.zip),
-        settingsHandler = CapabilityNamespaces.settings(spis.settings),
-        notificationHandler = CapabilityNamespaces.notification(spis.notification),
-        clipboardHandler = CapabilityNamespaces.clipboard(spis.clipboard),
-        sensorsHandler = CapabilityNamespaces.sensors(spis.sensors),
+        datastoreHandler = SystemNamespaces.datastore(spis.datastore),
+        zipHandler = SystemNamespaces.zip(spis.zip),
+        settingsHandler = SystemNamespaces.settings(spis.settings),
+        notificationHandler = SystemNamespaces.notification(spis.notification),
+        clipboardHandler = SystemNamespaces.clipboard(spis.clipboard),
+        sensorsHandler = SystemNamespaces.sensors(spis.sensors),
         // §9.2 图像面：生产侧由 [of] 喂 NativeImageAnalyzer（:bridge:image 的
         // libopencv.so 到位后）；单测/无 native 时不喂 —— 桥对 images.* 如实
         // ERR_NOT_IMPLEMENTED，绝不塞一个看不见像素的假分析器。
-        imagesHandler = images?.let { CapabilityNamespaces.images(it) },
+        imagesHandler = images?.let { SystemNamespaces.images(it) },
     )
 
     /** a11y 装配（[CapabilityNamespaces.a11y] 形状转接；实现在 :platform:capabilities）。 */

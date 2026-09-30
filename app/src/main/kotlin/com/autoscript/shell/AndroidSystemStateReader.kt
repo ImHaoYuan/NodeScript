@@ -13,6 +13,7 @@ import com.autoscript.domain.permission.CapabilityState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
+import com.autoscript.platform.capabilities.device.AutoScriptAccessibilityService
 
 /**
  * 三态查询的系统接触面（docs §9.5）—— [AndroidSystemStateReader] 唯一的 Android 依赖点，

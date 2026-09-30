@@ -6,6 +6,8 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import com.autoscript.platform.capabilities.a11y.A11yEventRing
+import com.autoscript.platform.capabilities.a11y.InMemoryUiTree
 
 /** [A11yEventRing] 游标契约（与 InMemoryUiTree.nextEvents 同语义：seq > since、空增量回 since）。 */
 class A11yEventRingTest {

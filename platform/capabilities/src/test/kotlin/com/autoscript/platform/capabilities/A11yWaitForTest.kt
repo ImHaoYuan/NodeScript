@@ -7,6 +7,9 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import com.autoscript.platform.capabilities.a11y.A11yNamespaceHandler
+import com.autoscript.platform.capabilities.a11y.InMemoryUiTree
+import com.autoscript.platform.capabilities.screen.InMemoryInputProvider
 
 /**
  * `waitFor` 的返回形状（§9.1 / §12.3）：与 `findOne` 共用选择器解析与树读路径，

@@ -17,6 +17,10 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import com.autoscript.platform.capabilities.device.SystemDialogOps
+import com.autoscript.platform.capabilities.dialogs.AndroidDialogHost
+import com.autoscript.platform.capabilities.dialogs.DialogResultRouter
+import com.autoscript.platform.capabilities.dialogs.DialogOps
 
 /**
  * [AndroidDialogHost] 编排语义（假 [DialogOps] 注入；设备面在 SystemDialogOps，本机不跑）。

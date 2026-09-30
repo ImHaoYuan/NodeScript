@@ -4,6 +4,9 @@ import com.autoscript.build.ArchGate
 import com.tngtech.archunit.core.importer.ClassFileImporter
 import com.tngtech.archunit.lang.syntax.ArchRuleDefinition
 import org.junit.jupiter.api.Test
+import com.autoscript.platform.capabilities.a11y.A11yBridge
+import com.autoscript.platform.capabilities.a11y.AndroidUiTree
+import com.autoscript.platform.capabilities.dialogs.AndroidDialogHost
 
 /**
  * 依赖方向守护（docs §6 模块表）：capabilities 实现 :domain SPI，不反向；

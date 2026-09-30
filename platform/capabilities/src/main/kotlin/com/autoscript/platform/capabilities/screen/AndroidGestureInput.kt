@@ -1,7 +1,9 @@
-package com.autoscript.platform.capabilities
+package com.autoscript.platform.capabilities.screen
 
 import com.autoscript.domain.automation.GestureInput
 import com.autoscript.domain.automation.InputProvider
+import com.autoscript.platform.capabilities.a11y.A11yBridge
+import com.autoscript.platform.capabilities.a11y.SystemA11yBridge
 
 /**
  * 无障碍手势输入（docs §9.1 `dispatchGesture` + §9.3 默认通道的 Android 实现）。

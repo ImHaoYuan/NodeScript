@@ -1,11 +1,11 @@
 package com.autoscript.platform.capabilities.device
 
-import com.autoscript.platform.capabilities.A11yBridge
-import com.autoscript.platform.capabilities.A11yEventRing
-import com.autoscript.platform.capabilities.A11yNode
-import com.autoscript.platform.capabilities.A11yNodeSnap
-import com.autoscript.platform.capabilities.A11yServiceHolder
-import com.autoscript.platform.capabilities.ProducedFrame
+import com.autoscript.platform.capabilities.a11y.A11yBridge
+import com.autoscript.platform.capabilities.a11y.A11yEventRing
+import com.autoscript.platform.capabilities.a11y.A11yNode
+import com.autoscript.platform.capabilities.a11y.A11yNodeSnap
+import com.autoscript.platform.capabilities.a11y.A11yServiceHolder
+import com.autoscript.platform.capabilities.screen.ProducedFrame
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
@@ -31,6 +31,9 @@ import com.autoscript.domain.automation.WindowScope
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
 import kotlinx.coroutines.CompletableDeferred
+import com.autoscript.platform.capabilities.a11y.AndroidUiTree
+import com.autoscript.platform.capabilities.a11y.SystemA11yBridge
+import com.autoscript.platform.capabilities.screen.ScreenshotSource
 
 /**
  * 无障碍服务本体（docs §9.1「服务在 :main」；清单见本模块 AndroidManifest.xml）。

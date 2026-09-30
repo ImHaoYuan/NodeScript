@@ -1,4 +1,4 @@
-package com.autoscript.platform.capabilities
+package com.autoscript.platform.system
 
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
@@ -66,7 +66,7 @@ class SensorsNamespaceHandlerTest {
     }
 
     private val fake = FakeSensors()
-    private val handler = CapabilityNamespaces.sensors(fake)
+    private val handler = SystemNamespaces.sensors(fake)
 
     private suspend fun call(method: String, payload: String?): BridgeResponse =
         handler.handle(BridgeRequest(1, "sensors", method, payload, 5_000))

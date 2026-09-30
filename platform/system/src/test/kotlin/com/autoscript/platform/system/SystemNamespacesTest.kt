@@ -1,4 +1,4 @@
-package com.autoscript.platform.capabilities
+package com.autoscript.platform.system
 
 import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.bridge.BridgeRequest
@@ -8,12 +8,6 @@ import com.autoscript.domain.core.ErrorCode
 import com.autoscript.domain.system.AppLauncher
 import com.autoscript.domain.system.DeviceInfoProvider
 import com.autoscript.domain.system.DeviceProfile
-import com.autoscript.domain.system.DialogHost
-import com.autoscript.domain.system.DialogMode
-import com.autoscript.domain.system.DialogOutcome
-import com.autoscript.domain.system.DialogPromptRequest
-import com.autoscript.domain.system.DialogChooseRequest
-import com.autoscript.domain.system.DialogChoice
 import com.autoscript.domain.system.FloatingWindowHost
 import com.autoscript.domain.system.FloatingWindowSpec
 import com.autoscript.domain.system.ShellExecutor
@@ -28,7 +22,9 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 /**
- * 五个系统侧命名空间的桥处理器测试（docs §9.4/§9.6/§12.2，JS 对偶 `extras.ts`）。
+ * `shell`/`device`/`app`/`floatingWindow` 四个命名空间的桥处理器测试
+ * （docs §9.4/§9.6/§12.2，JS 对偶 `extras.ts`；`dialogs` 半 2026-09-30 随步骤 6 拆去
+ * capabilities 的 DialogsNamespaceHandlerTest）。
  *
  * 判据与 [CapabilityNamespacesTest] 同一套口径，另加三件本组特有的事：
  * 1. **载荷形状与 JS facade 逐字对齐**：`{code,stdout,stderr}`、`{value,confirmed}`、
@@ -68,14 +64,6 @@ class SystemNamespacesTest {
         override suspend fun currentPackage(): String? = current
     }
 
-    private class FakeDialogs(
-        private val outcome: DialogOutcome = DialogOutcome("abc", true),
-        private val choice: DialogChoice = DialogChoice(1),
-    ) : DialogHost {
-        override suspend fun prompt(request: DialogPromptRequest): DialogOutcome = outcome
-        override suspend fun choose(request: DialogChooseRequest): DialogChoice = choice
-    }
-
     private class FakeFloating(
         private val next: Long = 7,
         private val failOnCreate: AutojsException? = null,
@@ -97,7 +85,7 @@ class SystemNamespacesTest {
     @Test
     fun `shell exec 三字段载荷与超时透传`() = runBlocking {
         val fake = FakeShell(result = { ShellResult(0, "out", "err") })
-        val h = CapabilityNamespaces.shell(fake, defaultTimeoutMillis = 12_345)
+        val h = SystemNamespaces.shell(fake, defaultTimeoutMillis = 12_345)
         val resp = h.handle(BridgeRequest(1, "shell", "exec", """{"cmd":"id","timeout":9000}""", 5_000))
         val ok = assertInstanceOf(BridgeResponse.Ok::class.java, resp)
         val o = DomainJson.decodeObject(ok.payload!!)
@@ -114,7 +102,7 @@ class SystemNamespacesTest {
     @Test
     fun `shell 方法别名与 mode 字面量`() = runBlocking {
         val fake = FakeShell()
-        val h = CapabilityNamespaces.shell(fake)
+        val h = SystemNamespaces.shell(fake)
         // extras.ts 的 shell.shell() 是 exec() 的别名：两个方法名都可达
         h.handle(BridgeRequest(1, "shell", "shell", """{"cmd":"id"}""", 5_000))
         h.handle(BridgeRequest(2, "shell", "exec", """{"cmd":"id","mode":"root"}""", 5_000))
@@ -131,7 +119,7 @@ class SystemNamespacesTest {
     @Test
     fun `shell 分类错误原码透传，零超时与缺 cmd 是参数错`() = runBlocking {
         val denied = FakeShell(fail = { AutojsException(ErrorCode.ERR_PERMISSION_DENIED, "root 未授权") })
-        val h = CapabilityNamespaces.shell(denied)
+        val h = SystemNamespaces.shell(denied)
         val err = assertInstanceOf(
             BridgeResponse.Err::class.java,
             h.handle(BridgeRequest(1, "shell", "exec", """{"cmd":"su"}""", 5_000)),
@@ -169,7 +157,7 @@ class SystemNamespacesTest {
 
     @Test
     fun `device model 与 sdkInt 直出字符串与数字`() = runBlocking {
-        val h = CapabilityNamespaces.device(FakeDevice())
+        val h = SystemNamespaces.device(FakeDevice())
         val model = assertInstanceOf(
             BridgeResponse.Ok::class.java,
             h.handle(BridgeRequest(1, "device", "model", null, 5_000)),
@@ -193,7 +181,7 @@ class SystemNamespacesTest {
 
     @Test
     fun `app launch 起不来回 false 而非抛错`() = runBlocking {
-        val h = CapabilityNamespaces.app(FakeApp(launched = false, current = null))
+        val h = SystemNamespaces.app(FakeApp(launched = false, current = null))
         val launch = assertInstanceOf(
             BridgeResponse.Ok::class.java,
             h.handle(BridgeRequest(1, "app", "launch", """{"packageName":"com.x"}""", 5_000)),
@@ -211,7 +199,7 @@ class SystemNamespacesTest {
 
     @Test
     fun `app launch 成功回 true，缺 packageName 是参数错`() = runBlocking {
-        val h = CapabilityNamespaces.app(FakeApp())
+        val h = SystemNamespaces.app(FakeApp())
         val ok = assertInstanceOf(
             BridgeResponse.Ok::class.java,
             h.handle(BridgeRequest(1, "app", "launch", """{"packageName":"com.autoscript"}""", 5_000)),
@@ -225,103 +213,12 @@ class SystemNamespacesTest {
         Unit
     }
 
-    // ── dialogs ─────────────────────────────────────────────────────
-
-    @Test
-    fun `dialogs prompt 回 value confirmed 两字段`() = runBlocking {
-        val h = CapabilityNamespaces.dialogs(FakeDialogs(outcome = DialogOutcome("张三", true)))
-        val ok = assertInstanceOf(
-            BridgeResponse.Ok::class.java,
-            h.handle(BridgeRequest(1, "dialogs", "prompt", """{"title":"名字","placeholder":"请输入"}""", 5_000)),
-        )
-        val o = DomainJson.decodeObject(ok.payload!!)
-        assertEquals("张三", (o["value"] as DomainJson.Value.S).v)
-        assertTrue((o["confirmed"] as DomainJson.Value.B).v)
-        Unit
-    }
-
-    @Test
-    fun `dialogs prompt 取消折叠为 value null confirmed false`() = runBlocking {
-        val h = CapabilityNamespaces.dialogs(FakeDialogs(outcome = DialogOutcome.CANCELLED))
-        val ok = assertInstanceOf(
-            BridgeResponse.Ok::class.java,
-            h.handle(BridgeRequest(1, "dialogs", "prompt", """{"title":"名字"}""", 5_000)),
-        )
-        val o = DomainJson.decodeObject(ok.payload!!)
-        assertTrue(o["value"] is DomainJson.Value.Null)
-        assertFalse((o["confirmed"] as DomainJson.Value.B).v)
-        Unit
-    }
-
-    @Test
-    fun `dialogs choose 直出下标，取消即 -1`() = runBlocking {
-        val h = CapabilityNamespaces.dialogs(FakeDialogs(choice = DialogChoice(2)))
-        val ok = assertInstanceOf(
-            BridgeResponse.Ok::class.java,
-            h.handle(BridgeRequest(1, "dialogs", "choose", """{"title":"选","options":["a","b","c"]}""", 5_000)),
-        )
-        assertEquals("2", (DomainJson.decode(ok.payload!!) as DomainJson.Value.N).raw)
-
-        val cancelled = CapabilityNamespaces.dialogs(FakeDialogs(choice = DialogChoice.CANCELLED))
-        val c = assertInstanceOf(
-            BridgeResponse.Ok::class.java,
-            cancelled.handle(BridgeRequest(2, "dialogs", "choose", """{"title":"选","options":["a"]}""", 5_000)),
-        )
-        assertEquals("-1", (DomainJson.decode(c.payload!!) as DomainJson.Value.N).raw)
-        Unit
-    }
-
-    @Test
-    fun `dialogs 空标题与空选项在构造期即拒`() = runBlocking {
-        val h = CapabilityNamespaces.dialogs(FakeDialogs())
-        val noTitle = assertInstanceOf(
-            BridgeResponse.Err::class.java,
-            h.handle(BridgeRequest(1, "dialogs", "prompt", """{"title":""}""", 5_000)),
-        )
-        assertEquals(ErrorCode.ERR_INVALID_PARAM.code, noTitle.errorCode)
-        val noOptions = assertInstanceOf(
-            BridgeResponse.Err::class.java,
-            h.handle(BridgeRequest(2, "dialogs", "choose", """{"title":"选","options":[]}""", 5_000)),
-        )
-        assertEquals(ErrorCode.ERR_INVALID_PARAM.code, noOptions.errorCode)
-        val notArray = assertInstanceOf(
-            BridgeResponse.Err::class.java,
-            h.handle(BridgeRequest(3, "dialogs", "choose", """{"title":"选","options":"a"}""", 5_000)),
-        )
-        assertEquals(ErrorCode.ERR_INVALID_PARAM.code, notArray.errorCode)
-        Unit
-    }
-
-    @Test
-    fun `dialogs BAL 降级路径失败回分类错误`() = runBlocking {
-        // overlay 未授权且通知不可达 → 宿主如实抛 ERR_PERMISSION_DENIED，handler 原码透传
-        val h = CapabilityNamespaces.dialogs(
-            object : DialogHost {
-                override suspend fun prompt(request: DialogPromptRequest): DialogOutcome =
-                    throw AutojsException(ErrorCode.ERR_PERMISSION_DENIED, "overlay 未授权且通知降级不可达")
-                override suspend fun choose(request: DialogChooseRequest): DialogChoice =
-                    throw AutojsException(ErrorCode.ERR_SERVICE_DISABLED, "无对话框宿主")
-            },
-        )
-        val err = assertInstanceOf(
-            BridgeResponse.Err::class.java,
-            h.handle(BridgeRequest(1, "dialogs", "prompt", """{"title":"名字","mode":"overlay"}""", 5_000)),
-        )
-        assertEquals("ERR_PERMISSION_DENIED", err.errorCode)
-        val err2 = assertInstanceOf(
-            BridgeResponse.Err::class.java,
-            h.handle(BridgeRequest(2, "dialogs", "choose", """{"title":"选","options":["a"]}""", 5_000)),
-        )
-        assertEquals("ERR_SERVICE_DISABLED", err2.errorCode)
-        Unit
-    }
-
     // ── floatingWindow ──────────────────────────────────────────────
 
     @Test
     fun `floatingWindow create 回句柄两字段，close 幂等透传`() = runBlocking {
         val fake = FakeFloating(next = 42)
-        val h = CapabilityNamespaces.floatingWindow(fake)
+        val h = SystemNamespaces.floatingWindow(fake)
         val created = assertInstanceOf(
             BridgeResponse.Ok::class.java,
             h.handle(BridgeRequest(1, "floatingWindow", "create", """{"title":"面板","width":300,"height":200}""", 5_000)),
@@ -342,7 +239,7 @@ class SystemNamespacesTest {
     @Test
     fun `floatingWindow 尺寸非法与跨代句柄都是分类错误`() = runBlocking {
         val fake = FakeFloating(failOnCreate = AutojsException(ErrorCode.ERR_PERMISSION_DENIED, "overlay 未授予"))
-        val h = CapabilityNamespaces.floatingWindow(fake)
+        val h = SystemNamespaces.floatingWindow(fake)
         val zero = assertInstanceOf(
             BridgeResponse.Err::class.java,
             h.handle(BridgeRequest(1, "floatingWindow", "create", """{"width":0,"height":200}""", 5_000)),
@@ -356,7 +253,7 @@ class SystemNamespacesTest {
         assertEquals("ERR_PERMISSION_DENIED", denied.errorCode)
 
         // 未知句柄 / 跨代 → ERR_STALE_HANDLE 原码透传（§7.4）
-        val stale = CapabilityNamespaces.floatingWindow(
+        val stale = SystemNamespaces.floatingWindow(
             FakeFloating(failOnClose = AutojsException(ErrorCode.ERR_STALE_HANDLE, "窗口已关闭")),
         )
         val err = assertInstanceOf(
@@ -376,25 +273,11 @@ class SystemNamespacesTest {
     // ── 挂载缝整体口径 ──────────────────────────────────────────────
 
     @Test
-    fun `五个命名空间的 mode 缺省都是 auto 与 default`() = runBlocking {
-        // 确认 mode 缺省不抛错：JS facade 不传 mode 时走 AUTO（dialogs）/ DEFAULT（shell）
+    fun `shell 的 mode 缺省是 default（JS 不传 mode 不抛错）`() = runBlocking {
         val shellFake = FakeShell()
-        CapabilityNamespaces.shell(shellFake)
+        SystemNamespaces.shell(shellFake)
             .handle(BridgeRequest(1, "shell", "exec", """{"cmd":"id"}""", 5_000))
         assertEquals(ShellMode.DEFAULT, shellFake.mode)
-
-        var seenMode: DialogMode? = null
-        val h = CapabilityNamespaces.dialogs(
-            object : DialogHost {
-                override suspend fun prompt(request: DialogPromptRequest): DialogOutcome {
-                    seenMode = request.mode
-                    return DialogOutcome.CANCELLED
-                }
-                override suspend fun choose(request: DialogChooseRequest): DialogChoice = DialogChoice.CANCELLED
-            },
-        )
-        h.handle(BridgeRequest(2, "dialogs", "prompt", """{"title":"t"}""", 5_000))
-        assertEquals(DialogMode.AUTO, seenMode)
         Unit
     }
 }

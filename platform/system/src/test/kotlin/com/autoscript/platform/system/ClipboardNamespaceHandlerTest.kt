@@ -1,4 +1,4 @@
-package com.autoscript.platform.capabilities
+package com.autoscript.platform.system
 
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
@@ -43,7 +43,7 @@ class ClipboardNamespaceHandlerTest {
     }
 
     private val fake = FakeClipboard()
-    private val handler = CapabilityNamespaces.clipboard(fake)
+    private val handler = SystemNamespaces.clipboard(fake)
 
     private suspend fun call(method: String, payload: String?): BridgeResponse =
         handler.handle(BridgeRequest(1, "clipboard", method, payload, 5_000))
