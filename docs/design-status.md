@@ -61,9 +61,22 @@
   >K=8 压 NMS；region 四态含粗筛×ROI×全帧坐标）；`npm test` 192 例 0 失败（1 例
   env 门禁 skip = CI 同跳）；`gen:wire` diff 空；gradle 13 任务同源行 BUILD SUCCESSFUL
   （含 archUnit / ModuleGraphTest / TestGuard）；NDK arm64 `-fsyntax-only` 双文件过。
-- **未完（下一次真机）**：A4 / A4-region / A2 复测 —— image-native CI 产物推设备 +
+- ~~**未完（下一次真机）**：A4 / A4-region / A2 复测 —— image-native CI 产物推设备 +
   imgbench 新行 + `FORCE_EXACT` A/B + 三常数扫参。**判据 <40ms 不改**（拍板项），
-  region 数字回来再谈口径。
+  region 数字回来再谈口径。~~ **同日已做**，见下条。
+
+### 2026-09-30 —— A2–A4 优化后真机复测（同日第二次；run1 金字塔 vs run2 强制精确 A/B）
+- **产物链**：image-native run `36718494804` 两 job 全绿（host 语义门 CI 侧复跑 ✓ +
+  `libopencv.so` arm64 出包，sha256 校验 `0f23441…34246`，strings 可见四个调参口）
+  → 推云手机（Android 13/arm64/4KB，同机同 `scr.raw`）→ imgbench 新行 ×100 中位。
+- **数字（首测 → run1 金字塔 / run2 强制精确）**：
+  - A2 计算段 1912.8ms → **171.75ms** / 1851.3ms —— **判据转绿**（match×2 ≈125ms <700ms）。
+  - A4 370×80 全帧 933.6 → **62.98ms** / 892.3ms（14.2×，回退阀 ≈ 旧行为）—— 仍 ❌ 差 1.6×。
+  - A4 48×48 全帧 862.4 → 855.5 / 866.2ms —— ❌ 预期（短边<80 恒精确路径）。
+  - **A4-region 48×48 @300×150 = 16.57ms ✅；370×80 @540×190 = 11.77ms ✅**（新行）。
+  - A3 ROI 0.870 / 0.906ms ✅ 不变。
+- **判据 <40ms 仍不改**（只追加）：全帧 63ms ❌ vs region 11.8ms ✅ 的口径之争现在
+  有数字了 —— **改判据与否待拍板**（§7.7 出路 ③ 保持原状）。表全文见 §7.7 复测块。
 
 ### 2026-09-30 —— A2–A4 真机性能实测（恢复自挂起；云手机 Android 13/API 33/arm64/4KB，OpenCV 4.14）
 
