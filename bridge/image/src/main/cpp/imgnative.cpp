@@ -16,7 +16,10 @@
 //
 // 帧表所有权（§9.2）：本 TU 自管 unordered_map<refId, Mat>，单调发号、
 // 不放缓存——缓存会让两个 refId 指向同一份像素，释放一个另一个即成野指针
-// （与 :domain ImageAnalyzer KDoc 同一理由）。guard：一把全局互斥量；帧表
+// （与 :domain ImageAnalyzer KDoc 同一理由）。**这句说的是帧表本身**：帧表里
+// 每个 ref 恒对应一份自有像素。派生图缓存（needle prep / scene prep，见下）
+// 是另一回事——它们按 ref 键控、不参与发号、release 时同步清，谁也不会让两个
+// ref 指向同一份帧。guard：一把全局互斥量；帧表
 // 操作是 O(1) 元数据改动，远低于匹配耗时，与 Kotlin 侧 ImagesNamespaceHandler
 // 的 Mutex guard 同构（不是热点，不细分）。锁恒盖**帧表段**（查找/发号/擦除）；
 // match 的计算段 2026-09-30 起移出锁（帧入表后不可变，浅拷贝即安全，理由见
@@ -73,6 +76,24 @@ struct NeedlePrep {
 };
 std::mutex g_match_cache_mu;
 std::unordered_map<int64_t, NeedlePrep> g_needle_prep;
+
+// 场景端粗筛准备缓存（2026-10-01）：同一帧的 `cvtColor(BGRA2GRAY)` + `resize(0.25×)`
+// 每次 match 都重做一遍，而**帧入表后不可变**（与上面 needle 那条不变式逐字同源：
+// 「帧表纪律本身：帧入表后不可变」，见 imgnative_match 的「计算出锁」段）。
+// 真机实测（1080×2400）：cvtColor ≈5.9ms + resize ≈1.6ms，A4 单次 24ms 里占 ~7.6ms；
+// A2「一次截图两次匹配」正是这条缓存的消费方 —— 同一 haystack 跑两遍，第二遍白付。
+//
+// 只缓存**全帧**（region == nullptr）：region 是浅视图，其灰度化/缩小结果与"先全帧
+// 再裁"在小尺度边界上有舍入差，缓存键要带着 region 走才等价 —— 那套账不值当，
+// region 调用原样走现算路径（region 本来就是低延迟出路，见 imgnative_match 注）。
+//
+// sc 存在条目里：同一帧配不同模板可能落到 0.25×/0.5× 两档，档不对就重建覆盖
+// （混用会抖动但不影响正确性 —— 结果只由 (帧, sc) 决定，不由缓存命中与否决定）。
+struct ScenePrep {
+    double sc = 1.0;
+    cv::Mat hs;   // 灰度缩小图（全帧口径）
+};
+std::unordered_map<int64_t, ScenePrep> g_scene_prep;
 int64_t g_next_ref = 1;
 
 constexpr int IMG_OK = 0;
@@ -299,6 +320,34 @@ NeedlePrep get_needle_prep(int64_t needle, const cv::Mat& n) {
 }
 
 /**
+ * 全帧场景端粗筛图（灰度 0.25×/0.5×）—— 命中即复用，未命中现算并按 (ref) 缓存。
+ *
+ * 与 `get_needle_prep` 同一套纪律（同两把锁、同顺序、同 release 清理）：帧不可变
+ * 是这条缓存的**全部依据**，所以它和模板端缓存写在同一个地方、用同一个失效钩子。
+ * 缓存的量只由 (帧, sc) 决定 —— 「命中与否」不改变结果，只改变谁付这笔钱。
+ */
+cv::Mat get_scene_prep(int64_t haystack, const cv::Mat& h, double sc) {
+    {
+        const std::lock_guard<std::mutex> lk(g_match_cache_mu);
+        auto it = g_scene_prep.find(haystack);
+        if (it != g_scene_prep.end() && it->second.sc == sc && !it->second.hs.empty()) {
+            return it->second.hs;
+        }
+    }
+    cv::Mat hg, hs;
+    cv::cvtColor(h, hg, cv::COLOR_BGRA2GRAY);
+    cv::resize(hg, hs, cv::Size(), sc, sc, cv::INTER_AREA);
+    // 与 get_needle_prep 同锁序（先 g_mu 再 cache_mu）：不相识的 ref 不入表。
+    {
+        const std::lock_guard<std::mutex> lk(g_mu);
+        if (g_frames.find(haystack) == g_frames.end()) return hs;
+        const std::lock_guard<std::mutex> ck(g_match_cache_mu);
+        g_scene_prep[haystack] = ScenePrep{sc, hs};   // 换 sc 即覆盖（大小只由 (帧,sc) 定）
+        return hs;
+    }
+}
+
+/**
  * 金字塔路径：灰度缩小图上只**提名**候选，报出去的坐标/置信度全部回到**原图
  * 4 通道**小窗里重算 —— 阈值与置信度语义因此与精确路径一字不差（这是与「灰度
  * 上直接匹配」的本质区别：那条会漂移答案，评审已否）。
@@ -309,13 +358,18 @@ NeedlePrep get_needle_prep(int64_t needle, const cv::Mat& n) {
  * 精确 —— 回退会让「图上没有」退化回 900ms）。假 miss 的残余风险由 host 差分
  * 双跑门计数：同一输入强制精确 vs 本路径，必须同命中/同位置/置信度 ≤2e-3。
  */
-MatchHit match_pyramid(const cv::Mat& h, const cv::Mat& n, double thr, const NeedlePrep& prep) {
+// `use_scene_cache` = 全帧调用（region == nullptr）才允许走场景缓存：region 是浅视图，
+// 它的灰度/缩小与"先全帧再裁"在小尺度边界上有舍入差，缓存键得带 region 才等价。
+MatchHit match_pyramid(const cv::Mat& h, const cv::Mat& n, double thr, const NeedlePrep& prep,
+                       int64_t haystack, bool use_scene_cache) {
     const MatchTune& t = match_tune();
-    cv::Mat hs;
     const double sc = prep.sc;
-    cv::Mat hg;
-    cv::cvtColor(h, hg, cv::COLOR_BGRA2GRAY);
-    cv::resize(hg, hs, cv::Size(), sc, sc, cv::INTER_AREA);
+    cv::Mat hs = use_scene_cache ? get_scene_prep(haystack, h, sc) : cv::Mat();
+    if (hs.empty()) {
+        cv::Mat hg;
+        cv::cvtColor(h, hg, cv::COLOR_BGRA2GRAY);
+        cv::resize(hg, hs, cv::Size(), sc, sc, cv::INTER_AREA);
+    }
     const cv::Mat& ns = prep.small;
     if (ns.cols > hs.cols || ns.rows > hs.rows) return match_exact(h, n, thr);
 
@@ -362,10 +416,12 @@ MatchHit match_pyramid(const cv::Mat& h, const cv::Mat& n, double thr, const Nee
     //   收窄后的 pad = ceil(1/sc)·1+2 仍盖住粗坐标回映误差（< 1/sc 原图像素）+
     //   resize 舍入。**不变式**：精配仍在原 4 通道窗内重算，只改「窗多大」不改
     //   「报什么」—— 差分门对 fast 路径逐字段比对（位置 + |Δconf| ≤ 2e-3）。
-    //   收窄 pad 的 CCOEFF 归一化分母随窗缩略有变化，conf 微移；探针实测
-    //   pad 10→6 在 370×80 上 conf 仍 1.0000 同位（饱和区，漂移 < 1e-4）。
-    //   与 kPadk=3 的关系：常态 pad = ceil(1/sc)·kPadk+2（上面已声明）；FastPath
-    //   的收窄 pad = ceil(1/sc)·1+2 是「唯一高置信候选」专用的一档，其余情形不变。
+    //   收窄 pad 的 CCOEFF 归一化分母随窗缩略有变化，conf 微移；真机 370×80 实测
+    //   两条路径 conf 均 1.0000 同位、坐标逐像素相同（饱和区，漂移 < 1e-4）。
+    //   与 kPadk=3 的关系：常态 pad = ceil(1/sc)·kPadk+2 = 14（0.25× 档，上面已
+    //   声明；本函数 rebase 到相位门基线之前，常态是 ceil(1/sc)·2+2 = 10）；
+    //   FastPath 的收窄 pad = ceil(1/sc)·1+2 = 6 是「唯一高置信候选」专用的一档，
+    //   其余情形不变。收窄的绝对量因此比首版更大（14→6，而非 10→6）。
     if (cands.size() == 1 && first_conf >= thr + 0.05) {
         pad = static_cast<int>(std::ceil(1.0 / sc)) * 1 + 2;
     }
@@ -540,11 +596,13 @@ int imgnative_match(int64_t haystack, int64_t needle, double threshold,
         }
 
         cv::Point origin(0, 0);
+        bool full_frame = true;
         if (region != nullptr) {
             cv::Rect roi;
             if (!resolve_region(h, region, &roi)) return IMG_ERR_INVALID_PARAM;
             h = h(roi);          // 浅视图，不拷像素
             origin = roi.tl();   // 命中坐标加回全帧口径
+            full_frame = false;
         }
 
         // 模板比画面（或所选 region）大：opencv matchTemplate 会直接断言失败，
@@ -563,7 +621,7 @@ int imgnative_match(int64_t haystack, int64_t needle, double threshold,
                 std::min(threshold - coarse_margin_of(prep.sc) + tune.headroom, 0.97);
             use_pyramid = prep.phase_worst >= floor;
         }
-        const MatchHit hit = use_pyramid ? match_pyramid(h, n, threshold, prep)
+        const MatchHit hit = use_pyramid ? match_pyramid(h, n, threshold, prep, haystack, full_frame)
                                          : match_exact(h, n, threshold);
         if (!hit.found) {
             *out_match = 0;
@@ -590,6 +648,7 @@ int imgnative_release(int64_t ref) {
     if (erased) {
         const std::lock_guard<std::mutex> ck(g_match_cache_mu);
         g_needle_prep.erase(ref);
+        g_scene_prep.erase(ref);   // 场景端缓存与模板端缓存同一个失效钩子（帧没了图也没了）
     }
     return erased ? IMG_OK : IMG_ERR_STALE_HANDLE;
 }

@@ -446,6 +446,51 @@ int main() {
         }
     }
 
+    // 9) **场景端粗筛缓存（2026-10-01）：同帧连跑两次必须同解**。
+    //    缓存是纯性能件（省 cvtColor+resize ≈7.6ms/次），但它把一份**派生图**
+    //    钉在了帧的生存期上 —— 判据是"缓存命中不改变任何出参字节"。
+    //    这里三重差分：① 同 (帧,模板,thr) 连跑两次逐字段一致（第二次命中的是
+    //    缓存图，第一次是现算图）；② 中间插一次**别的模板**匹配（不同 sc 档，
+    //    逼迫缓存键 (ref) 上的图被换掉/复用），回来后第三条仍与原值一致；
+    //    ③ 换 sc 档：拿一个短边落在 0.5× 档的模板（48→0.25×、100→0.25×，
+    //    要 0.5× 需短边 24..47 —— 用 320×40 让 40*0.5=20≥12 且 40*0.25=10<12）
+    //    与 370×80 交替匹配，两条各自与"单独跑"同解。
+    //    缓存图是灰度**缩小**图（CV_8U 单通道），与精配用的原 4 通道窗是两张图
+    //    —— 这里顺带把"缓存没有把原图像素改掉"也钉住：第三次跑完再验一次全帧
+    //    像素哈希（缓存若误写成就地缩小，原图会变）。
+    {
+        cv::Mat base2(240, 320, CV_8UC4);
+        rng.fill(base2, cv::RNG::UNIFORM, 0, 256);
+        base2(cv::Rect(80, 90, 120, 100)).setTo(cv::Scalar(30, 180, 60, 255));
+        cv::Mat scr;
+        cv::resize(base2, scr, cv::Size(1280, 960), 0, 0, cv::INTER_LINEAR);
+        cv::Mat tpl9 = scr(cv::Rect(320, 360, 480, 400)).clone();   // 短边 400 → 0.25×
+        cv::Mat tpl9b = scr(cv::Rect(320, 360, 480, 40)).clone();   // 短边 40 → 0.5×
+        const int64_t s9 = dec(d + "/scr9.png", scr);
+        const int64_t t9 = dec(d + "/tpl9.png", tpl9);
+        const int64_t t9b = dec(d + "/tpl9b.png", tpl9b);
+        if (s9 >= 0 && t9 >= 0 && t9b >= 0) {
+            const MR a = call_match(s9, t9, 0.9);      // 现算（缓存空）
+            const MR b = call_match(s9, t9, 0.9);      // 命中缓存
+            chk(a.rc == 0 && a.m == 1, "case9 首次命中");
+            chk(b.rc == 0 && b.m == 1 && b.x == a.x && b.y == a.y &&
+                std::fabs(b.c - a.c) < 1e-9, "case9 二次（命中场景缓存）与原值逐字段一致");
+            const MR mid = call_match(s9, t9b, 0.9);   // 另一个 sc 档：换图
+            const MR c = call_match(s9, t9, 0.9);      // 换回来
+            chk(mid.rc == 0, "case9 中间换 sc 档调用成功");
+            chk(c.rc == 0 && c.m == 1 && c.x == a.x && c.y == a.y &&
+                std::fabs(c.c - a.c) < 1e-9, "case9 换档后回到原档：仍与原值逐字段一致");
+            // region 路径**不走**场景缓存：与全帧调用同解（坐标加回全帧口径）。
+            const int32_t reg9[4] = {300, 340, 600, 500};
+            const MR rf = call_match(s9, t9, 0.9, reg9);
+            chk(rf.rc == 0 && rf.m == 1 && rf.x == a.x && rf.y == a.y &&
+                std::fabs(rf.c - a.c) < 1e-9, "case9 region 路径与全帧同解（场景缓存不参与 region）");
+            imgnative_release(s9);
+            imgnative_release(t9);
+            imgnative_release(t9b);
+        }
+    }
+
     // 差分跑完复位 kill switch（dual_match 尾态即 false，显式钉一次防回归时把
     // 别的 case 悄悄圈进强制精确路径）。
     g_force_exact.store(false);
