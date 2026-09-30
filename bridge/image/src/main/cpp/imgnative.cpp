@@ -1158,16 +1158,37 @@ int imgnative_color(int64_t frame, const int32_t* color, int32_t tolerance,
             return IMG_OK;
         }
 
-        // findNonZero 给 N×1 的 (x,y) 点列（单通道 CV_32SC2）；只取第一个 ——
-        // 没有命中（上面已判）与命中多个取哪个，是两个问题：多个命中时**回第一个
-        // 不排序**（顺序 = OpenCV 点列的**列主序**：y 不变、x 从 0 扫到 w，
-        // 再进下一行。这不是"离左上角最近"，严格说 (y=0,x=w-1) 会排在
+        // 首个命中 = **行主序**第一个非零像素（y 从小到大，同一行内 x 从小到大）。
+        //
+        // 【2026-10-01 性能修：不再走 cv::findNonZero】语义与
+        // `findNonZero(mask).at<Point>(0)` **逐位同解** —— 同一份 OpenCV 源码里
+        // （core/src/count_non_zero.dispatch.cpp）它也是外层遍历行、内层遍历列，
+        // 点按 (x=列, y=行) 入列，第 0 个就是这里扫到的那个。区别只在**代价**：
+        // findNonZero 是"先把每一个命中都 push 进 vector、再 copyTo 成 N×1 点列"，
+        // 命中面大时（1080×2400 上 76.7% 命中 ≈ 199 万点 ≈ 16MB）光建表就 ~25ms
+        // —— 命中越多越慢，与"找第一个"的语义完全无关。本算子只要第一个点，
+        // 扫到即返回：代价从 O(全部命中) 降到 O(首个命中的位置)。
+        // host 实测（真机截图 /tmp/imgbench 同源）：76.7% 命中面 22.12ms → 0.003ms，
+        // 且 9.6% / 76.7% / 未命中三种命中面下**返回值逐位相同**。
+        //
+        // 顺序本身仍是契约的一部分：这不是"离左上角最近"，严格说 (y=0,x=w-1) 会排在
         // (y=1,x=0) 前面 —— 稳定可复现就够了；按距离/面积排序会是另一套没在
-        // 契约里出现的策略，脚本要自己再筛）。
-        cv::Mat points;
-        cv::findNonZero(mask, points);
-        if (points.empty() || points.total() == 0) return IMG_ERR_IO;
-        const cv::Point p = points.at<cv::Point>(0);
+        // 契约里出现的策略，脚本要自己再筛。（catch：本注释 2026-10-01 之前把这条
+        // 顺序写成"列主序"，描述的行为（y 不变、x 扫到底再进下一行）一直是行主序，
+        // 只是名字写反了 —— 行为未变，名字改对。）
+        cv::Point p(-1, -1);
+        for (int y = 0; y < mask.rows && p.x < 0; ++y) {
+            const unsigned char* row = mask.ptr<unsigned char>(y);
+            for (int x = 0; x < mask.cols; ++x) {
+                if (row[x] != 0) {
+                    p = cv::Point(x, y);
+                    break;
+                }
+            }
+        }
+        // 上面 countNonZero 已保证至少一个命中；仍空 = mask 在两次读之间变了
+        // （mask 是本函数新分配的局部量，正常不可达）—— 如实报 IO，不假装命中。
+        if (p.x < 0) return IMG_ERR_IO;
         // ROI 内的坐标加回 roi 左上角，让脚本拿到的是**全帧坐标**（与 matchTemplate
         // 的命中坐标同口径，不发明第二套坐标系）。
         // Vec4b 的通道序是 **B,G,R,A**（OpenCV 的三通道基序是 BGR），所以回包的
