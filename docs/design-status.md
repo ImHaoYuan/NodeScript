@@ -42,6 +42,63 @@
 
 ## 流水（最新在最上）
 
+### 2026-10-02 —— A2b 拍板落地：shell 捕获输出超限改「静默截断 + Warning + 截断标志」（分支 `hellish-shrimp`）
+
+backlog A2b（2026-10-01 修 A2 超时/收尸时露出的口子）：`AndroidShellExecutor.PipeReader`
+把 stdout/stderr **全量**读进内存，一条 `cat` 大文件就能把宿主撑爆。加 cap 是**契约口径**
+变更（§9.6 原文只写「双流并发读干」，没定过上限），故 2026-10-02 先拍板再动手。
+口径追加在 [`design-decisions.md`](design-decisions.md) 第 21 项。
+
+**拍板 = 截断，不是报错**。「静默」指的是**调用方不因此失败**（不抛 `ERR_*`、`code` 仍是
+子进程真实退出码、`isSuccess` 语义不变），**不是瞒着** —— 三处同时留痕，缺一处就是悄悄丢字节：
+
+| 层 | 落点 | 谁读 |
+|---|---|---|
+| 程序 | `ShellResult.truncated`（纯增量字段，缺省 false） | 脚本自己（据此决定要不要分页/落盘） |
+| 运维 | 可注入 `LogSink` 的 Warning（带命令本身 + 丢弃字节数） | logcat |
+| 人 | 被截流末尾追加 `TRUNCATION_MARK` 说明行 | 读日志/输出的人 |
+
+**上限 = 每条流 1 MiB**（`ShellCaptureLimit.MAX_CAPTURE_BYTES`），三条约束缺一不可：正常
+shell 输出是 KB 级、1 MiB 对合法用途"够不着"；1 MiB 文本 JSON 编码后仍 ≈1 MiB，远在单帧
+上限 8 MiB 之下；**最坏情况**是 `DomainJson.appendQuoted` 把 `c.code < 0x20` 转义成 `\uXXXX`
+（**6 倍**膨胀），1 MiB × 6 ≈ 6 MiB 仍不触顶 —— 这条余量是必须的：单帧超限在桥上是
+`FrameTooLargeException` → 读循环 `break` → **关连接**，比截断重得多，所以必须在实现侧
+先兜住。膨胀系数不是估的：`ShellCaptureLimitTest` 拿 `DomainJson` 真编一遍控制字符，
+断言恰好 6N+2 字节，改了任一个数就重算这笔账。
+
+两条容易做漏的：**到顶后仍然读到 EOF**（只是不再落缓冲）—— 停下来不读会让子进程憋死在
+写满的管道上，那正是「双流并发读干」要防的死锁，截断反而把它请回来；`AndroidShellExecutorTest`
+用记账读端（`CountingStream`）钉住"全部字节都被读走"。**两条流各自计数** —— stdout 截了
+不挤掉 stderr 的额度（错误信息短、且最该留住）。
+
+**日志刻意不走 `android.util.Log`**：`:platform:system` 的 JVM 单测没有
+`isReturnDefaultValues`，直接调会抛 "not mocked"，一条"输出超限"的告警不该把测试判红。
+故走可注入的 `LogSink`（缺省 `java.util.logging`，其 `ConsoleHandler` 写 `System.err`，
+Android 把 `System.err` 重定向进 logcat —— 落得到，只是 tag 不叫包名）。
+
+落地七处（契约 → 实现 → handler → facade → 文档）：
+
+- `ShellCaptureLimit.kt`（新，`:platform:system`）：上限 + 膨胀系数 + 单帧预算对账常量 +
+  `TRUNCATION_MARK` + `LogSink` 缝；`ShellCaptureLimitTest`（新，5 例）钉算账与缝。
+- `ShellContracts.kt`：`ShellResult` 加 `truncated: Boolean = false`（**不进 `isSuccess` 判据** ——
+  截断是宿主侧捕获策略，拿它改成败就是把"跑成功了"说成失败）。
+- `AndroidShellExecutor.kt`：`PipeReader` 加 `capBytes` + `droppedBytes`（`@Volatile`），
+  `append()` 到顶后只计数不落缓冲（读循环不停）；`textOrNull()` 截断时在**文本层**追加说明行
+  （不在字节层 —— 否则"上限 = capBytes"变成"≈ capBytes"）；`warnIfTruncated()` 两条流都抽干
+  之后才播报（告警里的"丢了多少"是终值，不是"到此刻为止"）。构造器加 `logSink` 参数。
+- `ShellNamespaceHandler.kt`：载荷三字段 → 四字段 `{code,stdout,stderr,truncated}`。
+- `bridge/js/src/extras.ts`：`ShellResult` 加 `readonly truncated: boolean`（双侧逐字对齐）。
+- 测试：`AndroidShellExecutorTest` 加 4 例（超限留满 + 标志 + 说明行 + **进程仍被读干** /
+  两流各自计数 / 恰好等于上限不算超 / 多字节字符被切在中间不抛）、`SystemNamespacesTest`
+  三字段断言改四字段 + 新增"截断原样透出、仍走 Ok"、`bridge/js/test/extras.test.cjs` 同步。
+- 文档：§9.6 契约正文补「捕获有上限」段、§12.3 示例补 `out.truncated`。
+
+**一处 API 陷阱已修**：`AndroidShellExecutor` 加第二个参数后，测试里原有的尾随 lambda
+（`AndroidShellExecutor { throw IOException(…) }`）会绑到**最后一个**参数即 `logSink` 上
+（Kotlin 把尾随 lambda 给最后一个形参）—— 已改成显式 `ProcessLauncher { … }`，编译期红过
+一次（`ERR_SERVICE_DISABLED` 那例的 `IllegalStateException`）才发现的。
+
+
 ### 2026-10-02 —— E1 拍板落地：接受 APK 超支 + 能力中心明示实测安装体积（分支 `hellish-shrimp`）
 
 §15 的 `≤ 40MB release` 是本仓唯一被实测推翻的预算条目（≈92MB 未压缩三件套）。2026-10-02

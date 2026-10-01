@@ -52,8 +52,16 @@ class ShellNamespaceHandler(
         }
         return run {
             val r = executor.exec(cmd, mode, timeout)
+            // 四字段与 `extras.ts` 的 `ShellResult` 逐字对齐；`truncated` 是 2026-10-02 新增的
+            // 纯增量字段（实现侧超 [ShellCaptureLimit.MAX_CAPTURE_BYTES] 才为 true，
+            // 见 `docs/design-decisions.md` 第 21 项）—— JS 侧读不到它时按缺省 false 处理。
             ok(request, DomainJson.encode(
-                    mapOf("code" to r.code.toLong(), "stdout" to r.stdout, "stderr" to r.stderr),
+                    mapOf(
+                        "code" to r.code.toLong(),
+                        "stdout" to r.stdout,
+                        "stderr" to r.stderr,
+                        "truncated" to r.truncated,
+                    ),
                 ),
             )
         }

@@ -119,6 +119,37 @@
       引擎 .so 在不在。**量不到就说未量到，不显示 0** —— 0 会被读成"安装包是空的"；
       引擎缺失时体积照报（同一条纪律的另一面：装了个跑不了脚本的壳是事实，隐去比显示更糟）。
 
+21. **shell 捕获输出超限：静默截断 + 显式日志 Warning + 返回截断标志**（backlog A2b；§9.6 原口径只写「双流并发读干」，没定过上限）：
+    - **背景**：`AndroidShellExecutor.PipeReader` 把 stdout/stderr **全量**读进内存，一条 `cat` 大文件
+      就能把宿主撑爆。这是 2026-10-01 修 A2（超时/收尸）时露出的口子，当时刻意不夹带 ——
+      加 cap 是**契约口径**变更，两条路都合法且代价不同：**超限报错**让合法的大输出直接失败，
+      **截断**有损但可用。故先拍板再动手。
+    - **拍板**：**截断**。「静默」指的是**调用方不因此失败**（不抛 `ERR_*`、`code` 仍是子进程真实
+      退出码、`isSuccess` 语义不变），**不是瞒着** —— 三处同时留痕，缺一处就是悄悄丢字节：
+      ① `ShellResult.truncated`（**程序**读的那个，纯增量字段、缺省 false）；
+      ② 可注入 `LogSink` 的 Warning（**运维**读的那个，真机进 logcat，带命令本身与丢弃字节数）；
+      ③ 被截那条流末尾追加 `TRUNCATION_MARK` 说明行（**人**读的那个 —— 否则半截输出看起来
+      就是一条正常结束的输出）。
+    - **上限 = 每条流 1 MiB**（`ShellCaptureLimit.MAX_CAPTURE_BYTES`），不是随手取的整数，三条约束：
+      ① 正常 shell 输出是 KB 级，1 MiB 对合法用途"够不着"；② 1 MiB 文本 JSON 编码后仍 ≈1 MiB，
+      远在单帧上限 8 MiB（§7.5）之下；③ **最坏情况**：`DomainJson.appendQuoted` 把 `c.code < 0x20`
+      转义成 `\uXXXX`（**6 倍**膨胀，非估算 —— `ShellCaptureLimitTest` 拿 `DomainJson` 真编一遍钉住），
+      1 MiB × 6 ≈ 6 MiB 仍不触顶。**这条余量是必须的**：单帧超限在桥上是 `FrameTooLargeException`
+      → 读循环 `break` → **关连接**，比截断重得多，所以上限必须在实现侧先兜住。
+    - **两条流各自计数**（stdout 截了不挤掉 stderr 的额度）：错误信息短、且最该留住，
+      共用一份额度会让啰嗦的 stdout 把它挤掉。
+    - **到顶后仍然读到 EOF**（关键，写错就退化成死锁）：只是不再往缓冲里放字节。停下来不读的话，
+      子进程会阻塞在写满的管道上 —— 那正是 §9.6「双流必须并发读干」要防的死锁，截断反而把它请回来。
+      `AndroidShellExecutorTest` 用记账读端（`CountingStream`）钉住"全部字节都被读走"。
+    - **日志不走 `android.util.Log`**：`:platform:system` 的 JVM 单测没有 `isReturnDefaultValues`，
+      直接调会抛 "not mocked"，一条"输出超限"的告警不该把测试判红。故走可注入的 `LogSink`
+      （缺省 `java.util.logging`，其 `ConsoleHandler` 写 `System.err`，Android 把 `System.err`
+      重定向进 logcat —— 落得到，但 tag 不叫包名；要精确 tag/优先级就注入自己的 `LogSink`）。
+    - **落地面**：`ShellContracts.kt`（`truncated` 字段）/ `ShellCaptureLimit.kt`（上限 + 日志缝）/
+      `AndroidShellExecutor.kt`（cap + 播报）/ `ShellNamespaceHandler.kt`（四字段载荷）/
+      `bridge/js/src/extras.ts`（`ShellResult.truncated`，**双侧逐字对齐**）；契约正文见 §9.6，
+      示例见 §12.3。
+
 2026-09-30 拍板（外部审查整改步骤 7；非 §18 编号项，原口径不涉）：
 
 13. **`images` 匹配链路提速方案**（2026-09-30 评审拍板；A2–A4 实测 ❌ 后的出路裁决）：

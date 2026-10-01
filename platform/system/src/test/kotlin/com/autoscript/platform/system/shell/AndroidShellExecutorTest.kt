@@ -115,7 +115,11 @@ class AndroidShellExecutorTest {
 
     @Test
     fun `进程起不来（su 不存在）折成 ERR_SERVICE_DISABLED`() {
-        val exec = AndroidShellExecutor { throw IOException("Cannot run program \"su\"") }
+        // 注意：不能再写尾随 lambda —— 加了 logSink 之后它绑到的是**最后一个**参数。
+        // 这里显式写 SAM 类型，让"注入的是启动缝"这件事在调用点看得见。
+        val exec = AndroidShellExecutor(
+            AndroidShellExecutor.ProcessLauncher { throw IOException("Cannot run program \"su\"") },
+        )
         val e = runBlocking {
             runCatching { exec.exec("id", ShellMode.ROOT, 5_000) }.exceptionOrNull()
         }
@@ -209,6 +213,78 @@ class AndroidShellExecutorTest {
         assertEquals("err", r.stderr)
     }
 
+    // ── 捕获上限（2026-10-02，backlog A2b）────────────────────────────
+    // 口径：静默截断 + 显式日志 Warning + 返回截断标志（design-decisions 第 21 项）。
+    // 这里钉三件容易做漏的事：**到顶后仍在读**（否则子进程憋死在满管道上）、
+    // **两条流各自计数**、**没超限就一个字节都不许多**（截断不能变成常态损耗）。
+
+    @Test
+    fun `输出超上限：留满上限 + 置 truncated + 末尾说明行，且进程仍被读干`() {
+        val total = ShellCaptureLimit.MAX_CAPTURE_BYTES + 100_000
+        val stream = CountingStream(ByteArray(total) { 'x'.code.toByte() })
+        val proc = FakeProcess(exitCode = 0, outStream = stream)
+        val warnings = ArrayList<String>()
+        val r = runBlocking {
+            AndroidShellExecutor({ proc }, ShellCaptureLimit.LogSink { warnings += it })
+                .exec("cat big", ShellMode.DEFAULT, 30_000)
+        }
+        assertTrue(r.truncated, "超过上限必须置 truncated")
+        assertEquals(0, r.code, "截断不改退出码")
+        assertTrue(r.isSuccess, "截断不是命令失败")
+        // 保留的正是"前 N 字节"+ 说明行（说明行加在文本层，不占字节额度）。
+        assertEquals(ShellCaptureLimit.MAX_CAPTURE_BYTES + ShellCaptureLimit.TRUNCATION_MARK.length, r.stdout!!.length)
+        assertTrue(r.stdout!!.endsWith(ShellCaptureLimit.TRUNCATION_MARK), "末尾必须有给人看的说明行")
+        assertNull(r.stderr, "没超限的那条流仍是 null（没产出）")
+        // **关键**：到顶之后必须继续读干。读循环要是停了，真机上子进程会阻塞在写满的
+        // 管道上 —— 那比内存膨胀更坏（活锁 vs 有损）。这里以"读端把全部字节都取走了"为证。
+        assertEquals(total, stream.readBytes, "到顶后必须继续读干（否则子进程憋死在满管道上）")
+        assertEquals(1, warnings.size, "截断必须发一条 Warning")
+        assertTrue(warnings[0].contains("cat big"), "Warning 要带命令本身，否则定位不到是谁被截了：${warnings[0]}")
+        assertTrue(warnings[0].contains("100000"), "Warning 要报丢弃字节数：${warnings[0]}")
+    }
+
+    @Test
+    fun `两条流各自计数：stdout 截断不吃 stderr 的额度`() {
+        val proc = FakeProcess(
+            exitCode = 0,
+            outStream = CountingStream(ByteArray(ShellCaptureLimit.MAX_CAPTURE_BYTES + 1) { 'x'.code.toByte() }),
+            errStream = ByteArrayInputStream("boom\n".toByteArray()),
+        )
+        val r = runBlocking { AndroidShellExecutor({ proc }).exec("x", ShellMode.DEFAULT, 30_000) }
+        assertTrue(r.truncated)
+        // stderr 短得很，必须原样留着 —— 错误信息恰恰是最该留住的那部分。
+        assertEquals("boom\n", r.stderr)
+    }
+
+    @Test
+    fun `没超限就一个字节都不动：不加说明行、不置位、不发日志`() {
+        val payload = ByteArray(ShellCaptureLimit.MAX_CAPTURE_BYTES) { 'y'.code.toByte() }
+        val proc = FakeProcess(exitCode = 0, stdout = payload)
+        val warnings = ArrayList<String>()
+        val r = runBlocking {
+            AndroidShellExecutor({ proc }, ShellCaptureLimit.LogSink { warnings += it })
+                .exec("cat exact", ShellMode.DEFAULT, 30_000)
+        }
+        // 恰好等于上限 = 没超（`>` 而非 `>=`）：截断的代价不能提前一格开始付。
+        assertEquals(false, r.truncated)
+        assertEquals(ShellCaptureLimit.MAX_CAPTURE_BYTES, r.stdout!!.length)
+        assertTrue(!r.stdout!!.contains("[autoscript]"), "没截断就不许出现说明行")
+        assertTrue(warnings.isEmpty(), "没截断就不许发 Warning（否则日志里全是噪音）")
+    }
+
+    @Test
+    fun `上限按字节判：多字节字符被切在中间也不抛异常（替换字符收场）`() {
+        // 每个汉字 3 字节；上限不是 3 的倍数 ⇒ 最后一刀落在字符中间。
+        val cap = ShellCaptureLimit.MAX_CAPTURE_BYTES
+        val text = "汉".repeat(cap / 3 + 10)
+        val proc = FakeProcess(exitCode = 0, stdout = text.toByteArray(Charsets.UTF_8))
+        val r = runBlocking { AndroidShellExecutor({ proc }).exec("x", ShellMode.DEFAULT, 30_000) }
+        assertTrue(r.truncated)
+        assertTrue(r.stdout!!.startsWith("汉"), "前半段照常解码")
+        assertTrue(r.stdout!!.endsWith(ShellCaptureLimit.TRUNCATION_MARK))
+        Unit
+    }
+
     // ── 工具 ────────────────────────────────────────────────────────
 
     /**
@@ -235,6 +311,38 @@ class AndroidShellExecutorTest {
             seen += argv
             FakeProcess(exitCode = 0)
         }
+
+    /**
+     * 会记账的读端：把 [payload] 全部交出去，同时记下**被读走的字节数**。
+     *
+     * 存在的唯一理由是给"到顶后仍在读"一个可断言的证据 —— `ByteArrayInputStream`
+     * 不读也不会阻塞谁，所以"读循环停了"在它身上看不出来。真管道的写端会被满缓冲区
+     * 憋住，而本类用"读端取走了多少"把这个语义搬到单测里。
+     */
+    private class CountingStream(private val payload: ByteArray) : InputStream() {
+
+        @Volatile
+        var readBytes: Int = 0
+            private set
+
+        private var pos = 0
+
+        override fun read(): Int {
+            if (pos >= payload.size) return -1
+            readBytes += 1
+            return payload[pos++].toInt() and 0xff
+        }
+
+        override fun read(b: ByteArray, off: Int, len: Int): Int {
+            if (len == 0) return 0
+            if (pos >= payload.size) return -1
+            val n = minOf(len, payload.size - pos)
+            System.arraycopy(payload, pos, b, off, n)
+            pos += n
+            readBytes += n
+            return n
+        }
+    }
 
     /**
      * 真 `Process` 的最小替身：可控退出码、可控双流、可控"卡住不退出"。

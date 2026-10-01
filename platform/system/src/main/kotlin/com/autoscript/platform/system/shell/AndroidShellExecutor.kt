@@ -26,6 +26,11 @@ import java.util.concurrent.TimeUnit
  * 3. **双流必须并发读干**：管道缓冲区（Linux 默认 64KB）写满即阻塞子进程，
  *    先读干 stdout 再读 stderr 会在输出超过一屏时死锁 —— 所以两条读流在
  *    `waitFor` **之前**就起来了。
+ * 4. **捕获有上限**（2026-10-02，backlog A2b）：每条流最多留
+ *    [ShellCaptureLimit.MAX_CAPTURE_BYTES]，超出即**静默截断 + Warning + 置标志**
+ *    （口径见 `docs/design-decisions.md` 第 21 项）。**关键在「继续读干」**：
+ *    到顶后仍然把管道读到 EOF，只是不再往缓冲里放字节 —— 停下来不读的话
+ *    子进程会阻塞在写满的管道上，那正是第 3 条要防的死锁，截断反而把它请回来。
  *
  * **读流走独立线程，不是 `async` 子协程**（2026-10-01 修，见 `docs/backlog.md` A2）：
  * `InputStream.read` 阻塞期间**不响应协程取消**（协程取消只标记状态、线程中断也不保证
@@ -46,6 +51,7 @@ import java.util.concurrent.TimeUnit
  */
 class AndroidShellExecutor(
     private val launcher: ProcessLauncher = ProcessLauncher { Runtime.getRuntime().exec(it) },
+    private val logSink: ShellCaptureLimit.LogSink = ShellCaptureLimit.defaultLogSink,
 ) : ShellExecutor {
 
     /** 进程启动缝：真机走 [Runtime.exec]；单测注入以记录 argv / 供可控进程。 */
@@ -93,16 +99,38 @@ class AndroidShellExecutor(
                 // 等到点就带着已读到的字节返回 —— 铁律 3 不允许为它无限等待。
                 out.awaitEofOrGiveUp(DRAIN_GRACE_MILLIS)
                 err.awaitEofOrGiveUp(DRAIN_GRACE_MILLIS)
+                // 截断在**两条流都抽干之后**才播报：这样告警里的"丢了多少"是终值，
+                // 不是"到此刻为止"——日志里出现两个数会让人以为丢了两次。
+                warnIfTruncated("stdout", out, command)
+                warnIfTruncated("stderr", err, command)
                 ShellResult(
                     code = process.exitValue(),
                     stdout = out.textOrNull(),
                     stderr = err.textOrNull(),
+                    truncated = out.truncated || err.truncated,
                 )
             } finally {
                 // 收尸兜底：超时/取消/异常路径都不留孤儿进程（见 KDoc 第 2 条）。
                 if (process.isAlive) process.destroyForcibly()
             }
         }
+    }
+
+    /**
+     * 截断发生时的**显式日志 Warning**（口径第 2 层：程序看 [ShellResult.truncated]，
+     * 运维看这条日志，人看流末尾的 [ShellCaptureLimit.TRUNCATION_MARK]）。
+     *
+     * 走注入的 [logSink] 而不是直接 `android.util.Log`：`:platform:system` 的 JVM 单测
+     * 没有 `isReturnDefaultValues`，直接调会抛 "not mocked"（详见 [ShellCaptureLimit.LogSink]）。
+     * 日志里带**命令本身**（截断几乎总是某条具体的 `cat`/`dumpsys` 干的，没有它这条告警
+     * 只能告诉人"有东西被截了"，定位不到是谁）。
+     */
+    private fun warnIfTruncated(stream: String, reader: PipeReader, command: String) {
+        if (!reader.truncated) return
+        logSink.warn(
+            "shell $stream 输出超过上限 ${ShellCaptureLimit.MAX_CAPTURE_LABEL}，" +
+                "已截断（丢弃 ${reader.droppedBytes} 字节；结果 truncated=true）：$command",
+        )
     }
 
     /**
@@ -113,13 +141,25 @@ class AndroidShellExecutor(
      * 用裸守护线程还有第二个好处 —— 被丢弃时不会占住 `Dispatchers.IO` 的共享工作线程
      * （那个池子是全 App 共用的，被管道读流占满会连累无关的业务）。
      */
-    private class PipeReader(private val input: InputStream, name: String) {
+    private class PipeReader(
+        private val input: InputStream,
+        private val name: String,
+        private val capBytes: Int = ShellCaptureLimit.MAX_CAPTURE_BYTES,
+    ) {
 
         // ByteArrayOutputStream 的 write/toByteArray 自带同步：宽限到点后调用方拿到的是
-        // "此刻已读到的字节"快照，不需要额外加锁。
+        // "此刻已读到的字节"快照，不需要额外加锁。截断计数同理（@Volatile 供读侧现取）。
         private val buffer = ByteArrayOutputStream(INITIAL_BUFFER_BYTES)
         private val eof = CountDownLatch(1)
         private val thread = Thread({ pump() }, name).apply { isDaemon = true }
+
+        /** 到顶后**被丢弃**的字节数（只计不再进缓冲的那些，不是"流的总长度"）。 */
+        @Volatile
+        var droppedBytes: Long = 0L
+            private set
+
+        /** 是否发生过截断（即 [droppedBytes] > 0）。 */
+        val truncated: Boolean get() = droppedBytes > 0L
 
         fun start(): PipeReader {
             thread.start()
@@ -133,7 +173,7 @@ class AndroidShellExecutor(
                     while (true) {
                         val n = it.read(chunk)
                         if (n < 0) break
-                        if (n > 0) buffer.write(chunk, 0, n)
+                        if (n > 0) append(chunk, n)
                     }
                 }
             } catch (_: IOException) {
@@ -141,6 +181,28 @@ class AndroidShellExecutor(
                 // 必然走到这里；已读到的字节照常交回。shell 面没有比这更细的分类可用。
             } finally {
                 eof.countDown()
+            }
+        }
+
+        /**
+         * 收下 [n] 字节，**至多收到 [capBytes]**；多出来的只计数不落缓冲。
+         *
+         * 注意这个函数**仍然每轮都被调用**（读循环没停）—— 到顶后不读的写法会让
+         * 子进程卡在写满的管道上（见类 KDoc 第 3/4 条），那是比内存膨胀更坏的死锁。
+         * 上限按**字节**判：UTF-8 一个字符最多 4 字节，所以在 `capBytes` 处切断
+         * 可能切在字符中间，`toTextOrNull()` 用替换字符收场（既有口径，不另造）。
+         */
+        private fun append(chunk: ByteArray, n: Int) {
+            val room = capBytes - buffer.size()
+            if (room <= 0) {
+                droppedBytes += n
+                return
+            }
+            if (n <= room) {
+                buffer.write(chunk, 0, n)
+            } else {
+                buffer.write(chunk, 0, room)
+                droppedBytes += (n - room).toLong()
             }
         }
 
@@ -153,7 +215,20 @@ class AndroidShellExecutor(
             runInterruptible { eof.await(millis, TimeUnit.MILLISECONDS) }
         }
 
-        fun textOrNull(): String? = buffer.toByteArray().toTextOrNull()
+        /**
+         * 已捕获的字节 → 文本。**截断时末尾追加 [ShellCaptureLimit.TRUNCATION_MARK]** ——
+         * 给人读的那一层（机器判定用 `ShellResult.truncated`）。
+         *
+         * 追加发生在文本层而非字节层：上限是**字节**语义，标记是 UTF-8 的多字节串，
+         * 混进字节缓冲会把"上限 = capBytes"这句话变成"上限 ≈ capBytes"。
+         * 两种终局都追加：即便那 1 MiB 恰好切在多字节字符中间（末尾一个替换字符），
+         * 标记照样在 —— 截断过就必须看得出来。
+         */
+        fun textOrNull(): String? {
+            val text = buffer.toByteArray().toTextOrNull()
+            if (!truncated) return text
+            return (text ?: "") + ShellCaptureLimit.TRUNCATION_MARK
+        }
     }
 
     private companion object {

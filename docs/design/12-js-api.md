@@ -206,7 +206,8 @@ console.log(await auto.engines.poolStats());                // {capacity, free, 
 const name = await auto.dialogs.prompt('输入名字', { mode: 'auto' });  // auto：overlay 可见弹窗，否则通知回调
 const out = await auto.shell.exec('pm list packages');      // shell 是**命名空间对象**，不是可调用函数；
                                                             // 分级 DENIED 抛 ERR_PERMISSION_DENIED
-console.log(out.code, out.stdout, out.stderr);
+console.log(out.code, out.stdout, out.stderr, out.truncated);  // 每条流上限 1 MiB，超了 out.truncated === true
+                                                            // （截断 ≠ 失败：code 仍是真实退出码；要完整输出请分页/落盘）
 console.log(await auto.device.model(), await auto.device.sdkInt());
 console.log(await auto.app.launch('com.example'), await auto.app.currentPackage());  // false/null 是**诚实答案**
 const win = await auto.floatingWindow.create({ title: '面板', width: 300, height: 200 });  // {refId,generation}；缺省项显式 null

@@ -19,13 +19,23 @@ package com.autoscript.platform.system.shell
 enum class ShellMode { DEFAULT, ROOT, ADB }
 
 /**
- * shell 执行结果（与 JS `extras.ts` 的 `ShellResult` 逐字对齐：code/stdout/stderr）。
+ * shell 执行结果（与 JS `extras.ts` 的 `ShellResult` 逐字对齐：code/stdout/stderr/truncated）。
  * [stdout]/[stderr] 可空 = 该流没产出；绝不拿空串冒充「有输出但为空」。
+ *
+ * [truncated]：至少一条流被 [ShellCaptureLimit.MAX_CAPTURE_BYTES] 截断（2026-10-02 口径，
+ * 见 `docs/design-decisions.md` 第 21 项）。**默认 false**，只有真发生截断才置位 ——
+ * 因此旧调用方/旧 facade 拿到的形状不变（多一个字段，语义是纯增量）。
+ *
+ * **截断不进 [isSuccess] 的判据**：`code` 是子进程的真实退出码，截断是**宿主侧的捕获策略**，
+ * 两者正交 —— 拿截断去改 `isSuccess` 会让"命令跑成功了"变成"失败"，那是撒谎。
+ * 判断要不要分页/落盘的是脚本自己，依据就是这个标志（[stdout] 末尾另有
+ * [ShellCaptureLimit.TRUNCATION_MARK] 给人看，机器判定一律用本字段）。
  */
 data class ShellResult(
     val code: Int,
     val stdout: String?,
     val stderr: String?,
+    val truncated: Boolean = false,
 ) {
     val isSuccess: Boolean get() = code == 0
 }

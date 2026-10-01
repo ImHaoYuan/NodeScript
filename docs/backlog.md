@@ -19,7 +19,7 @@
 
 | # | 事项 | 证据位置 | 核实 | 影响 | 成本 |
 |---|---|---|---|---|---|
-| **A2b** | **shell 捕获输出无上限**（2026-10-01 新增）：`PipeReader` 把 stdout/stderr 全量读进内存，`cat` 一个大文件就能把宿主撑爆。加 cap 属**契约口径**（§9.6 写的是「双流并发读干」）：截断=静默有损、超限报错=合法大输出被拒，两条都要先拍板取哪个数、哪种语义 —— 故本次 A2 只修超时/收尸，不夹带 | `AndroidShellExecutor.PipeReader` | ✅ 2026-10-01（病灶属实） | S（定了口径就快） |
+| ~~**A2b**~~ | ~~**shell 捕获输出无上限**~~ —— **已拍板并落地（2026-10-02，选「静默截断 + 显式日志 Warning + 返回截断标志」）**：口径见 [`design-decisions.md`](design-decisions.md) 第 21 项，契约见 §9.6，流水见 [`design-status.md`](design-status.md)。上限 = 每条流 1 MiB（`ShellCaptureLimit.MAX_CAPTURE_BYTES`，最坏 JSON 膨胀 ×6 仍在 §7.5 的 8 MiB 单帧预算内）；`ShellResult.truncated` 纯增量、缺省 false；到顶后仍读到 EOF（否则退化成满管道死锁） | `AndroidShellExecutor.PipeReader` | ✅ 2026-10-02（拍板 + 落地） | S（已做完） |
 | **A5** | 桥没有 per-engine 身份：同一 uid 的任何进程可达全部命名空间（`SECURITY.md` 已承认是有意为之），无法按脚本/按 run 归因与审计 | 同 uid 门禁 `BridgeSocketListener.kt:117-122` 是 fail-closed；abstract 名可预测 | ✅ 2026-10-01 | 以后想加 per-run 权限会很贵 | M（协议变更，须与 `main.cpp` + JS bootstrap 同批） |
 | **A6** | **vendored npm 版本低于契约脊梁**（2026-10-01 A1 收口时暴露）：素材取自 Node 24.21.0 源码树的 `deps/npm` = **npm 11.19.0**，而 §10.1 脊梁写的是「npm 12.x 系」，§10.12 风险表明写「降级 npm11 会恢复『脚本默认执行』使护栏静默消失」。**护栏没有静默消失，但只剩一层**：`HostNodeExecutor` 对每条命令硬编码 `--ignore-scripts`（§11.1 T1 主控，与版本无关）；npm 12 的 `allowScripts=none`「官方默认」这层不在位，且**非脚本** spawn 路径的第二层兜底（§10.12 末行 child_process 拦截 shim）本就未落。升级路径二选一：换素材来源（另下 registry tarball / 自建裁剪）或等 Node 线携带 12.x；改 `NPM_CLI_VERSION` 即触发 `node-slice` 全链回归（~2h20m）。**能不能靠「等 Node 线携带」升**——2026-10-01 用 `nodejs.org/dist/index.json` 实测否掉了：**868 条官方发布里一条 npm 12.x 都没有**（最新 v26.10.0 / 2026-09-21 携带的是 npm 11.19.1），即走「Node 源码树 `deps/npm`」这条路**原理上拿不到 12.x**，要升必须换素材来源（另下 registry tarball / 自建裁剪）；**npm 12 本身是否存在、其 `allowScripts` 默认语义是否如 §10 所述仍未核实**（本机 `registry.npmjs.org` 不可达，WebFetch 亦被网络策略挡住） | `node-runtime-build/VERSIONS.env`（`NPM_CLI_VERSION=11.19.0`）、`fetch-and-build.sh` §9、`docs/design/10-npm.md` §10.1/§10.12、§11.3 第 8 条 | ✅ 2026-10-01（版本号实读素材 `package.json`；契约落差逐字比对过） | S（若只是换素材源）/ M（若要自建裁剪或改调用链） |
 
@@ -63,7 +63,7 @@
 
 ## F. 建议批次（一次一批，每批跑完整 CI 同源门）
 
-1. ~~**批 1（S）**：A2 / A3 / A1b / A4~~ —— **2026-10-01 已完成**，流水见 [`design-status.md`](design-status.md)（A2b 是修 A2 时露出的新口子，留在这里）。
+1. ~~**批 1（S）**：A2 / A3 / A1b / A4~~ —— **2026-10-01 已完成**，流水见 [`design-status.md`](design-status.md)。修 A2 时露出的新口子 **A2b 已于 2026-10-02 拍板并落地**（见该行）。
 2. ~~**批 2（S）**：B2（CI 卫生）+ C3（失效引用）+ D4（README 归位）+ D2（删 sandbox 目录）~~ —— **2026-10-01 全部完成**，流水见 [`design-status.md`](design-status.md)。D2 当时因与 design-decisions 2026-09-30「目录留盘」裁定冲突而暂缓，经拍板后执行，口径变更追加在 design-decisions 同批。
 3. ~~**批 3（S）**：C1/C5（人类 README + CONTRIBUTING）+ C4（只剩维护者开通上报入口）~~ —— **2026-10-01 完成**，流水见 [`design-status.md`](design-status.md)。C4 当时因「只剩维护者动作」留在池里 —— **该动作 2026-10-01 已由维护者完成**（GitHub 私密上报入口开通，`private-vulnerability-reporting` 复核为 `enabled:true`），仓库侧四处照实写法同批改掉，C4 随之出池。
 4. ~~**批 4（M）**：A1/A1c~~ —— **2026-10-01 全部完成**，流水见 [`design-status.md`](design-status.md)：A1c 接缝形状 `secretKey(): SecretKey` + 实现落 `:app` 装配层；A1 四个子缺口按依赖序全补（素材出库 → 随包任务 → `AssetTreeCliSource` → 启动期落位 + 注入 `HostNodeExecutor`），素材来源拍板「Node 源码树 `deps/npm`」（口径追加在 [`design-decisions.md`](design-decisions.md#已推翻--已改口径)）。**收口时露出一个新口子**：素材版本 npm 11.19.0 ≠ §10 脊梁的 npm 12.x —— 登记为 **A6**，要不要升是独立的产品判断。
