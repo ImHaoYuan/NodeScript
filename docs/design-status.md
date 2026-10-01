@@ -42,6 +42,37 @@
 
 ## 流水（最新在上）
 
+### 2026-10-01 —— CI 红的两例 AppShellTest：裁决输入借了宿主 `/proc`（分支 `hellish-shrimp`）
+
+CI 36883027569 在 `6cc6e9a` 上红（`203 tests completed, 2 failed`），两条都是
+`expected true but was false`，其中一条是「健康样本不杀」。**本机 11/11 全绿、
+跑 8 遍 `:app` 也全绿** —— 第三次撞上「本机绿不是门禁有效」。
+
+根因（用探针实证，不是推断）：`:app` 的测试假引擎统一报 `pid = 4242`，而
+`AppShell` / `AppShellKit.assemble` 缺省注入**生产** `ProcessMonitor`（真读
+`/proc/<pid>/stat|status`）。于是裁决输入由**跑测试的那台机器**决定：
+
+- 本机无 4242 → 采样回 null → 走 `procUnreadable`（§8.4「量不到」那支）→ 从不判；
+- CI runner 上 4242 恰好是某个 Gradle/Java 守护进程 → 读出真 RSS（数百 MB 起）
+  → 越过 `rssHardLimitBytes`（512MB）→ 判 `Kill(OOM)`，看门狗**真的去杀**。
+
+同一个测试在两台机器上判两样事，**且红的那个更"真"**。探针实证：拿生产采样器去读
+本机三个 >2.6GB 的 java 进程，verdict 全是 `Kill(OOM)`，与失败信息吻合。
+
+修法走 `ProcessMonitor` **既有的** `StatReader` / `StatusReader` 缝（其 KDoc 早已写明
+「单测/桌面无 Android 时可整体换成假 /proc」，此前没有调用方）—— 生产代码零改动。
+假 `/proc` 提到 `app/src/test/.../FakeEngines.kt` 的 `fakeProcMonitor()` 共享：固定
+utime/stime（首采样 CPU 0.0%）与 `VmRSS` 8MB，恒落在 Healthy 那一支。六处 `assemble`
+调用点统一注入。判死本身仍由 `:app-service:runtime` 的 `ProcessMonitorTest` /
+`EngineWatchdogTest` 覆盖，`:app` 这层只验接线（心跳通了就不杀、run 终结即遗忘）。
+
+提交 `6ff446e`；CI 36887703827 四个 job 全绿（含 JVM 单测、assembleDebug + 全模块
+lintDebug、facade 单测、文档链接门），image-native 36887703894 绿。
+
+**留下的口径**：装配层凡有「读宿主资源」的缺省实现（`/proc`、系统属性、真实文件），
+测试必须显式注入替身，不能靠「本机恰好没这个资源」过关。本机绿的证明力只覆盖
+**本机那份输入**——这已是同族第三例（前两次：探针注入、输入版本漂移）。
+
 ### 2026-10-01 —— 批 7（三项 S 级）：D8 许可声明 / D6 命名面 / D1 模块归属（分支 `hellish-shrimp`）
 
 批 7 原标注「L/产品、需拍板」。这一轮只做**不需拍板就能动手的 S 级**，把待拍板的部分原样留在池里。
