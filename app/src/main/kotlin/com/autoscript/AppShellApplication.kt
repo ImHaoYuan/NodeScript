@@ -36,7 +36,12 @@ import com.autoscript.shell.RecoverySnapshot
 import com.autoscript.shell.SchedulerAlarmRoute
 import com.autoscript.shell.ScreenGateAndroid
 import com.autoscript.shell.ScreenInteractive
-import kotlinx.coroutines.GlobalScope
+import com.autoscript.shell.launchGuaranteed
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import java.nio.file.Path
 
@@ -85,6 +90,22 @@ class AppShellApplication : Application(), HostSummary {
     /** 闹钟回投缝（[AlarmDispatch]）：装配前记账、装配后投递。 */
     private val alarmDispatch = AlarmDispatch()
 
+    /**
+     * 本类自己的协程域（进程级后台活：自装配 / 开机恢复 / 闹钟回投）。
+     *
+     * 为什么不是 `GlobalScope`：它挂在进程级 Job 上，**没有「谁负责停」** ——
+     * 装配或恢复跑到一半被要求收口时，只能干等一个谁也取消不了的协程。
+     * 这里用 [SupervisorJob]（一个后台活抛错不牵连其余）+ [Dispatchers.IO]
+     * （三件都是文件 IO：读 replay 日志、建目录、写意图日志），
+     * 在 [onTerminate] 里 cancel —— 与 `AppShellKit.ShellScope` 同一条纪律
+     * （壳的看门狗轮转住壳的域，进程的后台活住本类的域），只是生命周期长一档。
+     *
+     * 诚实边界：真机 `onTerminate` 不会被调用（见其 KDoc），所以这条 cancel
+     * 也只在测试/模拟器进程里真正生效；它买到的是「有着落」而不是「保证被调」。
+     * 需要**回执**的后台活走 [launchGuaranteed]（域已取消时协程体不会跑）。
+     */
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO + CoroutineName("app-shell"))
+
     /** 开机恢复（§8.5）：同壳幂等 + 失败记账 + 快照供能力中心读（见 [recoverySnapshot]）。 */
     private val bootRecovery = BootRecovery()
 
@@ -129,8 +150,7 @@ class AppShellApplication : Application(), HostSummary {
         // 而门禁在装配期就被交给 dispatcher —— 装完再起会让"装配完成到保活生效"之间
         // 出现一个窗口，期间 SCREEN_ON 任务被如实拒绝（不是错，但没必要让用户撞上）。
         foregroundKeeper()
-        @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
-        GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+        appScope.launch {
             installWithFiles(filesDir.toPath(), cacheDir.toPath())
         }
     }
@@ -295,8 +315,7 @@ class AppShellApplication : Application(), HostSummary {
      * 开机日志是排查"重启后任务没跑"的唯一现场，宁可在 logcat 里多一行。
      */
     private fun recover(shell: AppShell) {
-        @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
-        kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+        appScope.launch {
             val snapshot = try {
                 bootRecovery.recoverOnce(shell)
             } catch (t: Throwable) {
@@ -532,14 +551,14 @@ class AppShellApplication : Application(), HostSummary {
             return
         }
         // fire 是挂起函数：在广播的 goAsync 窗口内起协程，保证 onTrigger 走完（意图日志落行）。
-        kotlinx.coroutines.GlobalScope.launch {
+        // 回执必须**恰好一次**（PendingResult.finish 双调 = 崩，漏调 = 窗口挂到超时），
+        // 而域收口时协程体可能根本没跑起来 —— 所以走 launchGuaranteed 而不是裸 launch。
+        appScope.launchGuaranteed(done) {
             try {
                 val delivered = alarmDispatch.fire(taskId)
                 if (!delivered) Log.w(TAG, "闹钟回投无路线：taskId=$taskId（已计入漏投）")
             } catch (t: Throwable) {
                 Log.e(TAG, "闹钟回投失败：taskId=$taskId", t)
-            } finally {
-                done()
             }
         }
     }
@@ -556,6 +575,7 @@ class AppShellApplication : Application(), HostSummary {
         keepAlive?.stop()
         keepAlive = null
         ForegroundHost.keeper = null
+        appScope.cancel()     // 停本类的后台活；已取消的域里 launchGuaranteed 仍会回执一次
         super.onTerminate()
     }
 
