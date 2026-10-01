@@ -61,11 +61,15 @@ const ANDROID_API = need('ANDROID_API')
 const TARGET_ARCH = need('TARGET_ARCH')
 
 /**
- * 组件表。`file` 字段是 `licenses/` 下的原文名 —— 生成器**不校验文件存在**
+ * 组件表。`file` 字段是 `licenses/` 下的原文路径 —— 生成器**不校验文件存在**
  * （`--check` 也不），因为本门管的是「清单 ↔ VERSIONS.env」这一条联动；
- * 原文在不在由入库事实保证（缺文件时这里会渲染成一个坏链接，docs 链接门之外没人看）。
- * 刻意**不**加原文存在性断言：那是另一类门（打包内容门，见 backlog B5），两类混在一起
- * 会在 VERSIONS.env 改版与打包形态变化时互相挡路。
+ * 原文在不在由**文档链接门**（`check-doc-links.sh`，会顺着清单里的链接查）与
+ * `prepareNoticesAssets` 的逐件 require 两处分别管。
+ *
+ * `libjpeg-turbo` 一项是**子目录**（`libjpeg-turbo/LICENSE.md`）而不是同层文件 ——
+ * 上游自己的 LICENSE.md 里有一条指向 `README.ijg` 的相对链接（IJG 许可原文就在那份里），
+ * 拍平到一层会让那条链接断，文档链接门当场红（2026-10-01 首次提交实测撞到过：
+ * 本机那份 1586 行的旧 LICENSE 在 CI 上多出 9 条链接，链接门抓到的就是它）。
  */
 const COMPONENTS = [
   {
@@ -104,7 +108,7 @@ const COMPONENTS = [
     name: 'libjpeg-turbo（OpenCV 的 JPEG 编解码）',
     version: '随 OpenCV 源码树 pin（`3rdparty/libjpeg-turbo`，commit `a99141acd7874bfe027d2bd945a4bd1d7192178b`）',
     license: 'IJG License **或** Modified (3-clause) BSD —— 双许可，取哪个由使用者自选',
-    file: 'libjpeg-turbo-LICENSE.md',
+    file: 'libjpeg-turbo/LICENSE.md',
     shipsAs: ['同 `libopencv.so`（`BUILD_JPEG=ON` 强制走树内源码）'],
   },
   {

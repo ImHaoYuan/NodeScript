@@ -281,18 +281,29 @@ val prepareNoticesAssets = tasks.register("prepareNoticesAssets") {
         // 逐字原文一并随包：清单只说「见原文」，原文不在包内等于让用户去网上找。
         // 文件名与生成器 licenses/ 下的名字一致（清单里的链接指向同名件）。
         var copied = 0
-        licensesDir.asFile.listFiles()?.forEach { f ->
-            // 放行判据 = 生成器 COMPONENTS 表里的原文名集合（「-LICENSE」结尾的七件 + libjpeg-turbo
-            // 的两份），**不是**「目录里所有文件」—— 同目录的 gen-notices.mjs 是生成器本体，
-            // 随包没有意义。漏一份原文的后果是清单里那个链接指向不存在（与脚本 KDoc 同一口径）。
-            if (!f.isFile) return@forEach
-            val isLicenseText = f.name.endsWith("-LICENSE") ||
-                f.name == "libjpeg-turbo-LICENSE.md" ||
-                f.name == "libjpeg-turbo-README.ijg"
-            if (isLicenseText) {
-                f.copyTo(File(out, f.name), overwrite = true)
-                copied++
-            }
+        // 放行判据 = 生成器 COMPONENTS 表里的原文文件（`licenses/` 下的七件；libjpeg-turbo
+        // 是**子目录**，因为它自己的 LICENSE.md 里有一条指向 README.ijg 的相对链接 ——
+        // 拍平到一层会让那条链接断，与脚本 KDoc 同一口径）。**不是**「目录里所有文件」：
+        // 同目录的 gen-notices.mjs 是生成器本体，随包没有意义。漏一份原文 = 清单里那个
+        // 链接指向不存在。
+        val licenseFiles = listOf(
+            "node-LICENSE", "opencv-LICENSE", "kleidicv-LICENSE", "libpng-LICENSE", "zlib-LICENSE",
+        )
+        licenseFiles.forEach { name ->
+            val f = licensesDir.asFile.resolve(name)
+            require(f.isFile) { "node-runtime-build/licenses/$name 缺位（清单指向的原文缺失）" }
+            f.copyTo(File(out, name), overwrite = true)
+            copied++
+        }
+        // libjpeg-turbo 两份**保持上游的相对布局**（LICENSE.md ↔ README.ijg 互指）
+        val jpegDir = licensesDir.asFile.resolve("libjpeg-turbo")
+        listOf("LICENSE.md", "README.ijg").forEach { name ->
+            val f = jpegDir.resolve(name)
+            require(f.isFile) { "node-runtime-build/licenses/libjpeg-turbo/$name 缺位（双许可原文不完整）" }
+            val dest = File(out, "libjpeg-turbo/$name")
+            dest.parentFile.mkdirs()
+            f.copyTo(dest, overwrite = true)
+            copied++
         }
         require(copied > 0) {
             "node-runtime-build/licenses/ 无许可原文可随包（$licensesDir）—— 清单指向的原文缺失"

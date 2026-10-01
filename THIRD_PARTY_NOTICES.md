@@ -20,7 +20,7 @@
 | Android NDK / libc++ | r28c（bionic API 26，arm64） | Apache License 2.0 **WITH LLVM-exception**（NDK 工具链本体另有第三方条款，见其 NOTICE） | 见 NDK 随附 NOTICE（未随包） |
 | OpenCV（静态链接进 libopencv.so） | 4.14.0（commit `0654a42e19215ef25b1d367d822f3c630447e7c7`） | Apache License 2.0 | 见 [原文](node-runtime-build/licenses/opencv-LICENSE) |
 | KleidiCV（OpenCV 的 AArch64 HAL） | 26.03（软降级：下载失败则不启用，结论写进 SHASUMS256 审计行） | Apache License 2.0 | 见 [原文](node-runtime-build/licenses/kleidicv-LICENSE) |
-| libjpeg-turbo（OpenCV 的 JPEG 编解码） | 随 OpenCV 源码树 pin（`3rdparty/libjpeg-turbo`，commit `a99141acd7874bfe027d2bd945a4bd1d7192178b`） | IJG License **或** Modified (3-clause) BSD —— 双许可，取哪个由使用者自选 | 见 [原文](node-runtime-build/licenses/libjpeg-turbo-LICENSE.md) |
+| libjpeg-turbo（OpenCV 的 JPEG 编解码） | 随 OpenCV 源码树 pin（`3rdparty/libjpeg-turbo`，commit `a99141acd7874bfe027d2bd945a4bd1d7192178b`） | IJG License **或** Modified (3-clause) BSD —— 双许可，取哪个由使用者自选 | 见 [原文](node-runtime-build/licenses/libjpeg-turbo/LICENSE.md) |
 | libpng（OpenCV 的 PNG 编解码） | 随 OpenCV 源码树 pin（`3rdparty/libpng`，commit `8472efd791dba6cd53ff5f73fe3ceb874856b454`） | PNG Reference Library License version 2 | 见 [原文](node-runtime-build/licenses/libpng-LICENSE) |
 | zlib（OpenCV 的压缩层） | 随 OpenCV 源码树 pin（`3rdparty/zlib`，commit `266a2989b234a84129c04219f06099164378c280`） | zlib License | 见 [原文](node-runtime-build/licenses/zlib-LICENSE) |
 
