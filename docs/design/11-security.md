@@ -18,7 +18,7 @@
 
 | # | 事实 | 出处 |
 |---|---|---|
-| 1 | **进程隔离这条防线不存在**。引擎只有 Node 一条轨，第三方脚本与用户自写脚本**同进程、同权**（无障碍读屏/点击/截屏/网络/文件全开）。原先「第三方 → QuickJS 白名单子集」的隔离随 QuickJS 整轨撤出而作废 | §18 第 1 项（[18-19-ledger.md](18-19-ledger.md)）+ [design-decisions.md](design-decisions.md) 已拍板第 1 项 |
+| 1 | **进程隔离这条防线不存在**。引擎只有 Node 一条轨，第三方脚本与用户自写脚本**同进程、同权**（无障碍读屏/点击/截屏/网络/文件全开）。原先「第三方 → QuickJS 白名单子集」的隔离随 QuickJS 整轨撤出而作废 | §18 第 1 项（[18-19-ledger.md](18-19-ledger.md)）+ [design-decisions.md](../design-decisions.md) 已拍板第 1 项 |
 | 2 | **因此能力授予是唯一边界，不是进程边界**。给用户的提示必须直说「装来的脚本与自写脚本同权」，不能让文案读起来像沙箱 | 同上 |
 | 3 | **桥面按来源与能力双重过滤**：RuntimeChannel/engines 通信按来源分级（低信任不能给高信任发控制消息）；`ModuleRegistry` 按脚本的 CapabilityMask 过滤 handler，未授权调用回 `ERR_PERMISSION_DENIED`（不是静默 no-op） | 本节上方两条 bullets + §7 |
 
@@ -50,7 +50,7 @@
 4. **MediaProjection 高清会话未落**：授权 UI + FGS 那一档还没接，P0 由同一 a11y 帧源连续截图承接（§9.2）。这不是安全缺口，是能力边界，列此只为避免被当成「高清会话已有门禁」。
 5. **16KB 页机未测**：真机红测只有 16KB 模拟器镜像或 Pixel 8+ 能给，SELinux enforcing 上下文与 targetSdk 提取策略同样待真机（design-status「仍未验」块）。
 6. **审批卡呈现层未排期**：审批账本与桥面拉取口已通（`drainApprovals` → `NpmBridgeHandler` → JS `pumpApprovals`），但能力中心的审批卡不在当前排期内，期间审批只能靠脚本侧拉取。
-7. **上报流程缺失**：本仓当前没有对外的安全问题上报渠道，见根 [`SECURITY.md`](../SECURITY.md)（占位待补）。
+7. **上报流程缺失**：本仓当前没有对外的安全问题上报渠道，见根 [`SECURITY.md`](../../SECURITY.md)。
 8. **npm 生产装配未接线（2026-10-01 核实）**：`AppShellKit` 调 `NpmShellKit.assembleHandler(filesDir, cacheDir)` 走全缺省 —— `executor = HeavyOpExecutor.Unavailable`（真机安装如实回 `ERR_NOT_IMPLEMENTED`，`HostNodeExecutor` 在 `app/src/main` 零引用）、`lockKey = null`（T2 的签/验与快照导出都不发生）、`scriptExecutor = Unavailable`（T1 门禁过了也跑不起来）。即：**设计上写着「已接线」的那几道 npm 防线，当前在生产路径上都不生效**；这是接线缺口，不是设计缺口。
 
 ### 11.4 非目标
