@@ -7,8 +7,8 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 /**
- * 首屏状态纯逻辑（不碰 Compose/Android —— :ui 的 JVM 门走 `:ui:testDebugUnitTest`，
- * 本机裸 kotlinc 旁路编不了 @Composable，见 jvm-test-all 头注释）。
+ * 首屏状态纯逻辑（不碰 Compose/Android：`:ui` 的门走 `:ui:testDebugUnitTest`，
+ * 状态判定与渲染分开，才轮得到这台 JVM 门测它）。
  */
 class HomeStateTest {
 

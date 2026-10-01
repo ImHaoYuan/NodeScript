@@ -10,8 +10,8 @@ import com.autoscript.domain.permission.CapabilityState
  * 为什么接口住 `:domain` 而不是 `:ui` 或 `:app`：装配产物（壳、漏投账本）住在
  * `:app` 的 `AppShellApplication` 里，呈现层住 `:ui` —— 让 `:ui` import `:app`
  * 会成环（app→ui），让 `:app` import `:ui` 只为实现接口又会把 compose 拖回
- * `:app` 源码（与「UI 拆独立模块」决策相悖，且裸 kotlinc 旁路没有 androidx 坐标，
- * jvm-test 的 app 模块会直接编不过）。接口放中间的 `:domain`，两侧各只认它：
+ * `:app` 源码（与「UI 拆独立模块」决策相悖：`:app` 的价值就是零 compose 的装配层）。
+ * 接口放中间的 `:domain`，两侧各只认它：
  * `:app` 实现（`AppShellApplication : HostSummary`）、`:ui` 消费（`as? HostSummary`）。
  * 装配知识仍归 `:app` —— 本接口只回快照，不暴露壳/调度器本体。
  */

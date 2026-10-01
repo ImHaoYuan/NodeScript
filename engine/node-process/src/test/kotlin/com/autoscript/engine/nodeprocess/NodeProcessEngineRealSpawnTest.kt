@@ -79,7 +79,7 @@ class NodeProcessEngineRealSpawnTest {
         val receipt = runBlocking { e.execute(request()) }
 
         val self = selfPid()
-        // 落成局部再判：receipt 是 :domain 类型，跨模块 public val 不给 smart cast（jvm-test 同模块会掩掉这差异）。
+        // 落成局部再判：receipt 是 :domain 类型，跨模块 public val 不给 smart cast。
         val childPid = receipt.pid
         assertTrue(childPid != null && childPid > 0, "receipt.pid 必须是真子进程 pid：${childPid}")
         assertNotEquals(self, childPid?.toLong(), "pid 绝不给自身（§8.4：会把看门狗引到杀主进程）")

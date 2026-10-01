@@ -12,8 +12,8 @@ import java.io.OutputStream
  * 对端 uid 取 `LocalSocket.peerCredentials`（内核 `SO_PEERCRED`，与客户端侧对称）。
  *
  * **薄到没有逻辑**：绑定失败回 null、accept 期异常上抛 —— 门禁/循环/生命周期全在
- * [BridgeSocketListener]（纯 JVM 可测面）。本对象**不在单测里碰**：`:app` 单测运行期
- * classpath 不带 android.jar，`android.*` 方法体是会抛异常的桩。
+ * [BridgeSocketListener]（纯 JVM 可测面）。本对象**不在单测里碰**：`:app` 单测的
+ * android.jar 是可 mock 的桩，`android.*` 方法体一调就会抛异常。
  */
 object AndroidBridgeBinder : BridgeSocketBinder {
 

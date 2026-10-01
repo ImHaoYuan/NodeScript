@@ -42,6 +42,42 @@
 
 ## 流水（最新在上）
 
+### 2026-10-01 —— 待办池**批 2**（B2 / C3 / D4；分支 `hellish-shrimp`）—— D2 未执行（冲突，待拍板）
+
+- **B2 CI 卫生**：三个 workflow 一起收口 —— `permissions: contents: read`（三个都没有，默认令牌过宽；
+  只用 artifact 运行时令牌与缓存，不需要写权限，已核**无**任何 `git push`/release 步骤）、`ci.yml` 补
+  `concurrency`（`ci-${{ github.ref }}` + cancel-in-progress，与另两个同款）与逐 job `timeout-minutes`
+  （jvm-tests 45 / js-tests 15 / docs-check 5；另两个 workflow 的 job 本就有）。**actions 全部改钉 commit SHA**
+  （checkout/setup-java/setup-node/upload-artifact/cache，注释保留跟踪 tag），并新建 `.github/dependabot.yml`
+  —— 钉 SHA 的代价是不会自动跟上安全修复，两者是一套。Dependabot **只开 github-actions 一个生态**（版本升级
+  AGP/Kotlin/Compose/targetSdk 是显式推迟的决策，开了只会产出注定要关的 PR；依赖面另见 backlog B4），理由写在
+  该文件头注释里。删掉 `gradle-version: "8.9"`：版本的事实来源是 `gradle-wrapper.properties` 的 8.9，写死两处必漂。
+- **C3 失效引用**（外审「加一个文档路径检查门」的建议一并落地）：
+  - **代码里 10 处把 2026-09-30 已删的 `tools/jvm-test*` 旁路当现役理由**的注释改正 —— `ForegroundOps`
+    （不碰 androidx 的真理由：minSdk 26 + API 34 类型参数要求调用点显式给）、`AssetsWalk`（纯逻辑要能喂假实现）、
+    `HostSummary`、`BridgeSocketListener`/`AndroidBridgeBinder`（**改对了事实**：`:app` 单测的 android.jar 是
+    mock 桩、调了就抛，不是「classpath 不带」）、`AndroidPermissionGatesTest`（**改对了事实**：桩字段
+    `Build.VERSION.SDK_INT` 读出来是 **0** —— 已用临时探针实测并删除探针；缺省求值 = 静默把断言钉在 SDK 0 分支、
+    还不报错，比抛异常更难查）、`PlatformWiringTest`、`NodeProcessEngineRealSpawnTest`、`FixtureAxml`、
+    `HomeStateTest`、`RegistrationForm`、`SocketE2EHostTest`（3 处）。docs 里作为**历史记录**提到它的地方
+    （design-status / design-decisions 已推翻表 / `06-modules` 删除说明 / `TestGuard` 的「承…纪律」）保留不动。
+  - `CLAUDE.md` 仓库地图悬空行「`module-stubs` 之外的模块」删除；`ci.yml` 结尾与 `CLAUDE.md` 里
+    「Android assemble 走 `node-runtime-build/Dockerfile`」的**旧口径改正**（该镜像产出 libnode.so/OpenCV.so，
+    与 APK 无关；assemble 目前不在任何 workflow 里，搬上 CI 记在 backlog B1）。
+  - **新增文档链接门**（`docs-check` job + `.github/scripts/check-doc-links.sh`，零依赖、本机同一条命令）：
+    扫 git 跟踪的全部 `*.md`，markdown 相对链接按**文件所在目录**解析，目标不存在即红。**只查链接不查反引号
+    里的路径**是有意的 —— 实测反引号候选 92 条里真引用是少数（斜杠词表/分支名/别仓路径/相对另一基准的子路径），
+    那种门只能靠一张几十条的放行表维持，等于没门；链接的基准与意图都唯一，实测 27 个 md 零噪音。
+    **门第一次跑就抓出两条真缺口**：`11-security.md` 的 `[design-decisions.md](design-decisions.md)`
+    （应为 `../`）与 `[SECURITY.md](../SECURITY.md)`（应为 `../../`）—— 同目录其余分卷都是 `../` 写法，
+    这两处是漏网的。反向验证过：临时插坏链接 + 围栏内示例链接，门报前者 1 条、放过后者。
+- **D4 README 归位**：`platform/{system,capabilities}/src/main/kotlin/.../README.md` → 模块根
+  （`git mv`，内容不变）。`06-modules.md` 里「见 `platform/system/README.md`」的引用**因此才成立**（原来指的是
+  一个不存在的路径）。
+- **D2 未执行**：`engine/sandbox/` 删目录与 `design-decisions.md` 2026-09-30 的裁定行「空壳从 settings 注释摘除…
+  **目录留盘**，复活 = 注释回 + 登记」冲突（`CLAUDE.md` 模块表同口径）。删法本身无所谓（目录里只有 1 个
+  `build.gradle.kts`，git 历史留着），但那是推翻一条已裁定项，**留给协调者拍板**，backlog D2 行已记录冲突。
+
 ### 2026-10-01 —— 待办池**批 1**（A2 / A3 / A1b / A4；分支 `hellish-shrimp`）
 - **A2 `AndroidShellExecutor` 超时真修**（`platform/system`）：病灶是「超时抛错后 `coroutineScope` 要等两条
   `readBytes()` 子协程结束才传播异常，而 `destroyForcibly()` 在那个作用域**外**的 `finally` 里」——

@@ -29,7 +29,6 @@
 | # | 事项 | 证据位置 | 核实 | 影响 | 成本 |
 |---|---|---|---|---|---|
 | **B1** | **CI 跳过最危险的路径**：`-PskipNpmE2E` 恒开 → `HostNodeNpmE2ETest` / `NpmCacheSeedDeployerTest` / `P0LoopbackTest` 在 CI **永不执行**；没有 `assembleDebug`；没有 lint / detekt / ktlint；没有覆盖率 | `ci.yml:41`；`app/build.gradle.kts:58` | ✅ 2026-10-01 | APK 构建与真 npm 路径可无声回归 | M（建议：nightly 或 `workflow_dispatch` 跑不带 skip 的那条；单独 assembleDebug job；Android Lint） |
-| **B2** | CI 卫生：无 `permissions:` / `timeout-minutes` / `concurrency`（另两个 workflow 都有）；actions 全按 tag 固定；`gradle-version: "8.9"` 与 wrapper 重复；无 Dependabot | `ci.yml:1-45`；`.github/` 下无 `dependabot.yml` | ✅ 2026-10-01 | token 权限过宽、挂死 run、供应链面、版本漂移 | S |
 | **B3** | 无设备/仪器化测试道；`libs.versions.toml` 里的 `espresso` / `androidx-test-junit` **零引用**（要么用起来要么删目录项）；16KB 页 / SELinux / targetSdk exec 三条真机检查仍空白 | 全仓无 `androidTest` 目录；`libs.versions.toml:15,31,32` | ✅ 2026-10-01 | native exec/dlopen/a11y 只在一台设备上验过 | L |
 | **B4** | 无依赖漏洞扫描 / SBOM / `dependency-review-action`；`bridge/js/package.json` 无 `engines` 字段 | `package.json`；CI 无相关 job | 待核实（`engines` 未逐字读） | 升级债与漏洞看不见 | M |
 
@@ -39,7 +38,6 @@
 |---|---|---|---|---|
 | **C1** | `README.md` 只有 **744 B**，没有前置/构建/测试/运行命令 —— 真正的步骤在面向 agent 的 `CLAUDE.md` 里，人类读者进不来 | `README.md` | ✅ 2026-10-01 | S |
 | **C2** | `CLAUDE.md` 构建节硬编码 `/root/android-sdk`、`/root/develop/claude/tools/jdk-17.0.17+10`、`/root/ndk/android-ndk-r28c` → 换成 `ANDROID_HOME` / `JAVA_HOME` / `ANDROID_NDK_HOME` 约定，私人路径别进跟踪文件 | `CLAUDE.md` 构建 / NDK 节 | ✅ 2026-10-01 | S |
-| **C3** | 失效引用：`ForegroundOps.kt:174`（明写 `tools/jvm-test.sh`）、`AndroidPermissionGatesTest.kt:22`、`PlatformWiringTest.kt:363` 仍拿**已删的**旁路当**现役理由**（docs 里提到它是历史记录，不算漂移）；`CLAUDE.md` 仓库地图有悬空行「`module-stubs` 之外的模块」；`ci.yml:70-71`（assemble 走 Docker）与 `node-slice.yml` 的说法互斥。外审建议：加一个**文档路径/链接检查门**（它就是这样扫出这四条的） | 三处 .kt + `CLAUDE.md:14` + 两个 workflow | ✅ 2026-10-01 | S |
 | **C4** | `SECURITY.md` 上报渠道：**仓库侧已改成实话**（2026-10-01，删掉 `TODO@example.invalid` 这类看起来像真地址的占位，直说「本仓当前没有生效的私密上报渠道」）。**只剩维护者动作**：在 GitHub 仓库设置里开通 **Security → Report a vulnerability**（私密漏洞上报），开通后把入口写回该节 | `SECURITY.md` 报告一节 | ✅ 2026-10-01 | 维护者 5 分钟 |
 | **C5** | 无 `CONTRIBUTING.md` / `CHANGELOG` / PR、issue 模板；`versionName` 硬编码 `0.1.0` | `app/build.gradle.kts:19` | ✅ 2026-10-01 | S |
 | **C6** | `design-status.md` 122KB / 737 行、单元格极长，`design-decisions.md` 46KB —— 外审建议拆「当前状态页 + 按日期的日志文件」并加 `docs/README.md` 索引。**注意**：拆分要保住 § 锚点与「只追加」纪律（§号是唯一权威锚） | `docs/design-status.md` | ✅ 2026-10-01 | M |
@@ -53,9 +51,8 @@
 | # | 事项 | 核实 | 成本 |
 |---|---|---|---|
 | **D1** | `:app-service:permission-center` main 只有 **91 行**（独立模块偏重）：并回现有模块，或明确"等它长" | ✅ 2026-10-01 | S |
-| **D2** | `engine/sandbox/` 目录仍在盘上（settings 里已注释），删掉即可 —— git 历史留着 | ✅ 2026-10-01 | S |
+| **D2** | `engine/sandbox/` 目录仍在盘上（settings 里已注释）。**2026-10-01 未执行：与已裁定口径冲突** —— `design-decisions.md` 2026-09-30 的裁定行明写「空壳从 settings 注释摘除…**目录留盘**，复活 = 注释回 + 登记」，`CLAUDE.md` 模块表同口径。删目录 = 推翻这条裁定，得协调者拍板（删法本身无所谓：目录里只有 1 个 `build.gradle.kts`，git 历史留着） | ✅ 2026-10-01（含冲突核实） | S（+ 一次拍板） |
 | **D3** | `:platform:system` 4041 行 / ~45 文件**扁平单包**，而 `:platform:capabilities` 已用子包 → 对齐成 `clipboard/` `sensors/` `notification/` `images/` …（改包名要同步 ArchUnit 包模式 + `ModuleGraphTest` 允许集） | ✅ 2026-10-01 | M |
-| **D4** | `README.md` 住在 `src/main/kotlin/...` 里（`platform/system`、`platform/capabilities` 各一份）→ 移到模块根 | ✅ 2026-10-01 | S |
 | **D5** | 测试包不镜像 main（`platform/capabilities` 测试是扁平的） | 待核实 | S |
 | **D6** | 命名不一致：仓 `NodeScript` / 产品 `AutoScript` / npm 包 `@autoscript/bridge-js` 而描述写 `@autojs/*` / 目录 `.autojs` / 签名前缀 `autojs-lock-v1`。**顺带确认发布用的 npm scope 是自己拥有的** | ✅ 2026-10-01（命名面） | S–M |
 | **D7** | 大文件：`InstallCoordinator.kt` **996 行**、`AppShellApplication.kt` 606、`Scheduler.kt` 521、`NativeImageAnalyzer.kt` 567、`AppShellKit.kt` 442、`imgnative.cpp` 88KB 单文件（host 测试已按算子族分，可按同一刀口拆） | ✅ 2026-10-01 | M |
@@ -74,7 +71,7 @@
 ## F. 建议批次（一次一批，每批跑完整 CI 同源门）
 
 1. ~~**批 1（S）**：A2 / A3 / A1b / A4~~ —— **2026-10-01 已完成**，流水见 [`design-status.md`](design-status.md)（A2b 是修 A2 时露出的新口子，留在这里）。
-2. **批 2（S）**：B2（CI 卫生）+ C3（失效引用）+ D2（删 sandbox 目录）+ D4（README 归位）。
+2. ~~**批 2（S）**：B2（CI 卫生）+ C3（失效引用）+ D4（README 归位）~~ —— **2026-10-01 已完成**，流水见 [`design-status.md`](design-status.md)；**D2 未执行**（与 design-decisions 2026-09-30「目录留盘」裁定冲突，见上表 D2，待协调者拍板）。
 3. **批 3（S）**：C1/C5（人类 README + CONTRIBUTING）+ C4（只剩维护者开通上报入口）。
 4. **批 4（M，需先拍板）**：A1/A1c —— npm executor 与 lock 签名的**接线决策**（谁提供 `KeyProvider`、接缝形状、密钥生命周期）。
 5. **批 5（M）**：B1（CI 覆盖：nightly + assembleDebug + lint）。

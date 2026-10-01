@@ -8,8 +8,9 @@ import java.util.zip.ZipFile
  * 测试夹具定位：**锚仓库根（首个含 settings.gradle.kts 的目录），不锚目录名**。
  *
  * 本仓多 worktree 并行，目录名即分支名；锚死任一名字都会让其余 worktree 与 CI
- * 解析到 `/` 而拿不到夹具（`SocketE2EHostTest` 曾栽在这里，见 `tools/jvm-test-all.sh`
- * 对 aborted 的处理）。
+ * 解析到 `/` 而拿不到夹具（`SocketE2EHostTest` 曾栽在这里：夹具/`dist` 落空 →
+ * `assumeTrue` 静默跳过 → 当时只认 `0 tests failed` 的本机脚本照样放行。
+ * 现在这类跳过由 `TestGuard` 判红，栽不回去了）。
  */
 internal object FixtureAxml {
 

@@ -12,7 +12,6 @@
 | `docs/design-status.md` | 落地台账：接口期清单 + 流水（原 §19 的 9,584 字符流水外迁于此） | 原 §19 |
 | `docs/backlog.md` | **待办池**：未排期项 + 外审建议（逐条带证据位置、核实状态、成本、建议批次）——是收件箱不是承诺，排期/做完/裁定不做了都从这里移走 | — |
 | `.claude/skills/skill-designer/` | 项目级 skill：设计/创建技能 + 外科手术式改代码 + git 提交 | — |
-| `module-stubs` 之外的模块 | 各模块职责见下 | §6 |
 
 ## Gradle 模块（模块表由 `settings.gradle.kts` 冻结，15 个 —— `:engine:sandbox` 空壳 2026-09-30 已注释摘除、`:app-service:npm` 同日审查步骤 5 自 packager 拆出；复活 sandbox = 注释回 + ModuleGraphTest 登记）
 
@@ -47,9 +46,10 @@
 - **CI 验证门**：`.github/workflows/ci.yml` —— JVM 单测（13 个测试任务，即全部带 `src/test`
   的模块 —— 「15 个模块」「13 个测试任务」两个数**从 `settings.gradle.kts` 的 include 与
   `ci.yml` 的 `./gradlew` 行派生**，`:domain` 的 `ModuleGraphTest` 守着（文档里写了数字就必须
-  等于派生值）；清单：`:domain`、`:bridge:java`、`:app-service:{runtime,scheduler,script-repo,permission-center,packager,npm}`、`:platform:{capabilities,system}`、`:engine:node-process`、`:ui`、`:app`）+ archUnit + `bridge/js` 的 npm test，跑在 ubuntu-latest（JDK 17 + Gradle 8.9 + Android SDK license + Node 24）。Android assemble 走后续 `node-runtime-build/Dockerfile`。
+  等于派生值）；清单：`:domain`、`:bridge:java`、`:app-service:{runtime,scheduler,script-repo,permission-center,packager,npm}`、`:platform:{capabilities,system}`、`:engine:node-process`、`:ui`、`:app`）+ archUnit + `bridge/js` 的 npm test + **文档链接门**（`docs-check` job = `bash .github/scripts/check-doc-links.sh`，扫全部 `*.md` 的 markdown 相对链接是否指向存在的文件；本机同一条命令可跑，零依赖秒级），跑在 ubuntu-latest（JDK 17 + Gradle 8.9 + Android SDK license + Node 24）。
+  **Android assemble（APK）目前不在任何 workflow 里**（2026-10-01 核实并改正旧口径）：本机 `./gradlew :app:assembleDebug` 已可直跑，搬上 CI 记在 `docs/backlog.md` 的 B1；接入时走 node-slice / image-native 的同源手法（runner 直跑脚本、Dockerfile 只作发布封装）—— `node-runtime-build/Dockerfile` 产出的是 libnode.so / OpenCV.so，与 APK 无关。
   **`bridge/js/dist` 是构建产物**（2026-09-30 步骤 7 出库、不入 git）：jvm-tests job 前置 `npm --prefix bridge/js ci && run build`（`:app` bridgeDist 随包任务与 e2e 测试要 tsc 产物），js-tests job 另跑 `npm run gen:wire && git diff --exit-code` 门（`bridge/schema/wire.schema.json` → 两份生成物同步）。
-- **可用 GitHub Actions 跑远端 CI**：远端 `origin` = `git@github.com:Ventus-Pluviam/NodeScript.git`（私有仓，SSH 可推）。`ci.yml` 在 `push→main` 与 `pull_request` 时触发——把分支 `git push origin <分支>` 后开 PR 即跑全套门（JVM 单测 + archUnit + npm test），不用等合入 main 才知道红绿。本机 `gh` token 若无该私仓权限（`gh pr create` 报 404/解析不到仓库），用 push 后远端打印的 PR 链接手动开 PR；
+- **可用 GitHub Actions 跑远端 CI**：远端 `origin` = `git@github.com:Ventus-Pluviam/NodeScript.git`（私有仓，SSH 可推）。`ci.yml` 在 `push→main` 与 `pull_request` 时触发——把分支 `git push origin <分支>` 后开 PR 即跑全套门（JVM 单测 + archUnit + npm test + 文档链接门），不用等合入 main 才知道红绿。本机 `gh` token 若无该私仓权限（`gh pr create` 报 404/解析不到仓库），用 push 后远端打印的 PR 链接手动开 PR；
   看不到 runs 输出时以本机 `./gradlew` 同源复现为准。**不要为触发 CI 直推 main**。
 - **本机快速门**：与 CI **逐字同源**的 `./gradlew`（ci.yml L 任务行），单模块跑 `./gradlew :<模块>:test`（纯 JVM）或 `:<模块>:testDebugUnitTest`（android 模块）。守卫在约定插件里：测试出现 skipped/aborted 即红（`TestGuard.ENV_GATED` 只放行设计上环境门禁的 E2E；其余用 `-PallowSkipped=<类名>` 显式放行）。**`:ui`/`:app` 同源直跑**（`./gradlew :ui:testDebugUnitTest :app:testDebugUnitTest`）。
 

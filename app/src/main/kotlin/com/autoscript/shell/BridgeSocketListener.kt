@@ -57,8 +57,8 @@ fun interface BridgeSocketBinder {
  * （serve 要 router）。两段之间的入连接在内核 backlog 排队，start 后由 accept 取用
  * —— 生产顺序（bind → assemble → start → install）里没有执行体能抢在这窗口内 spawn。
  *
- * **纯 JVM**：本类不碰 `android.*`（`:app` 单测运行期 classpath 不带 android.jar，
- * 一碰就是 NoClassDefFound/Stub 崩 —— 见 CLAUDE.md 本机自测旁路）；Android 面全部
+ * **纯 JVM**：本类不碰 `android.*`（`:app` 单测跑在可 mock 的 android.jar 上 ——
+ * 那是桩，`android.*` 一碰就是「not mocked」）；Android 面全部
  * 收在 [AndroidBridgeBinder]（薄到没有逻辑，不在单测里碰）。
  *
  * @see AndroidBridgeBinder 设备侧绑定实现。

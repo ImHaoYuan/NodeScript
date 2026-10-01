@@ -8,8 +8,8 @@ import com.autoscript.domain.host.TaskRegistration
  * 任务中心「登记任务」表单的纯状态（文本字段 → [TaskRegistration] 的解析在提交时跑一次）。
  *
  * 为什么数据与解析住这里而不是 Compose 里：解析是判断（哪一格空了、哪个不是整数），
- * 必须可 JVM 测（[RegistrationFormTest]）；`@Composable` 里的校验没法进 `:ui` 的单测门
- * （compose 没有裸 kotlinc 配方，见 CLAUDE.md）。文本全部 **trim 后**进 DTO ——
+ * 必须可 JVM 测（[RegistrationFormTest]）；`@Composable` 里的校验进不了 `:ui` 的单测门
+ * （那台门跑的是 JVM，compose 不在其上）。文本全部 **trim 后**进 DTO ——
  * 表格里顺手打的空格不该变成"name 不得为空"。
  *
  * 两层校验的分工：

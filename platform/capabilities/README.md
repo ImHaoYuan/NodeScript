@@ -43,7 +43,7 @@ Android 真实现 ── :platform:system（SystemSpis.of）与 `device/` 的无
 ## Android 接触面
 
 本模块源码里**没有** `import android.*`（`ArchitectureTest` 把 `android..`/`androidx..`
-整包列进黑名单），因此全部 JVM 单测都不需要 `--android-jar`。Android 侧的落点：
+整包列进黑名单），因此全部 JVM 单测连 android.jar 都不需要（测试全走纯逻辑或假桥）。Android 侧的落点：
 
 | 能力 | 语义层（本模块） | 真实现落点 |
 |---|---|---|

@@ -37,9 +37,8 @@
 android 模块 `:x:testDebugUnitTest`）。「skipped/aborted ≠ 绿」由约定插件 `autoscript.test-guard`（`build-logic/`）承接：测试出现跳过即红，环境门禁类（`TestGuard.ENV_GATED`）与 `-PallowSkipped=<类名>` 是仅有的两条放行路。
 原 jvm-test-all 的「结构性盲区」提醒随脚本删除作废：gradle 本身就是 AGP 同源，不存在 kotlinc 直跑与 android.jar 桩面的分叉。
 
-`--android-jar` 只是**编译期桩**（取自 AGP transforms 缓存的 android-library `android.jar`）：`android.*` 方法体在运行期一律抛 `RuntimeException`，所以含 Android 源码的模块要做到「本机可测」，
-必须把 Android 接触面挡在可注入的 ops 缝后面（模式与落地清单见 `platform/system/README.md`）。这份脚手架是**本机提速用的旁路**，不替代 CI：`./gradlew` 仍是唯一权威（AGP/
-资源合并/Manifest 合并只有它能验），改动仍以 CI 绿为准。
+本机门里跑的是**可 mock 的 android.jar 桩**：`android.*` 方法体一调就抛 `RuntimeException`（"not mocked"），所以含 Android 源码的模块要做到「本机可测」，
+必须把 Android 接触面挡在可注入的 ops 缝后面（模式与落地清单见 `platform/system/README.md`）。`./gradlew` 是唯一权威（AGP/资源合并/Manifest 合并只有它能验），改动以 CI 绿为准。
 
 ---
 

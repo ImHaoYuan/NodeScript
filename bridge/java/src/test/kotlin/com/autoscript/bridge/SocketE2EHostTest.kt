@@ -21,12 +21,12 @@ import org.junit.jupiter.api.Test
  * 真 socket E2E（docs §7.5）：宿主 Node（bridge/js dist）
  * 经 loopback TCP ↔ 本 JVM 的 [NewlineFrameServer]+[BridgeRouter]+[ConsoleCollector]。
  *
- * 为什么不用 unix domain socket：本机 JDK 17（java.net.UnixDomainSocketAddress
- * 要 JDK 16+，但 ServerSocket 绑定 AF_UNIX 要 JDK 17 的 UnixDomainSocketAddress +
- * ServerSocketChannel —— CI 的 JDK 17 可用，本机 jvm-test.sh 的 kotlinc 目标链
- * 上 ServerSocketChannel.open(PROTOCOL_FAMILY) 写法在旧版脚本里没铺；loopback
- * TCP 与 NewlineFrameServer 同一 read/write 路径（见其 KDoc），介质差异由调用方承担，
- * 语义无差。
+ * 为什么不用 unix domain socket：本用例要测的是**协议语义**（帧编解码/路由/TTL/
+ * console 收集），不是传输介质 —— loopback TCP 与 AF_UNIX 在 [NewlineFrameServer]
+ * 走的是同一条 read/write 路径（见其 KDoc），介质差异由调用方承担，语义无差；
+ * 不依赖 AF_UNIX 也让这条用例在任何 JDK/容器组合下都跑得起来。
+ * （2026-09-30 前这里写的理由是「本机裸 kotlinc 旁路没铺
+ * `ServerSocketChannel.open(PROTOCOL_FAMILY)`」——旁路已删，那条不再成立。）
  *
  * 前置：bridge/js 已 npm run build（dist/bootstrap.js + runtime.js + console.js）。
  * Node 脚本内联（不落地文件）：connect → install → consoleSink.log → echo/ping 往返。
@@ -44,7 +44,8 @@ class SocketE2EHostTest {
      * checkout 目录名 = 仓库名），锚死任一名字都会让其余 worktree/CI 解析到 `/`，
      * `dist` 落空 → [org.junit.jupiter.api.Assumptions.assumeTrue] abort 成"静默跳过"。
      * 这里曾锚 `spiky-hamster`，在 `meek-bat` 等 worktree 与 CI 上该 E2E 一次都没跑过，
-     * 而 `tools/jvm-test-all.sh` 只认 `0 tests failed`，aborted 照样放行 —— 双重假绿。
+     * 而当时的本机脚本只认 `0 tests failed`，aborted 照样放行 —— 双重假绿
+     * （现在这类跳过由 `TestGuard` 判红）。
      */
     private val repoRoot: String = run {
         var d: java.io.File? = java.io.File(System.getProperty("user.dir")).absoluteFile
@@ -98,9 +99,11 @@ class SocketE2EHostTest {
 
     @Test
     fun loopbackE2E(): Unit = runBlocking {
-        // dist 前置检查：没 build 就诚实跳过（fail 比 skip 更能防 CI 漏配？不 ——
-        // CI 门是 gradle+jvm-test.sh，npm build 由 bridge/js 的 npm test 门覆盖；
-        // 此处用 assumeTrue 缺 dist 即跳过，避免跨门误杀）。
+        // dist 前置检查：没 build 就诚实跳过（fail 比 skip 更能防漏配？不 ——
+        // CI 的 jvm-tests job 已前置 `npm --prefix bridge/js ci && run build`，
+        // 本机缺 dist 只是"还没 build"，不是"门坏了"；此处用 assumeTrue 跳过，
+        // 避免跨门误杀。注意 TestGuard 判「skipped ≠ 绿」，所以本机不 build 就跑
+        // `:bridge:java:test` 是会红的 —— 这是有意的，见 CLAUDE.md 构建节）。
         org.junit.jupiter.api.Assumptions.assumeTrue(
             java.io.File("$dist/bootstrap.js").exists(),
             "bridge/js 未 build（先 npm run build），跳过真机 E2E",
