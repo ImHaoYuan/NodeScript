@@ -1,6 +1,8 @@
 ## 6. Gradle 模块结构与依赖规则
 
-> 批判建议「约 12 个模块、不要过度拆分」，下表为落定清单（15 个；`:engine:sandbox` 空壳 2026-09-30 已从 settings 摘除、`:app-service:npm` 同日审查步骤 5 自 packager 拆出；sandbox 处置见 [`design-decisions.md`](../design-decisions.md) 已推翻表），薄模块已合并（原 4 个 `:platform:*` 合并为 2 个，插件管理器/打包器等薄服务并入对应模块）——拆分的唯一目的是：**让依赖方向能在 Gradle 层面被强制**。
+> 批判建议「约 12 个模块、不要过度拆分」，下表为落定清单（15 个；`:engine:sandbox` 空壳 2026-09-30 已从 settings 摘除、`:app-service:npm` 同日审查步骤 5 自 packager 拆出；
+> sandbox 处置见 [`design-decisions.md`](../design-decisions.md) 已推翻表），薄模块已合并（原 4 个 `:platform:*` 合并为 2 个，插件管理器/打包器等薄服务并入对应模块）—
+> —拆分的唯一目的是：**让依赖方向能在 Gradle 层面被强制**。
 
 | 模块 | 职责 | 允许依赖 | 所有模块禁止 |
 |---|---|---|---|
@@ -28,11 +30,16 @@
 `:domain` 的 `ModuleGraphTest` 按 build.gradle.kts 依赖边校验 —— 空模块（尚无源码）同样被覆盖，
 且能拦住 Gradle 层反向依赖与依赖成环。
 
-**例外不是开后门**：`:app` 碰 `:bridge:java` 与 `:platform:capabilities`/`:platform:system` 都只发生在 `com.autoscript.shell` 一个包（后者是 `SystemSpis` + `CapabilityNamespaces` 的生产装配，落点 `com.autoscript.shell.PlatformWiring` → `AppShellApplication.installWithFiles` 喂 `AppShellKit.assemble`）；`:platform:capabilities` 挂 Router 只碰 `:domain` 的 `NamespaceHandler`。越界由 `:app` 的 `ArchitectureTest` 量化执行（shell 之外的 :app 类碰 platform/bridge 即红）+ `:domain` 的 `ModuleGraphTest` 按 build.gradle.kts 依赖边校验，不是口头约定。
+**例外不是开后门**：`:app` 碰 `:bridge:java` 与 `:platform:capabilities`/`:platform:system` 都只发生在 `com.autoscript.shell` 一个包（后者是 `SystemSpis` + `CapabilityNamespaces` 的生产装配，落点 `com.autoscript.shell.PlatformWiring` → `AppShellApplication.installWithFiles` 喂 `AppShellKit.assemble`）；`:platform:capabilities` 挂 Router 只碰 `:domain` 的 `NamespaceHandler`。
+越界由 `:app` 的 `ArchitectureTest` 量化执行（shell 之外的 :app 类碰 platform/bridge 即红）+ `:domain` 的 `ModuleGraphTest` 按 build.gradle.kts 依赖边校验，不是口头约定。
 
-**本机自测（与 CI 逐字同源，无第二口径）**：`tools/jvm-test*` 旁路已删（2026-09-30，见 design-decisions「已推翻」）——本机 SDK 已配置、`./gradlew` 单模块任务即快速门（纯 JVM `:x:test`、android 模块 `:x:testDebugUnitTest`）。「skipped/aborted ≠ 绿」由约定插件 `autoscript.test-guard`（`build-logic/`）承接：测试出现跳过即红，环境门禁类（`TestGuard.ENV_GATED`）与 `-PallowSkipped=<类名>` 是仅有的两条放行路。原 jvm-test-all 的「结构性盲区」提醒随脚本删除作废：gradle 本身就是 AGP 同源，不存在 kotlinc 直跑与 android.jar 桩面的分叉。
+**本机自测（与 CI 逐字同源，无第二口径）**：`tools/jvm-test*` 旁路已删（2026-09-30，见 design-decisions「已推翻」）——本机 SDK 已配置、`./gradlew` 单模块任务即快速门（纯 JVM `:x:test`、
+android 模块 `:x:testDebugUnitTest`）。「skipped/aborted ≠ 绿」由约定插件 `autoscript.test-guard`（`build-logic/`）承接：测试出现跳过即红，环境门禁类（`TestGuard.ENV_GATED`）与 `-PallowSkipped=<类名>` 是仅有的两条放行路。
+原 jvm-test-all 的「结构性盲区」提醒随脚本删除作废：gradle 本身就是 AGP 同源，不存在 kotlinc 直跑与 android.jar 桩面的分叉。
 
-`--android-jar` 只是**编译期桩**（取自 AGP transforms 缓存的 android-library `android.jar`）：`android.*` 方法体在运行期一律抛 `RuntimeException`，所以含 Android 源码的模块要做到「本机可测」，必须把 Android 接触面挡在可注入的 ops 缝后面（模式与落地清单见 `platform/system/README.md`）。这份脚手架是**本机提速用的旁路**，不替代 CI：`./gradlew` 仍是唯一权威（AGP/资源合并/Manifest 合并只有它能验），改动仍以 CI 绿为准。
+`--android-jar` 只是**编译期桩**（取自 AGP transforms 缓存的 android-library `android.jar`）：`android.*` 方法体在运行期一律抛 `RuntimeException`，所以含 Android 源码的模块要做到「本机可测」，
+必须把 Android 接触面挡在可注入的 ops 缝后面（模式与落地清单见 `platform/system/README.md`）。这份脚手架是**本机提速用的旁路**，不替代 CI：`./gradlew` 仍是唯一权威（AGP/
+资源合并/Manifest 合并只有它能验），改动仍以 CI 绿为准。
 
 ---
 

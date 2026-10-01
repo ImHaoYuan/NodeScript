@@ -39,18 +39,30 @@
 - 权限三态中心 UI + 引导页；specialUse FGS 骨架。
 - 打包：模板 APK 改装（assets 注入、签名向导）——**整轨移入后续版本**（2026-09-23 决策：本版不做打包；下方已落地记录保留作既成事实）。
   **P0 领域+收集侧已落地**：`ApkIdentity`（包名/aapt2 关键字校验）+ `TemplateInfo`（引擎版本锚定）+ `TemplateApkPlans`（planDigest 组装/改写前复验，防清单错配；`offlineVariant` 参与摘要）+ `PackagerCollector.plan()`（规格+清单+身份一次产出计划），均 JVM 可测。
-  **P0 AXML/ARSC 真改写已落地（纯 JVM，`:app-service:packager`）**：`IdentityTemplatePatch` 接 `PackagerPipeline.TemplatePatch` 缝——`AxmlPatcher` 改 manifest 的 package/versionName/versionCode/label，label 为 `@string` REF 时走 `ArscPatcher` 按资源 id 改全局池（REF 的 data 不变，AXML 无需重排；ARSC 缺资源则兜底降级为字面串），组件类名按**旧包**绝对化（`.X`/裸名 → 绝对名；dex 命名空间随模板编译定死，换 `package` 后相对名会按新包解析而类并不存在、装上即崩；本就绝对的与外部类不动，alias 的 `targetActivity` 同规则），`ApkRepacker` 重打包并剔除旧 v1 签名条目。字符串池**只追尾追加**（已有下标不动），未改动条目与未追加时的池字节逐字节保留，未知顶层块原样透传；夹具 APK（aapt2 产物）回读校验（另附组件+图标俱全的 `fixture-template-full.apk`）。换图标同趟条目级完成：`ApkPackager.iconPng` 换掉全密度 `ic_launcher(_round).png` 并剔除 `anydpi` 自适应 XML（API26+ 会拿自适应遮住 PNG），无密度 PNG/非 PNG 魔数/文件缺都在动模板前拒绝，`ApkRepacker.rewrite` 增删除集与 `entries()` 实况枚举。编排闭环已落地：`ApkPackager`（plan 两段式 → prepare → 身份改写 → `assets/project/` 批量注入（逐文件 sha256 对清单，collect 后被改即拒）→ `ZipAlignRunner` → `ApkSignerRunner`，**先对齐后签名**焊死，`apkSha256` 取对齐后字节），packager 模块内 200+ JVM 单测覆盖 argv/顺序/两道复验/失败口径；本机对真 `zipalign`+`apksigner`+debug keystore 手工跑通并 `zipalign -c`/`apksigner verify` 回读。**打包整轨已移入后续版本**（2026-09-23 决策：向导 UI 与 Keystore 取密随轨道走）；加密资产/loader 一并移出需求（与脚本加密同批收窄）。
+  **P0 AXML/ARSC 真改写已落地（纯 JVM，`:app-service:packager`）**：`IdentityTemplatePatch` 接 `PackagerPipeline.TemplatePatch` 缝——`AxmlPatcher` 改 manifest 的 package/versionName/versionCode/label，label 为 `@string` REF 时走 `ArscPatcher` 按资源 id 改全局池（REF 的 data 不变，AXML 无需重排；ARSC 缺资源则兜底降级为字面串），组件类名按**旧包**绝对化（`.X`/裸名 → 绝对名；
+  dex 命名空间随模板编译定死，换 `package` 后相对名会按新包解析而类并不存在、装上即崩；本就绝对的与外部类不动，alias 的 `targetActivity` 同规则），`ApkRepacker` 重打包并剔除旧 v1 签名条目。字符串池**只追尾追加**（已有下标不动），未改动条目与未追加时的池字节逐字节保留，未知顶层块原样透传；
+  夹具 APK（aapt2 产物）回读校验（另附组件+图标俱全的 `fixture-template-full.apk`）。换图标同趟条目级完成：`ApkPackager.iconPng` 换掉全密度 `ic_launcher(_round).png` 并剔除 `anydpi` 自适应 XML（API26+ 会拿自适应遮住 PNG），无密度 PNG/非 PNG 魔数/文件缺都在动模板前拒绝，`ApkRepacker.rewrite` 增删除集与 `entries()` 实况枚举。
+  编排闭环已落地：`ApkPackager`（plan 两段式 → prepare → 身份改写 → `assets/project/` 批量注入（逐文件 sha256 对清单，collect 后被改即拒）→ `ZipAlignRunner` → `ApkSignerRunner`，**先对齐后签名**焊死，`apkSha256` 取对齐后字节），packager 模块内 200+ JVM 单测覆盖 argv/顺序/两道复验/失败口径；本机对真 `zipalign`+`apksigner`+debug keystore 手工跑通并 `zipalign -c`/`apksigner verify` 回读。
+  **打包整轨已移入后续版本**（2026-09-23 决策：向导 UI 与 Keystore 取密随轨道走）；加密资产/loader 一并移出需求（与脚本加密同批收窄）。
   **P0 签名向导领域侧已落地**：`SigningKey`（Debug 临时/ECDSA 发布密钥库描述）+ `SignPlans`（请求组装绑定计划摘要，签名前复验）+ `ApkSignerArgs`（apksigner 参数表纯构造，口令只走 `env:NAME` 不进参数表），均 JVM 可测。
-  **P0 apksigner 起进程已落地（纯 JVM 缝）**：`ApkSignerRunner` 注入 `ProcessLauncher`（对齐 `HostNodeExecutor` 惯例）——argv 与领域参数表逐字一致、口令只经 `AUTOSCRIPT_KS_PASS`/`AUTOSCRIPT_KEY_PASS` 环境变量、非 0 退出码与"报成功但没产出包"都如实失败。**参数形态经真 apksigner 验证**：必须是两项式 `--ks-pass env:NAME`（`--ks-pass:env` 连写会被拒 `Unsupported option`）。`ZipAlignRunner`（`zipalign -f -p 4 in out`，同样注入 `ProcessLauncher`）与编排顺序（先对齐后签名、`SignPlans` 摘要绑对齐后字节）已由 `ApkPackager` 焊死。仍留 Android/后续侧：Keystore 取密钥、签名向导 UI。
+  **P0 apksigner 起进程已落地（纯 JVM 缝）**：`ApkSignerRunner` 注入 `ProcessLauncher`（对齐 `HostNodeExecutor` 惯例）——argv 与领域参数表逐字一致、口令只经 `AUTOSCRIPT_KS_PASS`/`AUTOSCRIPT_KEY_PASS` 环境变量、非 0 退出码与"报成功但没产出包"都如实失败。**参数形态经真 apksigner 验证**：必须是两项式 `--ks-pass env:NAME`（`--ks-pass:env` 连写会被拒 `Unsupported option`）。
+  `ZipAlignRunner`（`zipalign -f -p 4 in out`，同样注入 `ProcessLauncher`）与编排顺序（先对齐后签名、`SignPlans` 摘要绑对齐后字节）已由 `ApkPackager` 焊死。仍留 Android/后续侧：Keystore 取密钥、签名向导 UI。
 - 单测/archUnit CI；Docker 构建镜像。**已落地**：`.github/workflows/ci.yml`（JVM 单测 + archUnit）；本机已配 Android SDK（`/root/android-sdk`，2026-09-23）——CI 同款 `./gradlew …` 命令可本机直跑复现；本机快速门 = CI 同源 `./gradlew`（`tools/jvm-test*` 已删，见 §6 末）。
 - npm P0（§10.11）：vendored npm CLI + 专用安装会话进程 + 零 spawn 主路径 + 事务化安装/journal 自愈 + 精选缓存种子离线首装 + 带外信任锚/lock 验签/审批卡 UI + 依赖面板 + 打包 node_modules 入包。
 
 ### P1 — 并发、图像、生态关键件（沙箱已裁，§18 第 1 项）
 - 引擎池自适应（1-3）＋执行 slot FGS + 队列语义；`engines` 多引擎/`RuntimeChannel`。
-- ~~QuickJS `:sandbox` 进程~~ **已裁（2026-09-26，§18 第 1 项「不要沙箱」）**：QuickJS 整条轨撤出排期，引擎只剩 Node 一条；`:engine:sandbox` 模块壳保留但不进排期（**2026-09-30 追记：壳已从 settings 注释摘除，不占模块表**）。连带作废的还有 npm P1 里的「QuickJS 白名单库独立 vendored」与 §16 的两条相关风险——第三方脚本的防线改为**安装时用户选择 + §11 来源提示**（进程隔离那条不再存在）。
-- `libopencv.so` 全图像管线的 P1 算子与桥面消费方**均已全落**；**找色已落地**（2026-09-25，§9.2：单色 + 逐分量容差 + 可选区域 + 首个命中，四层同改，`x=-1` 哨兵与“扫过 0 像素”两条口径），模板匹配 + `decode`/`release` 亦已随 §9.2 落地，**灰度、裁剪、缩放、旋转与特征已落计算核**（2026-09-25：`imgnative_gray` 产出新帧 + 28 例；`imgnative_crop` 尺寸会变的产出 + 复用区域判据 + 真拷贝 + 46 例；`imgnative_resize` 目标尺寸入参 + 固定 LINEAR + 配额 + 45 例；`imgnative_rotate` 逆时针角度 + expand 包络画布 + 帧中心 + 45 例；`imgnative_feature` ORB+ratio+几何一致性+铺开度门只回坐标 + 51 例 host 断言；**五者桥面已于 2026-09-29 全部开通** —— P1 图像桥消费方兑现了当初"没有消费方就不开桥面"的判据，`:domain ImageAnalyzer` 扩到十方法）；MediaProjection 会话式截屏/录屏仍待（换 producer 即插，语义面不动）。
+- ~~QuickJS `:sandbox` 进程~~ **已裁（2026-09-26，§18 第 1 项「不要沙箱」）**：QuickJS 整条轨撤出排期，引擎只剩 Node 一条；`:engine:sandbox` 模块壳保留但不进排期（**2026-09-30 追记：
+  壳已从 settings 注释摘除，不占模块表**）。连带作废的还有 npm P1 里的「QuickJS 白名单库独立 vendored」与 §16 的两条相关风险——第三方脚本的防线改为**安装时用户选择 + §11 来源提示**（进程隔离那条不再存在）。
+- `libopencv.so` 全图像管线的 P1 算子与桥面消费方**均已全落**；**找色已落地**（2026-09-25，§9.2：单色 + 逐分量容差 + 可选区域 + 首个命中，四层同改，`x=-1` 哨兵与“扫过 0 像素”两条口径），
+  模板匹配 + `decode`/`release` 亦已随 §9.2 落地，**灰度、裁剪、缩放、旋转与特征已落计算核**（2026-09-25：`imgnative_gray` 产出新帧 + 28 例；`imgnative_crop` 尺寸会变的产出 + 复用区域判据 + 真拷贝 + 46 例；
+  `imgnative_resize` 目标尺寸入参 + 固定 LINEAR + 配额 + 45 例；`imgnative_rotate` 逆时针角度 + expand 包络画布 + 帧中心 + 45 例；`imgnative_feature` ORB+ratio+几何一致性+铺开度门只回坐标 + 51 例 host 断言；
+  **五者桥面已于 2026-09-29 全部开通** —— P1 图像桥消费方兑现了当初"没有消费方就不开桥面"的判据，`:domain ImageAnalyzer` 扩到十方法）；MediaProjection 会话式截屏/
+  录屏仍待（换 producer 即插，语义面不动）。
 - `ui` 原生 XML UI 宿主 + `ui_web` WebView JS 桥 + 悬浮窗。
-- datastore SQLite、settings、sensors、notification、app Intent、zip、power_manager（**已落地**，见 §8.7；clipboard 亦已落地 §12.2 第五条独立缝，sensors 亦已落地 §12.2 第六条独立缝，images 桥面与 native 实现均已落地 §12.2 第七条独立缝 —— `libopencv.so`（OpenCV 4.14 静态链接，`node-runtime-build/scripts/build-opencv.sh` + `.github/workflows/image-native.yml`）+ `NativeImageAnalyzer`/`JniOps`（`:platform:system`）+ `PlatformWiring.of` 三件套齐全，so 缺位时桥回 `ERR_NOT_IMPLEMENTED`）。
+- datastore SQLite、settings、sensors、notification、app Intent、zip、power_manager（**已落地**，见 §8.7；clipboard 亦已落地 §12.2 第五条独立缝，sensors 亦已落地 §12.2 第六条独立缝，
+  images 桥面与 native 实现均已落地 §12.2 第七条独立缝 —— `libopencv.so`（OpenCV 4.14 静态链接，`node-runtime-build/scripts/build-opencv.sh` + `.github/workflows/image-native.yml`）+ `NativeImageAnalyzer`/
+  `JniOps`（`:platform:system`）+ `PlatformWiring.of` 三件套齐全，so 缺位时桥回 `ERR_NOT_IMPLEMENTED`）。
 - ~~OCR (MLKit 插件基准实现)~~ **不内置（2026-09-26 拍板，见 §9.7）** + `OcrProvider`（只保留接缝）。
 - 插件框架骨架 + 打包合并插件资产。
 - npm P1（§10.11）：spawn 桥 polyfill + **lifecycle 脚本真实执行**（§18 第 7 项口径：不做出厂卡口、安装时让用户自己选，不是"批准后才跑"的审批流 —— **宿主侧门禁面已落 2026-09-29**：解析/哈希/白名单/自请入队/执行接缝齐了，缺 spawn 桥本体，见 §10.3 T1 落地追记）+ npm 终端 + 在线/OSV 离线审计 + node-shim 红测。（原「QuickJS 白名单库独立 vendored」随第 1 项沙箱裁掉。）
@@ -76,7 +88,10 @@
 | APK 体积 | ≤ 40MB release（`libnode.so` + `libopencv.so` + assets）—— **已超支，见下** |
 
 > **APK 体积预算是本表唯一已被实测推翻的条目（2026-09-25 记账）**：`:engine:node-process` 侧 jniLibs 三件套
-> `libnoden.so` + `libnode.so` + `libc++_shared.so` 实测未压缩合计已 ≈81MB（APK 压缩安装后另计）——**2026-09-26 ICU 之后要按 ≈92MB 读**：`libnode.so` 由 `--with-intl=none` 换成 `small-icu zh,en` 后实测 70,725,976 → 81,950,376 B（**+11,224,400 B = +10.70 MiB = +15.87%**），增量全在 `libnode.so`，故三件套 +10.70 MiB；取证 = 两个 `node-slice` artifact（`36153816811` / `36185853302`）+ 各自 `config.gypi`（旧 `icu_small=false`，新 `icu_small=true, icu_locales=en,root,zh, icu_path=deps/icu-small`）。§18 第 4 项的拍板（只要 zh,en）**已按本条买单**——不拍这条的话全量 ICU 还要再多，预算只会更超（下文 `libopencv` 两处「占三件套 8.6%/7.8%」的分母仍是 ICU 前的 81MB，按 ≈92MB 折算应为 7.6%/6.6%，分母换了、结论不变：图像面不是超支原因）；
+> `libnoden.so` + `libnode.so` + `libc++_shared.so` 实测未压缩合计已 ≈81MB（APK 压缩安装后另计）——**2026-09-26 ICU 之后要按 ≈92MB 读**：`libnode.so` 由 `--with-intl=none` 换成 `small-icu zh,en` 后实测 70,725,976 → 81,950,376 B（**+11,224,400 B = +10.70 MiB = +15.87%**），
+> 增量全在 `libnode.so`，故三件套 +10.70 MiB；取证 = 两个 `node-slice` artifact（`36153816811` / `36185853302`）+ 各自 `config.gypi`（旧 `icu_small=false`，新 `icu_small=true, icu_locales=en,root,zh, icu_path=deps/icu-small`）。
+> §18 第 4 项的拍板（只要 zh,en）**已按本条买单**——不拍这条的话全量 ICU 还要再多，预算只会更超（下文 `libopencv` 两处「占三件套 8.6%/7.8%」的分母仍是 ICU 前的 81MB，
+> 按 ≈92MB 折算应为 7.6%/6.6%，分母换了、结论不变：图像面不是超支原因）；
 > `libopencv.so` 是 OpenCV 4.14 `core+imgproc+imgcodecs+features2d+flann` 静态链接（kleidicv=ON；五模块 device 构建实测 **7,298,272 B = 7.0 MiB**（特征落地前 6,328,916 B = 6.0 MiB，增量不足 1MB、+15.3%），占引擎三件套 81MB 的 8.6%）——
 > 仅按 `BUILD_LIST` 裁剪，**未压缩实测 6,328,916 B = 6.0 MiB**（占三件套 81MB 的 7.8%）——
 > 早前"再添一个数量级相当的份额"是不成立的推断，实测不是同一量级。因此超支**全在引擎三件套**，

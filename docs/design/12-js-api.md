@@ -4,7 +4,8 @@
 - **Promise 优先**：`await` 一切；同步语义的系统能力（如纯计算）由明确的同步函数提供（`images.format` 等纯函数）。
 - **EventEmitter 事件**：a11y 事件、引擎事件、截图流、数据流统一 EventEmitter。
 - **超时/取消**：`{timeout}` 选项默认给；返回 Promise 的可选 `AbortSignal`（图形接口）。
-- **唯一入口**：脚本 `require('auto')` 返回命名空间根对象（`auto.a11y` / `auto.engines` / …），结构化维护 API。**落位**（2026-09-24 资产交付轨）：装配期 `BridgeDistDeploy` 把随包 dist 放进 `filesDir/node_modules/auto`（`ScriptPaths.autoModuleRoot` 单一出处；无 package.json 走 `index.js` 缺省入口），每个项目脚本沿目录树向上第 3 站解析到；桥 handler 由打包入口 kBootstrap 的 `attachNative` 在脚本前装上（见 §12.4 切片路线）。
+- **唯一入口**：脚本 `require('auto')` 返回命名空间根对象（`auto.a11y` / `auto.engines` / …），结构化维护 API。**落位**（2026-09-24 资产交付轨）：装配期 `BridgeDistDeploy` 把随包 dist 放进 `filesDir/node_modules/auto`（`ScriptPaths.autoModuleRoot` 单一出处；无 package.json 走 `index.js` 缺省入口），每个项目脚本沿目录树向上第 3 站解析到；
+  桥 handler 由打包入口 kBootstrap 的 `attachNative` 在脚本前装上（见 §12.4 切片路线）。
 - **错误码**：`ERR_*` 目录 + `instanceof AutojsError`，可 try/catch 策略化。
 - 兼容垫片：对知名差异（如 `uc_obj` 语义）通过 `compat` 标志位提供，**不反向攻坚原生语义**。
 
@@ -27,7 +28,17 @@
 > 下表第四列（挂载状态）是**状态**，权威台账见 [`design-status.md`](../design-status.md)。
 > 本表保留第四列是为了就近阅读；两者不一致时，以台账（日期更晚）为准，并回来改本表。
 
-> 本表有**机械化门禁**：`bridge/schema/wire.schema.json` 是 wire 面单一事实来源（审查步骤 7），`bridge/js/test/wire-schema.test.cjs` 四向对账（不经 mock）——facade `invoke` 的命名空间/方法必须在 schema 表内、生产源 `register` 集合与 schema 键**双向相等**、19 个 handler 的 `methods()` 申报（单源指生成物 `WireMethods.BY_NS`）与 schema 键双向相等、schema 方法必须被 facade 发或登记在 schema `aliases`（收了没人发的 wire 名要么 facade 漏调、要么写进 schema `aliases` 并说明为什么，且不许虚报）；生成物 `wire-types.ts`/`WireMethods.kt` 由 `generate.mjs --check` 钉同步（CI 另跑 `npm run gen:wire && git diff --exit-code`）。它是 `npm test` 的一部分，随 CI 跑；a11y 选择器动作经 `call('<m>')` 字面量（schema `dynamicSinks` 登记）与 `findOneOrNull`、`shell.shell()` 两条 alias 是仅有的登记（原「正则啃 `when` 块」的 `wire-reconcile.test.cjs` 已删，底账换 schema）。 同族另有三道：`event-wire.test.cjs`（npm **事件面** wire 逐字对账——宿主 `phaseWire`/`kindWire`/`actionWire`/`type` ⇄ `npm.ts` 的 `PHASES`/`WARNING_KINDS`/`APPROVAL_ACTIONS`/`routeInstallEvent` 分支双向集合相等，防 `.name.lowercase()` 折出 `post_check` 那类连字符漂移），并钉**键名面**——`encodeEvent`/审批 `mapOf` 发的每个键 ⇄ JS `w.x` 读的键逐分支对账，JS 读宿主不发的键即红、宿主发了没人读的键须登记 `UNREAD` 并写明理由（mock 测试发的永远是 JS 自己认识的键，键名漂移只有这道门能抓）与 `err-catalog.test.cjs`（错误目录三面对账，见 §7.6）；`wiring-table.test.cjs`（**本表 ↔ schema** 对账：facade 列点名的 `.ts` 真存在且与 schema `facade` 字段一致、handler 列点名的类真存在（花括号组展开，且每行至少认出一个候选防改名绕过）、行覆盖与 schema 键**双向相等** + 状态列写「已挂/已可挂」的必须在 schema 里——表是手写的，§19 又宣布它为事实来源，就该有门看着；`register`↔schema 的那半由 wire-schema 门钉）；`pull-wire.test.cjs`（**另两条拉取环** a11y.events / sensors.drain 的回包键名 + 入参键名对账——入参 `sinceSeq` 改名的失败面是宿主读不到、游标恒 0、事件重复投递，不报错只出错数据）。
+> 本表有**机械化门禁**：`bridge/schema/wire.schema.json` 是 wire 面单一事实来源（审查步骤 7），`bridge/js/test/wire-schema.test.cjs` 四向对账（不经 mock）——facade `invoke` 的命名空间/
+> 方法必须在 schema 表内、生产源 `register` 集合与 schema 键**双向相等**、19 个 handler 的 `methods()` 申报（单源指生成物 `WireMethods.BY_NS`）与 schema 键双向相等、
+> schema 方法必须被 facade 发或登记在 schema `aliases`（收了没人发的 wire 名要么 facade 漏调、要么写进 schema `aliases` 并说明为什么，且不许虚报）；生成物 `wire-types.ts`/
+> `WireMethods.kt` 由 `generate.mjs --check` 钉同步（CI 另跑 `npm run gen:wire && git diff --exit-code`）。它是 `npm test` 的一部分，随 CI 跑；a11y 选择器动作经 `call('<m>')` 字面量（schema `dynamicSinks` 登记）与 `findOneOrNull`、
+> `shell.shell()` 两条 alias 是仅有的登记（原「正则啃 `when` 块」的 `wire-reconcile.test.cjs` 已删，底账换 schema）。 同族另有三道：`event-wire.test.cjs`（npm **事件面** wire 逐字对账—
+> —宿主 `phaseWire`/`kindWire`/`actionWire`/`type` ⇄ `npm.ts` 的 `PHASES`/`WARNING_KINDS`/`APPROVAL_ACTIONS`/`routeInstallEvent` 分支双向集合相等，防 `.name.lowercase()` 折出 `post_check` 那类连字符漂移），
+> 并钉**键名面**——`encodeEvent`/审批 `mapOf` 发的每个键 ⇄ JS `w.x` 读的键逐分支对账，JS 读宿主不发的键即红、宿主发了没人读的键须登记 `UNREAD` 并写明理由（mock 测试发的永远是 JS 自己认识的键，
+> 键名漂移只有这道门能抓）与 `err-catalog.test.cjs`（错误目录三面对账，见 §7.6）；`wiring-table.test.cjs`（**本表 ↔ schema** 对账：facade 列点名的 `.ts` 真存在且与 schema `facade` 字段一致、
+> handler 列点名的类真存在（花括号组展开，且每行至少认出一个候选防改名绕过）、行覆盖与 schema 键**双向相等** + 状态列写「已挂/已可挂」的必须在 schema 里—
+> —表是手写的，§19 又宣布它为事实来源，就该有门看着；`register`↔schema 的那半由 wire-schema 门钉）；`pull-wire.test.cjs`（**另两条拉取环** a11y.events / sensors.drain 的回包键名 + 入参键名对账—
+> —入参 `sinceSeq` 改名的失败面是宿主读不到、游标恒 0、事件重复投递，不报错只出错数据）。
 
 | 命名空间 | JS facade | Kotlin handler | 挂载状态 |
 |---|---|---|---|
@@ -47,15 +58,36 @@
 | `workManager`（create/cancel/list 建任务面） | `workManager.ts`（排期工具 + 桥门面） | `WorkManagerNamespaceHandler`（`:app-service:scheduler`，直驱本模块 `Scheduler`、直写注册表 —— 步骤 6c 自 `:app` 迁入，与 `EnginesNamespaceHandler` 住 runtime 同形态） | **已挂**（恒挂载，调度器是本壳自建、无注入缝；cron 非法表达式桥侧 `ERR_INVALID_PARAM`，校验出处 `CronTab.parse` 与 UI 侧同口径） |
 | `power_manager`（acquire/release/status 脚本电源面） | `power.ts`（`acquire`/`release`/`status`） | `PowerManagerNamespaceHandler`（`:platform:system` —— 步骤 6d 迁入，与 `WakeLockLedger` 同模块同一本账（账本随迁、语义零改）；keepalive 走 `:domain` `KeepAliveRenew` 窄缝，`ForegroundKeeper` 实现之） | **已挂**（`powerManagerHandler` **独立缝**，与 datastore/zip/settings/notification/clipboard/sensors 同形、不入 `systemHandlers` 束；生产由 `AppShellApplication.installWithFiles` 经 `PlatformWiring.powerManagerHandler(keeper)` 造好喂缝（根包零 platform 类型，见步骤 6d）；脚本锁必须限时、无期限只属框架；token 服务端分配；取不到锁 `ERR_SERVICE_DISABLED` 且未记账；直驱账本不走 `ForegroundKeeper.start(token)` 单槽） |
 
-**为什么能力命名空间走注入缝**：`a11y`/`screen` 的真实现住 `:platform:capabilities`，而 §6 禁止 `:app` **非装配包**直连 `:platform`（装配包 shell 经包级例外二可直连，见 `PlatformWiring` —— 但注入缝本身仍是设计答案：`AppShellKit`/`AppShell` 保持纯 JVM 可测，真假实现共用同一条缝）。解法是 `:domain` 上的挂载缝 `NamespaceHandler` + 薄转接工厂束 —— 无障碍面 `CapabilityNamespaces.{a11y,screen,dialogs}`（`:platform:capabilities`）、系统面 `SystemNamespaces.*`（`:platform:system`，2026-09-30 步骤 6 随 handler 归位），由持有真实现的 Android 侧在调用 `assemble` 时注入；`BridgeRouter` 的 `RequestHandler` 只是这条缝的 typealias。这不违反依赖规则：两侧都只见 `:domain`。
+**为什么能力命名空间走注入缝**：`a11y`/`screen` 的真实现住 `:platform:capabilities`，而 §6 禁止 `:app` **非装配包**直连 `:platform`（装配包 shell 经包级例外二可直连，
+见 `PlatformWiring` —— 但注入缝本身仍是设计答案：`AppShellKit`/`AppShell` 保持纯 JVM 可测，真假实现共用同一条缝）。解法是 `:domain` 上的挂载缝 `NamespaceHandler` + 薄转接工厂束 —
+— 无障碍面 `CapabilityNamespaces.{a11y,screen,dialogs}`（`:platform:capabilities`）、系统面 `SystemNamespaces.*`（`:platform:system`，2026-09-30 步骤 6 随 handler 归位），由持有真实现的 Android 侧在调用 `assemble` 时注入；
+`BridgeRouter` 的 `RequestHandler` 只是这条缝的 typealias。这不违反依赖规则：两侧都只见 `:domain`。
 
 **五个系统命名空间（`dialogs`/`shell`/`device`/`app`/`floatingWindow`）分两层，别混**（2026-09-30 步骤 6：语义层与实现层**同批归位 `:platform:system`**；原「语义层住 capabilities / handler 不住 system」口径已反转，原文照抄与推翻记录见 design-decisions）：
-- **语义层**（handler）住 `:platform:system` 的 `SystemNamespaces.kt`（2026-09-30 步骤 6 与实现同模块；`dialogs` 例外住 `:platform:capabilities` 的 `DialogsNamespaceHandler` —— `DialogHost` 实现按约定在同模块，见下一条），纯 JVM 可测（假 SPI 注入即可跑）：参数校验（spec 守卫、必填字段、`timeout > 0`）、枚举字面量解析（`ShellMode`/`DialogMode`，拼错即报错不静默套默认）、默认值（shell 超时 30s）、错误分类**透传**（`AutojsException.error` 原码回桥）、响应形状编码（与 `extras.ts` 逐字对齐）；
-- **Android 实现层**住 `:platform:system` —— 契约 `SystemHostContracts.kt` 的 `ShellExecutor`/`DeviceInfoProvider`/`AppLauncher`/`FloatingWindowHost` 四件（步骤 6a 自 `:domain` 迁入，grep 判据仅 handler+impl 消费）+ 实现四件**已落地**（`AndroidShellExecutor`/`AndroidDeviceInfoProvider`/`AndroidAppLauncher`/`AndroidFloatingWindowHost`，入口 `SystemSpis.of(context)`；各自只碰一小块 Android，其余在可注入的 ops 缝后面，本机无 SDK 也能跑契约测试），`DialogHost` **住 :platform:capabilities 而非本模块**（domain KDoc 约定 + 平台模块间无依赖边；编排 `AndroidDialogHost` 纯 JVM 可测，设备面在 `…capabilities.device` 子包）。**有状态的判断归实现层**：句柄记账与 generation、`close` 幂等、`ERR_STALE_HANDLE`/`ERR_PERMISSION_DENIED` 的起源、`DialogMode.AUTO` 按 overlay 可见性选路（降级决策需要 overlay 实况，handler 看不到）。
+- **语义层**（handler）住 `:platform:system` 的 `SystemNamespaces.kt`（2026-09-30 步骤 6 与实现同模块；`dialogs` 例外住 `:platform:capabilities` 的 `DialogsNamespaceHandler` —— `DialogHost` 实现按约定在同模块，
+  见下一条），纯 JVM 可测（假 SPI 注入即可跑）：参数校验（spec 守卫、必填字段、`timeout > 0`）、枚举字面量解析（`ShellMode`/`DialogMode`，拼错即报错不静默套默认）、
+  默认值（shell 超时 30s）、错误分类**透传**（`AutojsException.error` 原码回桥）、响应形状编码（与 `extras.ts` 逐字对齐）；
+- **Android 实现层**住 `:platform:system` —— 契约 `SystemHostContracts.kt` 的 `ShellExecutor`/`DeviceInfoProvider`/`AppLauncher`/`FloatingWindowHost` 四件（步骤 6a 自 `:domain` 迁入，
+  grep 判据仅 handler+impl 消费）+ 实现四件**已落地**（`AndroidShellExecutor`/`AndroidDeviceInfoProvider`/`AndroidAppLauncher`/`AndroidFloatingWindowHost`，入口 `SystemSpis.of(context)`；
+  各自只碰一小块 Android，其余在可注入的 ops 缝后面，本机无 SDK 也能跑契约测试），`DialogHost` **住 :platform:capabilities 而非本模块**（domain KDoc 约定 + 平台模块间无依赖边；
+  编排 `AndroidDialogHost` 纯 JVM 可测，设备面在 `…capabilities.device` 子包）。**有状态的判断归实现层**：句柄记账与 generation、`close` 幂等、`ERR_STALE_HANDLE`/`ERR_PERMISSION_DENIED` 的起源、
+  `DialogMode.AUTO` 按 overlay 可见性选路（降级决策需要 overlay 实况，handler 看不到）。
 
-**原「为什么 handler 不住 `:platform:system`」两层理由已随步骤 6 推翻**（(1) 共担门禁组、(2) 装配层双模块直连 —— 原文照抄与推翻记录见 design-decisions）：handler 归位实现模块（与 `EnginesNamespaceHandler` 住 `:app-service:runtime` 同形态），共担门禁的校验仍单点住在 `SystemNamespaces` 工厂束（同模块一处，不各写一份），装配层 `PlatformWiring` 本就经包级例外二同时可见两模块。**§9.6 的存储面（datastore/settings/zip）与这五个命名空间无关**：`datastore` 已单列入上表（handler 住 `:platform:system`、独立注入缝；SPI `DataStore` 留 `:domain` —— 非能力专用）；`zip` 已单列入上表（SPI+实现+桥面俱全，§9.6）；`settings` 已单列入上表（SPI+实现+桥面俱全，§9.6）—— 三者都与五个命名空间无共担门禁，已逐条单列；`notification` 是**第四条独立缝**（门禁是 `POST_NOTIFICATIONS`，同样不与那五个共担），故也单列入上表。`clipboard` 是**第五条独立缝**（剪贴板无门禁，读受限是系统的 null 答案、写不受限，判据在 SPI，同样不与那五个共担），故也单列入上表。`sensors` 是**第六条独立缝**（P0 名单无运行时门禁，未知名→`ERR_NOT_SUPPORTED`、系统拒收→`ERR_SERVICE_DISABLED` 判据在 SPI，同样不与那五个共担），故也单列入上表。`images` 是**第七条独立缝**（§9.2 图像面：无运行时门禁，`ERR_FILE_NOT_FOUND`/`ERR_IO`/`ERR_STALE_HANDLE` 判据在 SPI 自己身上）：桥面十方法 `decode`/`matchTemplate`/`findImage`/`findColor`/`release`/`toGrayscale`/`crop`/`resize`/`rotate`/`findFeature` 已就位（阈值**一个键** `threshold`、域 `[0,1]`、未匹配回裸 `null` 不是异常；找色的 `color` 恒四分量 `[r,g,b,a]`、`tolerance` 逐分量 `[0,255]`、`region` 四元组，未命中同样回裸 `null`，而“扫过 0 像素”是 `ERR_INVALID_PARAM`），真实现也已接（`NativeImageAnalyzer` + `libopencv.so`，见 §9.2 末）—— 与那六条现在完全同形：`PlatformWiring.of` 都喂真实现，唯独图像面多一条"so 缺位即不喂"的判据（`JniOps.loadOrNull()`）。
+**原「为什么 handler 不住 `:platform:system`」两层理由已随步骤 6 推翻**（(1) 共担门禁组、(2) 装配层双模块直连 —— 原文照抄与推翻记录见 design-decisions）：
+handler 归位实现模块（与 `EnginesNamespaceHandler` 住 `:app-service:runtime` 同形态），共担门禁的校验仍单点住在 `SystemNamespaces` 工厂束（同模块一处，不各写一份），
+装配层 `PlatformWiring` 本就经包级例外二同时可见两模块。**§9.6 的存储面（datastore/settings/zip）与这五个命名空间无关**：`datastore` 已单列入上表（handler 住 `:platform:system`、
+独立注入缝；SPI `DataStore` 留 `:domain` —— 非能力专用）；`zip` 已单列入上表（SPI+实现+桥面俱全，§9.6）；`settings` 已单列入上表（SPI+实现+桥面俱全，§9.6）—
+— 三者都与五个命名空间无共担门禁，已逐条单列；`notification` 是**第四条独立缝**（门禁是 `POST_NOTIFICATIONS`，同样不与那五个共担），故也单列入上表。
+`clipboard` 是**第五条独立缝**（剪贴板无门禁，读受限是系统的 null 答案、写不受限，判据在 SPI，同样不与那五个共担），故也单列入上表。`sensors` 是**第六条独立缝**（P0 名单无运行时门禁，
+未知名→`ERR_NOT_SUPPORTED`、系统拒收→`ERR_SERVICE_DISABLED` 判据在 SPI，同样不与那五个共担），故也单列入上表。`images` 是**第七条独立缝**（§9.2 图像面：
+无运行时门禁，`ERR_FILE_NOT_FOUND`/`ERR_IO`/`ERR_STALE_HANDLE` 判据在 SPI 自己身上）：桥面十方法 `decode`/`matchTemplate`/`findImage`/`findColor`/`release`/`toGrayscale`/`crop`/`resize`/
+`rotate`/`findFeature` 已就位（阈值**一个键** `threshold`、域 `[0,1]`、未匹配回裸 `null` 不是异常；找色的 `color` 恒四分量 `[r,g,b,a]`、`tolerance` 逐分量 `[0,255]`、
+`region` 四元组，未命中同样回裸 `null`，而“扫过 0 像素”是 `ERR_INVALID_PARAM`），真实现也已接（`NativeImageAnalyzer` + `libopencv.so`，见 §9.2 末）—— 与那六条现在完全同形：
+`PlatformWiring.of` 都喂真实现，唯独图像面多一条"so 缺位即不喂"的判据（`JniOps.loadOrNull()`）。
 
-**能力门禁不在 handler 里**：`:app-service:permission-center` 的 `PermissionFacade` 住 `:app-service:*`，而 `:platform:capabilities` 的 archUnit 黑名单含 `com.autoscript.appservice..`（§6）。门禁由装配层在取用这些 handler 之前完成（`ensure(Capability.OVERLAY)` 等），handler 只负责**能力已保证之后的语义**；被拒时由 `PermissionFacade` 抛带引导文案的 `ERR_PERMISSION_DENIED`，handler 侧的分类错误（如句柄过期 `ERR_STALE_HANDLE`、服务未启用 `ERR_SERVICE_DISABLED`）原样透传到 JS。
+**能力门禁不在 handler 里**：`:app-service:permission-center` 的 `PermissionFacade` 住 `:app-service:*`，而 `:platform:capabilities` 的 archUnit 黑名单含 `com.autoscript.appservice..`（§6）。
+门禁由装配层在取用这些 handler 之前完成（`ensure(Capability.OVERLAY)` 等），handler 只负责**能力已保证之后的语义**；被拒时由 `PermissionFacade` 抛带引导文案的 `ERR_PERMISSION_DENIED`，
+handler 侧的分类错误（如句柄过期 `ERR_STALE_HANDLE`、服务未启用 `ERR_SERVICE_DISABLED`）原样透传到 JS。
 
 ### 12.3 关键签名示例（风格示范）
 
@@ -223,26 +255,36 @@ offQe();
    `const { AutojsError, ERROR_CODES } = require('auto')` 成立，`auto.AutojsError` 是 `undefined`（`index.ts` 的具名导出，不挂在命名空间根上）。判错两条路：`e instanceof AutojsError && e.code === 'ERR_FILE_NOT_FOUND'`，或 `e.is('ERR_FILE_NOT_FOUND')`。
    **`ErrCode` 是 TS `const enum`，运行期不存在**（编译期内联，`dist` 里只剩 `/* ErrCode.NOT_FOUND */` 注释）。所以 `e.code === ErrCode.FILE_NOT_FOUND` 只对 TS 脚本成立；`.js` 脚本用 `ERROR_CODES` 里的字符串字面量。`bridge/js/src` 内部用 `ErrCode` 是因为它整体过 `tsc`，不是"运行期也能拿到"的证据。
 2. **`auto.shell` 是命名空间对象，不是可调用函数**：`await auto.shell('pm list packages')` 当场 `TypeError`（`auto.shell` 是 `{exec, shell}`）。**`shell.shell()` 是别名，wire 上仍是 `shell/exec`**。`auto.a11y.selector().timeout(2000)` 同理——选择器上的超时方法叫 `time()`（`timeout` 只在 `findOne` 的选项里）。
-3. **`screen.*` 与 `images.*` 是两个释放入口、一张帧表**（§18 第 8 项 (b) 2026-09-26 落地，"帧不通用"取消）：`decode` 的帧 `recycle()` 打 `images/release`，`capture` 的帧打 `screen/recycle` —— **打进去是同一张表**，所以 `screen.capture()` 的帧可以直接当 `findImage`/`findColor` 的 haystack，反过来 `images.release()` 也放得掉一帧截屏。放过的帧任一侧再用都是 `ERR_STALE_HANDLE`（同一个"已释放"事实）。**"截屏→找图"不再需要先落成文件**（§9.2 的落地段写明了链路与钉子）。
-4. **未命中 / 缺键 / 空结果是答案，不是异常**：`findImage`/`matchTemplate`/`findColor` 未命中回裸 `null`（`findColor` 的 native 侧用 `x = -1` 哨兵，因为 `(0,0)` 是合法首像素）；`findOneOrNull` 回 `null`；`datastore.get` 缺键回 `undefined` 而存的 JSON `null` 回 `null`（两者不折叠）；`settings.getInt`/`clipboard.getText` 缺键回 `null`。**但"扫过 0 像素"（空 region / region 越界）是 `ERR_INVALID_PARAM`** —— 那不是"没有"，是"根本没找"，混成 `null` 会让脚本把空区域当成搜过一遍。**`findFeature` 未命中同款（回 `null`，见 §9.2 末）。
+3. **`screen.*` 与 `images.*` 是两个释放入口、一张帧表**（§18 第 8 项 (b) 2026-09-26 落地，"帧不通用"取消）：`decode` 的帧 `recycle()` 打 `images/release`，`capture` 的帧打 `screen/recycle` —— **打进去是同一张表**，所以 `screen.capture()` 的帧可以直接当 `findImage`/`findColor` 的 haystack，反过来 `images.release()` 也放得掉一帧截屏。
+  放过的帧任一侧再用都是 `ERR_STALE_HANDLE`（同一个"已释放"事实）。**"截屏→找图"不再需要先落成文件**（§9.2 的落地段写明了链路与钉子）。
+4. **未命中 / 缺键 / 空结果是答案，不是异常**：`findImage`/`matchTemplate`/`findColor` 未命中回裸 `null`（`findColor` 的 native 侧用 `x = -1` 哨兵，因为 `(0,0)` 是合法首像素）；`findOneOrNull` 回 `null`；`datastore.get` 缺键回 `undefined` 而存的 JSON `null` 回 `null`（两者不折叠）；`settings.getInt`/`clipboard.getText` 缺键回 `null`。
+  **但"扫过 0 像素"（空 region / region 越界）是 `ERR_INVALID_PARAM`** —— 那不是"没有"，是"根本没找"，混成 `null` 会让脚本把空区域当成搜过一遍。**`findFeature` 未命中同款（回 `null`，见 §9.2 末）。
 5. **引擎会话的两个名字都是 v9 的两代形态，别照旧写法**：`engines.exec({projectId, scriptPath})`（不是 `{script}`）；`session.onExit(info => …)` 且 `info` 是 `CrashInfo | null`（不是 `on('exit', code => …)` 的数字码，也没有 `.on` 这个方法）；`session.channel` 恒 `null`，命名通道要 `engines.channel(name)` **显式打开**（隐式建通道会在宿主侧留一条永远没人 drain 的缓冲）。
-6. **npm 的事件订阅名与 §12.2 表格一致，不是 `on('progress')`**：`onProgress`/`onApproval`/`onWarning`/`onFinished` 四个独立方法（各有退订返回值）。`on('progress')`/`on('approval')` 在 facade 上**不存在**（会 `TypeError`），wire 上也没有对应方法（§10.8 的示例同批改）。四条都是**拉取轮询**投递（首订立拉、退订自停）：宿主侧没有推给脚本的通道，谁把 wire 上的 `events`/`approvals` 删了，`pump*` 会响亮抛 `ERR_NOT_IMPLEMENTED` 而不是安静空转。
-7. **`engines.exec` 的 `timeoutMillis` 是必填的墙钟总时长，不是排队上限**（2026-10-01）：桥这条路拿到句柄就返回、**没人 await 终结**，而看门狗三路健康判据（心跳/CPU/RSS）全看进程表现 —— 心跳正常、CPU 空闲的长跑脚本三路都判它健康，谁也收不住它。所以期限必须由调用方声明，宿主对缺席/`null`/`非正` 一律回 `ERR_INVALID_PARAM`（**本层不预检**：两处校验必然漂移，与空事件名同一条纪律）。到点宿主落 `KillCause.TIMEOUT` 强杀，`onExit` 报 `{cause:'UNKNOWN'}`（外部结算同款：结算即离表，不把「查不到」伪造成干净结束）。排队上限是另一个参数 `waitTimeoutMillis`（缺省取请求 TTL），别混。
+6. **npm 的事件订阅名与 §12.2 表格一致，不是 `on('progress')`**：`onProgress`/`onApproval`/`onWarning`/`onFinished` 四个独立方法（各有退订返回值）。`on('progress')`/`on('approval')` 在 facade 上**不存在**（会 `TypeError`），
+  wire 上也没有对应方法（§10.8 的示例同批改）。四条都是**拉取轮询**投递（首订立拉、退订自停）：宿主侧没有推给脚本的通道，谁把 wire 上的 `events`/
+  `approvals` 删了，`pump*` 会响亮抛 `ERR_NOT_IMPLEMENTED` 而不是安静空转。
+7. **`engines.exec` 的 `timeoutMillis` 是必填的墙钟总时长，不是排队上限**（2026-10-01）：桥这条路拿到句柄就返回、**没人 await 终结**，而看门狗三路健康判据（心跳/
+  CPU/RSS）全看进程表现 —— 心跳正常、CPU 空闲的长跑脚本三路都判它健康，谁也收不住它。所以期限必须由调用方声明，宿主对缺席/`null`/`非正` 一律回 `ERR_INVALID_PARAM`（**本层不预检**：
+  两处校验必然漂移，与空事件名同一条纪律）。到点宿主落 `KillCause.TIMEOUT` 强杀，`onExit` 报 `{cause:'UNKNOWN'}`（外部结算同款：结算即离表，不把「查不到」伪造成干净结束）。
+  排队上限是另一个参数 `waitTimeoutMillis`（缺省取请求 TTL），别混。
 
 #### 12.3.3 接口期未落地（示例里故意不写，写了就是撒谎）
 
-- **`images` 的 `pixel`/`captureScreen`**：`fromFile` 是 `decode` 的合法别名（两侧同名 `decode`），其余名字**两侧都没有**（`pixel` 读单个像素值、`captureScreen` 截图 —— 都要新的 native 算子，脚本侧也没有消费方，不开）。~~灰度 / 裁剪 / 缩放 / 旋转 / 特征~~ —— **桥面已于 2026-09-29 开通**（P1 图像桥消费方：`images.toGrayscale`/`crop`/`resize`/`rotate` 产新帧 + `images.findFeature` 回模板中心坐标；`:domain ImageAnalyzer` 扩到十方法，handler 同批认，§9.2 末推演兑现）。
+- **`images` 的 `pixel`/`captureScreen`**：`fromFile` 是 `decode` 的合法别名（两侧同名 `decode`），其余名字**两侧都没有**（`pixel` 读单个像素值、`captureScreen` 截图 —— 都要新的 native 算子，脚本侧也没有消费方，不开）。~~灰度 / 裁剪 / 缩放 / 旋转 / 特征~~ —— **桥面已于 2026-09-29 开通**（P1 图像桥消费方：`images.toGrayscale`/`crop`/`resize`/`rotate` 产新帧 + `images.findFeature` 回模板中心坐标；
+  `:domain ImageAnalyzer` 扩到十方法，handler 同批认，§9.2 末推演兑现）。
 - **`engines.stop(runId)` 之外的会话操作**、`npm` 的 `resolveApproval`（人机分离，§10.5）等：刻意不在桥面，脚本调即 `ERR_NOT_IMPLEMENTED`（诚实）。
 - ~~`floatingWindow.create` 的参数面 / 缺 `close`~~、~~`screen.startCapturer` 的 `{width,height}` 不生效~~ —— **两处已于 2026-09-26 收口**（facade 发真 payload + 补 `close`；尺寸经 `openSession(w,h)` 透给生产者，回包尺寸仍 = 真实帧）。故示例（§12.3.1）现在**照写**；余下本节的其他条目仍是"写了就是撒谎"。
 
 #### 12.3.4 本节与 §12.2 的分工
 
-§12.2 是**命名空间清单**（有什么、接线到哪、谁注入），§12.3 是**调用形状**（怎么调、回什么、哪里会抛）。两者冲突时以本节为准（本节是实测），并应回来改 §12.2。§18 的**已拍板缺口**别在本节自行发明口径：第 8 项（截屏帧 ↔ images 帧的通路）**已于 2026-09-26 落地**（(b) 两缝共用帧表，见 §9.2）；第 9 项（`images.decode` 的相对路径口径）**已于 2026-09-25 拍板 (a)** —— 只收绝对路径，故本节示例**一律绝对**（`fromFile('/sdcard/part.png')`）。相对写法按 `:main` 的 CWD（= `/`）解析，`fromFile('part.png')` 回 `ERR_FILE_NOT_FOUND` 而报的路径是对的，看起来像"文件真的不在"，不像口径没定。
+§12.2 是**命名空间清单**（有什么、接线到哪、谁注入），§12.3 是**调用形状**（怎么调、回什么、哪里会抛）。两者冲突时以本节为准（本节是实测），并应回来改 §12.2。§18 的**已拍板缺口**别在本节自行发明口径：第 8 项（截屏帧 ↔ images 帧的通路）**已于 2026-09-26 落地**（(b) 两缝共用帧表，见 §9.2）；
+第 9 项（`images.decode` 的相对路径口径）**已于 2026-09-25 拍板 (a)** —— 只收绝对路径，故本节示例**一律绝对**（`fromFile('/sdcard/part.png')`）。相对写法按 `:main` 的 CWD（= `/`）解析，`fromFile('part.png')` 回 `ERR_FILE_NOT_FOUND` 而报的路径是对的，看起来像"文件真的不在"，不像口径没定。
 
 ### 12.4 typings 工程
 `:bridge:js` 产出全套 `.d.ts`（@types/auto），IDE 补全不依赖文档站点；d.ts 作为 API 契约的单一事实来源，API 评审以 d.ts diff 为准。
 
-**与 `bridge/schema/wire.schema.json` 的分工**（2026-09-30 审查步骤 7 拍板）：d.ts 管**对外 API 形状**（参数/返回/重载，脚本作者看得见的 TS 面），schema 管**桥线 wire 名**（每 ns 方法表 + aliases + dynamicSinks + facade 归属，双发射 `wire-types.ts`/`WireMethods.kt`）—— 两份各司其职、各自入库、各有一道门，不合并（理由见 [`design-decisions.md`](../design-decisions.md) 第 12 项）。对账门在 §12.2 门禁说明段。
+**与 `bridge/schema/wire.schema.json` 的分工**（2026-09-30 审查步骤 7 拍板）：d.ts 管**对外 API 形状**（参数/返回/重载，脚本作者看得见的 TS 面），schema 管**桥线 wire 名**（每 ns 方法表 + aliases + dynamicSinks + facade 归属，双发射 `wire-types.ts`/`WireMethods.kt`）—— 两份各司其职、各自入库、各有一道门，不合并（理由见 [`design-decisions.md`](../design-decisions.md) 第 12 项）。
+对账门在 §12.2 门禁说明段。
 
 ---
 
