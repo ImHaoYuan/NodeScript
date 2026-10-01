@@ -3,6 +3,7 @@
 //   · prepareBridgeDistAssets（§12.4 facade dist → assets/bridge-dist/）
 //   · prepareEngineNativeLibs（§19 引擎三件 + libopencv 选填 + addon 随包）
 //   · prepareNpmCliAssets（§10.2 vendored npm CLI → assets/npm/，选填）
+//   · prepareNoticesAssets（第三方许可声明 → assets/，见下段）
 // 「三件齐/半套红/全无警」与选填件「缺位只 warn」语义逐字保留；ANDROID_NDK_HOME
 // 无缺省且只在三件齐分支必填（没 NDK 的机器走「全无 → 警告」照常 assemble）。
 import java.io.File
@@ -248,9 +249,65 @@ val prepareNpmCliAssets = tasks.register("prepareNpmCliAssets") {
     }
 }
 
+// ── 第三方许可声明随包（backlog D8）─────────────────────────────────────────
+// 为什么声明文件也要进 APK：仓里有一份 `THIRD_PARTY_NOTICES.md` 只解决「审计者看得到」，
+// 而随 APK 分发的二进制（Node / OpenCV / libc++ …）其许可条款**必须随分发一起可达**——
+// 只在仓库里放一份、装到用户手机上就没有，等于没声明。落位 `assets/third-party/`，与
+// 能力中心的「关于/许可」页将来取用是同一个键。
+//
+// 与前三件的纪律差别（刻意不同）：本件**在 git 里**（生成物已入库，评审面可见），所以
+// 缺件是**仓库破损**而不是「本机没构建」——按 bridgeDist 的口径红，不按选填件的口径只 warn。
+// 同步面（改 VERSIONS.env 必须重跑生成器）由 CI 的 `gen-notices.mjs && git diff` 门管。
+val noticesAssetsDir = layout.buildDirectory.dir("generated/noticesAssets/third-party")
+
+val prepareNoticesAssets = tasks.register("prepareNoticesAssets") {
+    val src = rootProject.layout.projectDirectory.file("THIRD_PARTY_NOTICES.md")
+    val licensesDir = rootProject.layout.projectDirectory.dir("node-runtime-build/licenses")
+    inputs.file(src)
+    inputs.dir(licensesDir)
+    outputs.dir(noticesAssetsDir)
+    doLast {
+        val out = noticesAssetsDir.get().asFile
+        out.deleteRecursively()
+        out.mkdirs()
+        if (!src.asFile.isFile) {
+            throw GradleException(
+                "THIRD_PARTY_NOTICES.md 缺位（${src.asFile}）：随包二进制（Node / OpenCV / " +
+                    "libc++ 等）的许可声明是分发义务，不是可选项 —— 跑 " +
+                    "`node node-runtime-build/licenses/gen-notices.mjs` 生成",
+            )
+        }
+        src.asFile.copyTo(File(out, "THIRD_PARTY_NOTICES.md"), overwrite = true)
+        // 逐字原文一并随包：清单只说「见原文」，原文不在包内等于让用户去网上找。
+        // 文件名与生成器 licenses/ 下的名字一致（清单里的链接指向同名件）。
+        var copied = 0
+        licensesDir.asFile.listFiles()?.forEach { f ->
+            // 放行判据 = 生成器 COMPONENTS 表里的原文名集合（「-LICENSE」结尾的七件 + libjpeg-turbo
+            // 的两份），**不是**「目录里所有文件」—— 同目录的 gen-notices.mjs 是生成器本体，
+            // 随包没有意义。漏一份原文的后果是清单里那个链接指向不存在（与脚本 KDoc 同一口径）。
+            if (!f.isFile) return@forEach
+            val isLicenseText = f.name.endsWith("-LICENSE") ||
+                f.name == "libjpeg-turbo-LICENSE.md" ||
+                f.name == "libjpeg-turbo-README.ijg"
+            if (isLicenseText) {
+                f.copyTo(File(out, f.name), overwrite = true)
+                copied++
+            }
+        }
+        require(copied > 0) {
+            "node-runtime-build/licenses/ 无许可原文可随包（$licensesDir）—— 清单指向的原文缺失"
+        }
+        logger.lifecycle(
+            "[notices] 许可声明随包：THIRD_PARTY_NOTICES.md + $copied 份逐字原文 → " +
+                "assets/third-party/",
+        )
+    }
+}
+
 // 资产合并前必须先生成（AGP 的 preBuild 每变体都有；matching 覆盖配置期尚未注册的情形）。
 tasks.matching { it.name == "preBuild" }.configureEach {
     dependsOn(prepareBridgeDistAssets)
     dependsOn(prepareEngineNativeLibs)
     dependsOn(prepareNpmCliAssets)
+    dependsOn(prepareNoticesAssets)
 }

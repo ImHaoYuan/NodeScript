@@ -76,6 +76,14 @@ jobs:
         run: |
           npm --prefix bridge/js run gen:wire
           git diff --exit-code
+      - name: 第三方许可声明同步门（VERSIONS.env → THIRD_PARTY_NOTICES.md，漂移即红）
+        # 生成器零依赖、不需要 npm ci，与上面 wire 门同一手法。放本 job 是因为这里已
+        # setup-node 24（生成器要 node ≥18 的 ESM），别处再开一个 job 只为跑一个
+        # 几百行的生成器不划算。版本事实来源是 node-runtime-build/VERSIONS.env ——
+        # 改版本没跑生成器 = 这里的 git diff 红（漏改的许可声明在分发时是法律问题）。
+        run: |
+          node node-runtime-build/licenses/gen-notices.mjs
+          git diff --exit-code
       - name: facade 单元测试
         working-directory: bridge/js
         run: |

@@ -44,6 +44,10 @@ android {
             // `npm/<rel>`（启动期 AssetTreeCliSource("npm", …) 认的就是这个键）——
             // 与 bridge-dist 同一条"指成子目录会拍平"的教训。
             assets.srcDir(layout.buildDirectory.dir("generated/npmCliAssets"))
+            // 第三方许可声明随包（backlog D8）：srcDir 取**父目录**，资产键 =
+            // `third-party/<file>`（`THIRD_PARTY_NOTICES.md` + `licenses/` 的七份逐字原文；
+            // 随分发可达是许可义务，仓里那份只解决审计面）—— 同样「指成子目录会拍平」。
+            assets.srcDir(layout.buildDirectory.dir("generated/noticesAssets"))
             // 引擎二进制随包（§19）：srcDir 根下按 ABI 分目录（`arm64-v8a/libnoden.so`），
             // prepareEngineNativeLibs 拷进 generated/engineNativeLibs/arm64-v8a/。
             jniLibs.srcDir(layout.buildDirectory.dir("generated/engineNativeLibs"))

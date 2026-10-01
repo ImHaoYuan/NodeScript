@@ -117,6 +117,11 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## 许可
 
-本项目本体是 MIT，见 [`LICENSE`](LICENSE)。随包分发的第三方组件（Node.js / OpenCV / libc++ 等）
-的许可**尚未**整理成随包声明 —— 组件与版本清单在 [`node-runtime-build/VERSIONS.env`](node-runtime-build/VERSIONS.env)，
-生成 `THIRD_PARTY_NOTICES` 这件事记在 [`docs/backlog.md`](docs/backlog.md) D8，**发行前必须补上**。
+本项目本体是 MIT，见 [`LICENSE`](LICENSE)。随包分发的第三方组件（Node.js / OpenCV /
+KleidiCV / libc++ / libjpeg-turbo / libpng / zlib / vendored npm）的许可清单见
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)，逐字许可原文在
+[`node-runtime-build/licenses/`](node-runtime-build/licenses/)。
+
+该清单是**生成物**：版本事实来源是 [`node-runtime-build/VERSIONS.env`](node-runtime-build/VERSIONS.env)，
+改版本后必须重跑 `node node-runtime-build/licenses/gen-notices.mjs`，CI 有一道同步门
+（漂移即红）—— 许可声明与事实脱节在分发时是法律问题，不是文档瑕疵。
