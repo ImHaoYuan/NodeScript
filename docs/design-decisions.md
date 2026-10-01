@@ -360,6 +360,7 @@
 
 | `engines.exec` 的 `timeoutMillis` 可选（缺省交给引擎/看门狗自行兜底） | §8.6 原「仍待覆盖」段 + `bridge/js` `EngineRunRequest` | **改必填**：桥路径无人 await 终结，缺席即 `ERR_INVALID_PARAM`；到点由看门狗期限线落 `KillCause.TIMEOUT`（§8.6 期限线，判据 = 发起方等不等） | 2026-10-01 |
 | `:engine:sandbox`「**目录留盘**」（2026-09-30 摘壳时的附带口径） | 本表上一则 `:engine:sandbox` 行 | **目录删除**（2026-10-01 拍板，backlog D2）：裁撤口径本身不变（§18 第 1 项「不要沙箱」），只是把空壳目录从盘上清掉 —— 目录里只有 1 个 `build.gradle.kts`（QuickJS 白名单/独立进程那条轨的残骸，P1 再实装的口子），模块早在 2026-09-30 就不在 `settings.gradle.kts` 的模块表里。**复活 = 重建模块目录 + 注释回 include + ModuleGraphTest 允许集登记**（比原口径多「重建目录」一步）；`build.gradle.kts` 可从 git 历史取回（`git show <摘除前的 sha>:engine/sandbox/build.gradle.kts`）。`settings.gradle.kts` 里那行 `// include(":engine:sandbox")` 是协调者冻结文件，本次不动 | 2026-10-01 |
+| `settings.gradle.kts` 里 `// include(":engine:sandbox")` 那行注释「留作复活提示」 | 本表上一则 `:engine:sandbox` 行末句 | **注释行删除**（2026-10-01 同日拍板，承上一则）：目录既然已不在盘上，留一行指向不存在目录的注释只剩误导 —— 它引用的两个事实（空壳摘除、复活办法）在文档侧都有登记，而**冻结文件**里留死引用正是 C3 那批刚清掉的形态。复活口径随之定为「重建模块目录 + include 行加回 + ModuleGraphTest 允许集登记」（不再有「取消注释」这一步）；ModuleGraphTest 的 `include` 正则锚行首，删注释行不影响派生计数（`:domain:test` 已重跑验证） | 2026-10-01 |
 ### 附：§12.2 被反转口径原文照抄（2026-09-30 步骤 6 摘录前的原文）
 
 > - **语义层**（handler）住 `:platform:capabilities` 的 `SystemNamespaces.kt`，纯 JVM 可测（假 SPI 注入即可跑）：参数校验（spec 守卫、必填字段、`timeout > 0`）、枚举字面量解析（`ShellMode`/`DialogMode`，拼错即报错不静默套默认）、默认值（shell 超时 30s）、错误分类**透传**（`AutojsException.error` 原码回桥）、响应形状编码（与 `extras.ts` 逐字对齐）；

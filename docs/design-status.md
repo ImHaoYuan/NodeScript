@@ -21,7 +21,7 @@
 |---|---|---|
 | §18 | 开放决策点 | **已全部拍板**（第 8/9 项 2026-09-25，第 1–7 项 2026-09-26，见 [`design-decisions.md`](design-decisions.md)；§18 保留作决策台账） |
 | §14 P1 | MediaProjection 高清会话 | 未落（授权 UI + FGS；换 producer 即插，语义面不动） |
-| §14 P1 | QuickJS `:sandbox` 进程 | 未落；模块壳 **2026-09-30 已从 settings 注释摘除**（不计入模块数），**空壳目录 2026-10-01 已从盘上删除**（复活 = 重建模块目录 + 注释回 + ModuleGraphTest 登记） |
+| §14 P1 | QuickJS `:sandbox` 进程 | 未落；模块壳 **2026-09-30 已从 settings 注释摘除**（不计入模块数），**空壳目录与 settings 注释行 2026-10-01 已一并删除**（复活 = 重建模块目录 + include 行加回 + ModuleGraphTest 登记） |
 | §14 P1 | `ui` 原生 XML UI 宿主 / `ui_web` | 未落 |
 | §9.7 | OCR（P1）/ 插件（P2） | 未落 |
 | §10.5 | 生物特征二次确认 | 未落（`BiometricPrompt` 全仓零引用） |
@@ -80,7 +80,8 @@
   （§18 第 1 项「不要沙箱」），改的只是「壳要不要留在盘上」这一条附带口径 —— 口径变更追加在
   [`design-decisions.md`](design-decisions.md) 已推翻表（原行不删），`CLAUDE.md` 模块表、`06-modules.md`
   模块行、`13-roadmap-budget.md` P1 段、本文件接口期表同批同步；复活现在多一步「重建模块目录」。
-  `settings.gradle.kts` 里 `// include(":engine:sandbox")` 那行属协调者冻结文件，未动。
+  `settings.gradle.kts` 里 `// include(":engine:sandbox")` 那行属协调者冻结文件，当时未动 —— **同日经协调者拍板后一并删掉**
+  （口径追加在 design-decisions 已推翻表下一行；settings 是冻结文件，改它按纪律先问后动）。
 
 ### 2026-10-01 —— 待办池**批 1**（A2 / A3 / A1b / A4；分支 `hellish-shrimp`）
 - **A2 `AndroidShellExecutor` 超时真修**（`platform/system`）：病灶是「超时抛错后 `coroutineScope` 要等两条
