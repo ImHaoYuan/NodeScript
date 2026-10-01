@@ -2,6 +2,7 @@ package com.autoscript.ui
 
 import com.autoscript.domain.host.CapabilityCenterSnapshot
 import com.autoscript.domain.host.CapabilityRow
+import com.autoscript.domain.host.InstallSize
 import com.autoscript.domain.permission.Capability
 import com.autoscript.domain.permission.CapabilityState
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -102,5 +103,68 @@ class CapabilityCenterStateTest {
         assertNull(CapabilityCenterState.of(CapabilityCenterSnapshot(emptyList(), emptyList())).loadError)
         assertNull(CapabilityCenterState.NOT_LOADED.loadError)
         assertTrue(CapabilityCenterState.failed(IllegalStateException("x")).loadError != null)
+    }
+
+    // ── 安装体积（§15 E1「接受并明示」）────────────────────────────────────
+    // 钉住两件会撒谎的事：①没量到不显示 0；②引擎那一份要能单独被比较（超支全在它身上）。
+
+    @Test
+    fun `安装体积没量到就不显示 而不是显示 0`() {
+        val s = CapabilityCenterState.of(
+            CapabilityCenterSnapshot(rows = listOf(row()), degradedAlarmTaskIds = emptyList()),
+        )
+        assertNull(s.installSize, "没量到 = null；0 会被读成「安装包是空的」")
+
+        Unit  // 显式收尾：void 返回值才被 JUnit5 视为测试
+    }
+
+    @Test
+    fun `安装体积给出总数与其中引擎那一段`() {
+        val mib = 1024L * 1024
+        val s = CapabilityCenterState.of(
+            CapabilityCenterSnapshot(
+                rows = listOf(row()),
+                degradedAlarmTaskIds = emptyList(),
+                installSize = InstallSize(totalBytes = 92 * mib, engineBytes = 85 * mib, engineFilesPresent = true),
+            ),
+        )
+        assertEquals("安装体积 92.0 MiB（其中引擎 85.0 MiB，其余 7.0 MiB）", s.installSize!!.text())
+        assertTrue(
+            s.installSize!!.text().contains("85.0 MiB"),
+            "引擎那段要能被单独看见：超支全在它身上，混进总数里就答不上「为什么这么大」",
+        )
+
+        Unit  // 显式收尾：void 返回值才被 JUnit5 视为测试
+    }
+
+    @Test
+    fun `引擎未随包时如实说明 不隐去体积`() {
+        val mib = 1024L * 1024
+        val s = CapabilityCenterState.of(
+            CapabilityCenterSnapshot(
+                rows = listOf(row()),
+                degradedAlarmTaskIds = emptyList(),
+                installSize = InstallSize(totalBytes = 8 * mib, engineBytes = 0, engineFilesPresent = false),
+            ),
+        )
+        val text = s.installSize!!.text()
+        assertTrue(text.contains("引擎未随包"), "装了个跑不了脚本的壳 = 事实，隐去比显示更糟")
+        assertTrue(text.contains("8.0 MiB"), "体积照样报：用户已经装了，藏起来只是让人更意外")
+
+        Unit  // 显式收尾：void 返回值才被 JUnit5 视为测试
+    }
+
+    @Test
+    fun `MiB 换算不是 MB 且不四舍五入成 0`() {
+        assertEquals("0.0", InstallSizeState.mib(0))
+        assertEquals("0.5", InstallSizeState.mib(512L * 1024))
+        assertEquals("1.0", InstallSizeState.mib(1024L * 1024))
+        // 1 MB = 1,000,000 B = 0.9537 MiB。按 MB 报与按 MiB 报差 4.9%，
+        // 两套口径混用正是「体积对不上」的来源 —— 故这里固定成 MiB。
+        assertEquals("1.0", InstallSizeState.mib(1_000_000), "0.9537 MiB 一位小数下是 1.0（不是「1 MB」）")
+        assertEquals("0.9", InstallSizeState.mib(950_000), "0.9059 MiB → 0.9")
+        assertEquals("92.0", InstallSizeState.mib(92L * 1024 * 1024))
+
+        Unit  // 显式收尾：void 返回值才被 JUnit5 视为测试
     }
 }

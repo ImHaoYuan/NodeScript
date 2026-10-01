@@ -29,6 +29,8 @@ import com.autoscript.domain.permission.CapabilityState
  * - 三态的说法逐态不同（可用/降级可用/被拒绝），因为"用户该做什么"逐态不同；
  * - 「去授权」按钮的显隐直接读 [CapabilityRowState.canRequestGrant]，呈现层不做判断。
  * - 降级中的定时任务单列一段：那是 §8.6 承诺要标注「可能偏差」的账，不是权限问题。
+ * - 安装体积单列一段（§15 E1「接受并明示」）：超支是既成事实，披露的时机是**装之前**
+ *   用户能读到的那一屏，而不是装完才发现。
  */
 @Composable
 fun CapabilityScreen(
@@ -48,6 +50,7 @@ fun CapabilityScreen(
             ) {
                 Text("能力中心", style = MaterialTheme.typography.headlineMedium)
                 Header(state, onRefresh)
+                InstallSizeBlock(state)
                 DegradedAlarms(state)
                 LazyColumn(
                     modifier = Modifier.fillMaxWidth(),
@@ -81,6 +84,21 @@ private fun Header(state: CapabilityCenterState, onRefresh: () -> Unit) {
         )
     }
     Button(onClick = onRefresh) { Text("刷新") }
+}
+
+/**
+ * 安装体积那一段（§15 的 E1 处置：2026-10-02 拍板「接受超支并在能力中心明示」）。
+ *
+ * 量不到（installSize = null）**不显示这一段**，而不是显示 0 —— 0 会被读成
+ * 「安装包是空的」，那比不显示更糟。详见 [InstallSizeState]。
+ */
+@Composable
+private fun InstallSizeBlock(state: CapabilityCenterState) {
+    val size = state.installSize ?: return
+    Text(
+        size.text(),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 @Composable

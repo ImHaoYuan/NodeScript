@@ -85,7 +85,7 @@
 
 | 指标 | 目标 |
 |---|---|
-| APK 体积 | ≤ 40MB release（`libnode.so` + `libopencv.so` + assets）—— **已超支，见下** |
+| APK 体积 | ≤ 40MB release（`libnode.so` + `libopencv.so` + assets）—— **已超支（≈92MB 未压缩三件套），2026-10-02 拍板「接受 + 能力中心明示实测安装体积」，见 [`design-decisions.md`](../design-decisions.md) 第 20 项** |
 
 > **APK 体积预算是本表唯一已被实测推翻的条目（2026-09-25 记账）**：`:engine:node-process` 侧 jniLibs 三件套
 > `libnoden.so` + `libnode.so` + `libc++_shared.so` 实测未压缩合计已 ≈81MB（APK 压缩安装后另计）——**2026-09-26 ICU 之后要按 ≈92MB 读**：`libnode.so` 由 `--with-intl=none` 换成 `small-icu zh,en` 后实测 70,725,976 → 81,950,376 B（**+11,224,400 B = +10.70 MiB = +15.87%**），

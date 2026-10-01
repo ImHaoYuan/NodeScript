@@ -40,7 +40,33 @@
 见 [`design-decisions.md`](design-decisions.md#已推翻--已改口径) —— 口径变更属决策侧，
 只在那里写一份（本文件不复制，避免两处漂移）。
 
-## 流水（最新在上）
+## 流水（最新在最上）
+
+### 2026-10-02 —— E1 拍板落地：接受 APK 超支 + 能力中心明示实测安装体积（分支 `hellish-shrimp`）
+
+§15 的 `≤ 40MB release` 是本仓唯一被实测推翻的预算条目（≈92MB 未压缩三件套）。2026-10-02
+拍板选 (a)：**接受超支，在能力中心明示安装体积**；口径追加在 [`design-decisions.md`](design-decisions.md)
+第 20 项。否掉的两条各有实测理由：(c) 继续裁 OpenCV 面的收益上限就是那 6.6%（7.0 MiB /
+92MB；`imgcodecs` 已只留 PNG/JPEG，再裁要动 SPI 承诺），(b) 按需分发要给 `libnode.so` 找
+exec 之外的落位链（§19 未解决），比"披露一个大数字"大得多。
+
+**改的是披露，不是预算**：§15 表里那一行保留原样并标注已超支，证据链也保留 —— 推翻一个
+契约要留账，静默把数字改大就是"账被擦了"。
+
+落地三段（各有一段职责，都可 JVM 测）：
+
+- `InstallSizeRead`（`:app`，纯 JVM）：量 `applicationInfo.sourceDir` 与
+  `nativeLibraryDir` 的**真实文件**。**不抄 §15 的 ≈92MB** —— 那是 node-slice 产物的
+  未压缩 jniLibs 合计，用户装的是压缩后的 APK，两者不是同一个数；抄文档数字进 UI 就是
+  呈现层说谎。引擎字节按 `lib/<abi>/libX.so` 逐个 ABI 子目录找齐（外加裸放 lib 根的那份）。
+- `CapabilityCenterSnapshot.installSize`（`:domain`，**不给默认值**）：null = 没量到，
+  与"量到了 0"分开。`InstallSize` 另带 `engineFilesPresent` —— 引擎 .so 不在时**体积照报**，
+  那正是"装了个跑不了脚本的壳"的事实（CI 出的无引擎 APK 就是这个形状）。
+- `InstallSizeState.text()`（`:ui`）：文案与 MiB 换算都在呈现态里，好让"说成多少"也可测。
+  **MiB 不与 MB 混用**（1 MB = 0.9537 MiB，差 4.9%，混用正是"体积对不上"的来源）。
+
+能力中心那一屏单列一段，与"降级中的定时任务"同款处理（同为账，不是权限行）。四例新测试：
+量不到不显示 0、总数 + 引擎分段、引擎未随包仍报体积、MiB 换算口径。
 
 ### 2026-10-01 —— CI 红的两例 AppShellTest：裁决输入借了宿主 `/proc`（分支 `hellish-shrimp`）
 

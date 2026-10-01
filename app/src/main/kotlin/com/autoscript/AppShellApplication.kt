@@ -32,6 +32,7 @@ import com.autoscript.shell.AutoScriptForegroundService
 import com.autoscript.shell.BootRecovery
 import com.autoscript.shell.BridgeSocketListener
 import com.autoscript.shell.CapabilityCenterRead
+import com.autoscript.shell.InstallSizeRead
 import com.autoscript.shell.ForegroundHost
 import com.autoscript.shell.ForegroundKeeper
 import com.autoscript.shell.PlatformWiring
@@ -40,6 +41,7 @@ import com.autoscript.shell.SchedulerAlarmRoute
 import com.autoscript.shell.ScreenGateAndroid
 import com.autoscript.shell.ScreenInteractive
 import com.autoscript.shell.launchGuaranteed
+import java.io.File
 import java.nio.file.Path
 import java.nio.file.Paths
 import kotlinx.coroutines.CoroutineName
@@ -458,6 +460,12 @@ class AppShellApplication : Application(), HostSummary {
             facade = permissionCenter(),
             // 降级任务账（§8.6「可能偏差」）：键排序只为让 UI 上的顺序稳定，不改账本语义。
             degradedAlarmTaskIds = degradedAlarmTasks().keys.sorted(),
+            // §15 的 E1 处置（2026-10-02 拍板「接受超支并在能力中心明示」）：量已装 APK 与
+            // native 库目录，不抄文档里的 ≈92MB —— 那是未压缩三件套，与用户装的不是同一个数。
+            installSize = InstallSizeRead.measure(
+                apkFile = File(applicationInfo.sourceDir),
+                nativeLibDir = File(applicationInfo.nativeLibraryDir),
+            ),
         )
 
     /**

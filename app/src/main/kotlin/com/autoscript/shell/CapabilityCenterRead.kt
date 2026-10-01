@@ -3,6 +3,7 @@ package com.autoscript.shell
 import com.autoscript.appservice.permissioncenter.PermissionCenter
 import com.autoscript.domain.host.CapabilityCenterSnapshot
 import com.autoscript.domain.host.CapabilityRow
+import com.autoscript.domain.host.InstallSize
 import com.autoscript.domain.permission.Capability
 import com.autoscript.domain.permission.PermissionFacade
 
@@ -34,6 +35,7 @@ object CapabilityCenterRead {
     suspend fun snapshot(
         facade: PermissionFacade,
         degradedAlarmTaskIds: List<String>,
+        installSize: InstallSize? = null,
     ): CapabilityCenterSnapshot = CapabilityCenterSnapshot(
         rows = Capability.entries.map { ability ->
             CapabilityRow(
@@ -43,5 +45,8 @@ object CapabilityCenterRead {
             )
         },
         degradedAlarmTaskIds = degradedAlarmTaskIds,
+        // 安装体积（§15 E1「接受并明示」）：量不到就是 null，UI 显示「未量到」——
+        // 这里不替 UI 猜 0，猜出来的 0 会被读成「安装包是空的」。
+        installSize = installSize,
     )
 }
