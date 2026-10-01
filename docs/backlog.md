@@ -47,7 +47,9 @@
 | **C5** | 无 `CONTRIBUTING.md` / `CHANGELOG` / PR、issue 模板；`versionName` 硬编码 `0.1.0` | `app/build.gradle.kts:19` | ✅ 2026-10-01 | S |
 | **C6** | `design-status.md` 122KB / 737 行、单元格极长，`design-decisions.md` 46KB —— 外审建议拆「当前状态页 + 按日期的日志文件」并加 `docs/README.md` 索引。**注意**：拆分要保住 § 锚点与「只追加」纪律（§号是唯一权威锚） | `docs/design-status.md` | ✅ 2026-10-01 | M |
 | **C7** | JS facade 没有**用户向** API 参考（`12-js-api.md` 是设计文档）→ 可从 `bridge/js` 生成 typedoc | `bridge/js/src` | 待核实（未评估 typedoc 覆盖度） | M |
-| **C8** | `ModuleGraphTest` 直接读 `CLAUDE.md` / `ci.yml` / `06-modules.md`；外审建议改成「生成到片段」，免得改散文就红。**这条与 2026-10-01 刚落地的派生计数门是同一件事的两端** —— 现行口径就是「文档写了数字就必须等于派生值」，要改先想清楚是否放弃人工可读的散文 | `ModuleGraphTest.kt`；`domain/build.gradle.kts` 的 `inputs.files` | ✅ 2026-10-01 | S–M |
+
+> **C8（文档数字改成生成片段）已裁定：保持现状、不动作** —— 2026-10-01 提案人本人撤回，
+> 理由与两条附带观察记在 [`design-decisions.md`](design-decisions.md) 第 15 项。**不再作为待办。**
 
 ## D. 结构 / 重构
 
