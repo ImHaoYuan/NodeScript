@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 安全问题的报告方式（不要开公开 issue）
+    url: https://github.com/Ventus-Pluviam/NodeScript/blob/main/SECURITY.md
+    about: 支持范围、私密上报渠道的现状与替代做法
+  - name: 先读设计文档再提 issue
+    url: https://github.com/Ventus-Pluviam/NodeScript/blob/main/docs/framework-design.md
+    about: 契约的单一事实来源（薄索引，按 § 号进分卷）
