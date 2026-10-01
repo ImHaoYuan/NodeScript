@@ -2,6 +2,7 @@
 // 机器路径全清 —— /root、/tmp 类缺省一律不入构建脚本）：
 //   · prepareBridgeDistAssets（§12.4 facade dist → assets/bridge-dist/）
 //   · prepareEngineNativeLibs（§19 引擎三件 + libopencv 选填 + addon 随包）
+//   · prepareNpmCliAssets（§10.2 vendored npm CLI → assets/npm/，选填）
 // 「三件齐/半套红/全无警」与选填件「缺位只 warn」语义逐字保留；ANDROID_NDK_HOME
 // 无缺省且只在三件齐分支必填（没 NDK 的机器走「全无 → 警告」照常 assemble）。
 import java.io.File
@@ -176,8 +177,80 @@ val prepareEngineNativeLibs = tasks.register("prepareEngineNativeLibs") {
     }
 }
 
+// ── vendored npm CLI 素材随包（§10.2 调用链首段）──────────────────────────────
+// `files/npm/` 的素材来自 `assets/npm/**`，而素材本身**不在 git**（14MB 级，且是
+// node-runtime-build 的产物：`fetch-and-build.sh` §9 从 Node 源码树 deps/npm 收敛，
+// CI 走 node-slice artifact 出库）。因此与引擎三件套**同一条选填纪律**：
+//   · 有货 → 递归拷进 generated/npmCliAssets/npm/（**解引用符号链接**：assets 装不了）；
+//   · 有货但缺锚（bin/npm-cli.js、bin/npx-cli.js）→ **红**：半瘫 CLI 比没交付更糟
+//     （设备上 npm-cli.js 在、require 的依赖树不在，报错面离病因极远）；
+//   · 无货 → 警告 + 空产出：装配照过（本机没跑过 Node 构建不挡 assemble），
+//     设备侧 `NpmCliDeployer.deploy` 拿不到锚即如实失败 → 装配层不注入 executor →
+//     桥对 npm.* 回 ERR_NOT_IMPLEMENTED（**不是**"npm 已可用"）。
+// 点条目（以 . 开头）一律不拷：AssetManager 对点条目的可见性在 ROM 间不一致，
+// 拷进 assets 只会制造"源里有、设备上没有"的静默差。产出脚本已保证素材零点条目，
+// 这条过滤只兜手工 export NPM_CLI_ROOT 指向现成 npm 树的实验路径。
+val npmCliAssetsDir = layout.buildDirectory.dir("generated/npmCliAssets/npm")
+
+val prepareNpmCliAssets = tasks.register("prepareNpmCliAssets") {
+    // 候选序（先命中先用）：显式 env → node-runtime-build 出口（同 LIBNODE/LIBOPENCV 纪律，
+    // 机器路径不入脚本）。本机复现配方：export NPM_CLI_ROOT=/path/to/npm。
+    val candidates = listOfNotNull(
+        System.getenv("NPM_CLI_ROOT")?.let { File(it) },
+        rootProject.layout.projectDirectory.dir("node-runtime-build/out/npm").asFile,
+    )
+    outputs.dir(npmCliAssetsDir)
+    // 来源不在 git：每次装配现查现拷（否则刚解包的 artifact 会被"outputs 已存在"跳过）
+    outputs.upToDateWhen { false }
+    doLast {
+        val out = npmCliAssetsDir.get().asFile
+        out.deleteRecursively()
+        out.mkdirs()
+        val src = candidates.firstOrNull { it.isDirectory }
+        if (src == null) {
+            logger.warn(
+                "[npm-cli] 素材未交付（候选位 = node-runtime-build/out/npm 或 export " +
+                    "NPM_CLI_ROOT=…）：APK 无 vendored npm CLI，设备侧 npm.* 如实 " +
+                    "ERR_NOT_IMPLEMENTED —— 跑 node-runtime-build/scripts/fetch-and-build.sh " +
+                    "或下载 node-slice artifact 解包到 node-runtime-build/out/。",
+            )
+            return@doLast
+        }
+        var files = 0
+        var bytes = 0L
+        var skippedDot = 0
+        src.walkTopDown()
+            .filter { it.isFile }
+            .filter { f ->
+                // 相对路径的任一段以 . 开头即跳过（同产出脚本的剪裁口径）
+                val dotted = f.relativeTo(src).path.split(File.separatorChar).any { it.startsWith(".") }
+                if (dotted) skippedDot++
+                !dotted
+            }
+            .forEach { f ->
+                val dest = File(out, f.relativeTo(src).path)
+                dest.parentFile.mkdirs()
+                f.copyTo(dest, overwrite = true)
+                files++
+                bytes += f.length()
+            }
+        if (skippedDot > 0) {
+            logger.warn("[npm-cli] 跳过 $skippedDot 个点条目（AssetManager 可见性 ROM 间不一致；source=$src）")
+        }
+        // 锚文件：与 NpmCliDeployer.ANCHORS 同名单（部署侧还会再验一次，这里红在装配期）
+        listOf("bin/npm-cli.js", "bin/npx-cli.js").forEach { anchor ->
+            require(File(out, anchor).isFile) {
+                "npm CLI 素材缺锚文件 $anchor（源 = $src）—— 半瘫 CLI 不随包：素材树要么是" +
+                    "未剪裁完的半成品，要么 NPM_CLI_ROOT 指错了目录"
+            }
+        }
+        logger.lifecycle("[npm-cli] 素材随包：$files 个文件 / ${bytes / 1024 / 1024}MiB → assets/npm/（source=$src）")
+    }
+}
+
 // 资产合并前必须先生成（AGP 的 preBuild 每变体都有；matching 覆盖配置期尚未注册的情形）。
 tasks.matching { it.name == "preBuild" }.configureEach {
     dependsOn(prepareBridgeDistAssets)
     dependsOn(prepareEngineNativeLibs)
+    dependsOn(prepareNpmCliAssets)
 }

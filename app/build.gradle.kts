@@ -40,6 +40,10 @@ android {
             // `bridge-addon/<file>`（Application 侧 `assets.open("bridge-addon/…")` 认的
             // 就是这个键）—— 与 bridge-dist 同一条"指成子目录会拍平"的教训。
             assets.srcDir(layout.buildDirectory.dir("generated/engineAddonAssets"))
+            // vendored npm CLI 素材随包（§10.2 调用链首段）：srcDir 取**父目录**，资产键 =
+            // `npm/<rel>`（启动期 AssetTreeCliSource("npm", …) 认的就是这个键）——
+            // 与 bridge-dist 同一条"指成子目录会拍平"的教训。
+            assets.srcDir(layout.buildDirectory.dir("generated/npmCliAssets"))
             // 引擎二进制随包（§19）：srcDir 根下按 ABI 分目录（`arm64-v8a/libnoden.so`），
             // prepareEngineNativeLibs 拷进 generated/engineNativeLibs/arm64-v8a/。
             jniLibs.srcDir(layout.buildDirectory.dir("generated/engineNativeLibs"))
