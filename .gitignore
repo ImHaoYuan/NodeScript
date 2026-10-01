@@ -22,3 +22,7 @@ node-runtime-build/out-opencv/
 # misc
 .DS_Store
 .kotlin/
+
+# 密钥库（SECURITY.md 密钥管理：绝不提交）
+*.jks
+*.keystore
