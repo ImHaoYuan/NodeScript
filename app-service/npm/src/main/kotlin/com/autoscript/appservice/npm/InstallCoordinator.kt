@@ -64,16 +64,11 @@ class InstallCoordinator(
         Files.getFileStore(it).usableSpace
     },
     now: () -> Long = { System.currentTimeMillis() },
-    config: Config = Config(),
+    config: InstallConfig = InstallConfig(),
     /** 真 cacheDir（`<data>/cache/npm-cache`，§10.2；Android 装配层注入）。 */
     npmCacheDir: Path? = null,
 ) : PackageManagerFacade {
 
-    data class Config(
-        val minFreeBytes: Long = 500L * 1024 * 1024,       // §10.2 磁盘 free≥500MB 预检
-        val projectQuotaBytes: Long = 512L * 1024 * 1024,  // 项目 node_modules 配额（100% 拦）
-        val quotaWarnRatio: Double = 0.8,                  // 80% 黄
-    )
 
     // 探针/时钟/配额不走 [NpmServices]：它们不是「外部协作者」而是本类行为参数，
     // 收进 services 会让「换一份 layout 就顺手换掉时钟」变得合法——那是两回事。
@@ -115,102 +110,6 @@ class InstallCoordinator(
         "preuninstall", "uninstall", "postuninstall",
         "prepare", "preprepare", "preparePack",
     )
-
-    /** 重操作执行体接缝：拉起安装会话跑 vendored npm CLI（§10.2 调用链末段）。 */
-    fun interface HeavyOpExecutor {
-        /**
-         * 在已分配的事务上下文里执行重操作；args 为 npm CLI 参数（install/ci/…）。
-         * 实现方负责进度事件（经 [ProgressSink]）。
-         *
-         * **TTL 契约（铁律 3）**：协调器已对本次调用套 [op.timeoutMillis]（withTimeoutOrNull），
-         * 超时即取消并回 err 路径收尾（journal fail + 残骸清扫 + 锁释放）。故实现方必须
-         * 合作式响应取消（阻塞 IO 拆成可中断段、子进程随取消销毁）——不响应取消的执行体
-         * 会在超时后变成孤儿：项目锁虽已释放，但它仍可能与新会话争抢同一 stageDir。
-         */
-        suspend fun execute(op: HeavyOp, sink: ProgressSink): String   // 返回摘要（人类可读）
-
-        /** 默认：无引擎可用 → 如实 ERR_NOT_IMPLEMENTED。 */
-        object Unavailable : HeavyOpExecutor {
-            override suspend fun execute(op: HeavyOp, sink: ProgressSink): String {
-                throw AutojsException(
-                    ErrorCode.ERR_NOT_IMPLEMENTED,
-                    "安装会话引擎未接入：重操作 ${op.args.joinToString(" ")} 未执行（编排已完成：journal=${op.nonce}）",
-                )
-            }
-        }
-    }
-
-    /** 一次重操作的完整上下文（编排层 → 执行体）。 */
-    data class HeavyOp(
-        val nonce: String,
-        val projectId: String,
-        val args: List<String>,
-        val projectRoot: java.nio.file.Path,
-        val stageDir: java.nio.file.Path,
-        val timeoutMillis: Long,
-    )
-
-    /** 进度事件回传缝（执行体 → 协调器事件流）。 */
-    fun interface ProgressSink {
-        suspend fun emit(event: InstallEvent)
-    }
-
-    /**
-     * T1 lifecycle 脚本执行体接缝（§10.3 T1「spawn 桥 → `:main` 沿 EnginePool 同路径拉临时
-     * 引擎执行」的执行侧契约）。
-     *
-     * 为什么不复用 [HeavyOpExecutor]：那条通道编排的是「事务」——stageDir + journal +
-     * 原子落位，为的是 npm CLI 会重写 `node_modules`。lifecycle 脚本不做 reify，
-     * 走那条链会为一个不改依赖树的操作凭空造暂存目录与 commit 记录，
-     * `unfinished()` 里多出没有产物的残骸。两条通道共用 TTL/取消/事件面，差异只在落位。
-     *
-     * [ScriptOp.npmArgs] 交出的是 npm CLI 口径的参数（`run <name> -- <args>` /
-     * `exec <args> -- <bin>`）—— 真执行体把它交给 vendored npm 或直接按 shim 拦截后的
-     * 语义展开，两条路都在宿主侧，故此处不替实现方决定。
-     *
-     * **TTL 契约**同 [HeavyOpExecutor]：协调器已套 [ScriptOp.timeoutMillis] 的
-     * withTimeoutOrNull，实现方必须合作式响应取消（子进程随取消销毁，见 §10.3 T1 的
-     * TERM→超时→SIGKILL 回收顺序），否则超时后会成为争抢同一项目锁的孤儿。
-     */
-    fun interface ScriptOpExecutor {
-        suspend fun execute(op: ScriptOp, sink: ProgressSink): String   // 返回摘要（人类可读）
-
-        /** 默认：spawn 桥未接入 → 如实 ERR_NOT_IMPLEMENTED（门禁已过也不假装跑过）。 */
-        object Unavailable : ScriptOpExecutor {
-            override suspend fun execute(op: ScriptOp, sink: ProgressSink): String {
-                throw AutojsException(
-                    ErrorCode.ERR_NOT_IMPLEMENTED,
-                    "T1 spawn 桥未接入：已获批的 ${op.what}（${op.action.name}）未执行。" +
-                        "放行门禁与审批账本已就位，缺的是 child_process shim → 临时引擎这一段（§10.3 T1）",
-                )
-            }
-        }
-    }
-
-    /**
-     * 一次已放行 lifecycle 执行的上下文。
-     *
-     * [what] 是脚本名或 bin 名（审计与错误信息的抓手）；[npmArgs] 是 npm CLI 口径参数；
-     * [versionHash] 带上是为了让执行体可复述「我跑的是哪一份」——审计条目只记摘要不够，
-     * 用户问「我批的那份脚本现在还在不在」时要有据可查。
-     */
-    data class ScriptOp(
-        val handleId: String,
-        val projectId: String,
-        val action: ApprovalAction,
-        /** 审批主体 = 归属包名（run 侧是项目自身包名，exec 侧是提供该 bin 的包名）。 */
-        val pkg: String,
-        /** 脚本名或 bin 名。 */
-        val what: String,
-        val args: List<String>,
-        val projectRoot: java.nio.file.Path,
-        val npmArgs: List<String>,
-        val versionHash: String,
-        val timeoutMillis: Long,
-    ) {
-        /** 审批键的主体段（`"<pkg>|<what>"`）—— 账本键与审计条目同款，不再各拼各的。 */
-        val subject: String get() = "$pkg|$what"
-    }
 
     // —— 运行态（全局互斥 + per-project 锁 + 事件流 + 句柄账） ——
 
@@ -934,43 +833,6 @@ class InstallCoordinator(
         events.emit(e)
     }
 
-    /**
-     * 有界 seq 环（`A11yEventRing` 同纪律）：seq 单调递增、超界丢最旧、空洞可见。
-     *
-     * - `drain` 按 [projectId] 过滤（脚本只看自己项目的事件）、`batch` 截断（未取完的下一批从
-     *   `lastSeq+1` 续）；空增量回 `(sinceSeq, sinceSeq)` —— 调用方以游标为准，不以空数组终结；
-     * - 丢最旧不告警而是**留空洞**：`first > sinceSeq + 1` 就是「中间丢过」，与 a11y 同口径
-     *   （进度数据面本就可丢包，§7.3；静默断流才是要禁的）。
-     */
-    internal class SeqRing<T>(private val capacity: Int) {
-        private val guard = Any()
-        private val entries = ArrayList<Entry<T>>()
-        private var head = 0L
-
-        internal class Entry<T>(val seq: Long, val projectId: String, val value: T)
-
-        /** 任意线程投递；锁内分配序号并追加（超界丢最旧）。 */
-        fun push(projectId: String, value: T) {
-            synchronized(guard) {
-                entries.add(Entry(++head, projectId, value))
-                while (entries.size > capacity) entries.removeAt(0)
-            }
-        }
-
-        /** 返回 (本批首序号, 本批末序号, 命中的 (seq, value))。 */
-        fun drain(projectId: String, sinceSeq: Long, batch: Int): Triple<Long, Long, List<Pair<Long, T>>> {
-            require(batch > 0) { "batch 必须 > 0" }
-            val picked = synchronized(guard) {
-                entries.asSequence()
-                    .filter { it.seq > sinceSeq && it.projectId == projectId }
-                    .take(batch)
-                    .map { it.seq to it.value }
-                    .toList()
-            }
-            if (picked.isEmpty()) return Triple(sinceSeq, sinceSeq, emptyList())
-            return Triple(picked.first().first, picked.last().first, picked)
-        }
-    }
 
     companion object {
         /** 事件环容量（与 `A11yEventRing.MAX_EVENTS` 同值同纪律）。 */

@@ -19,7 +19,7 @@ import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Path
 
 /**
- * 任务中心操作面的**装配侧**验证（[AppShellKit.AssembledShell] 的
+ * 任务中心操作面的**装配侧**验证（[AssembledShell] 的
  * `registerTask`/`cancelTask`/`runTaskNow`）—— 也就是 `AppShellApplication`
  * 三个写口在真机上会走的那条路。
  *
@@ -51,7 +51,7 @@ class AppShellTaskOpsTest {
     private fun kit(
         provider: SchedulerProvider = RecordingProvider(),
         screenGate: ScreenGate = ScreenGate.AllowAll,
-    ): AppShellKit.AssembledShell = AppShellKit.assemble(
+    ): AssembledShell = AppShellKit.assemble(
         filesDir = files,
         cacheDir = cache,
         schedulerProvider = provider,

@@ -31,7 +31,7 @@ class AppShellBridgeDistTest {
         override suspend fun cancelTrigger(handle: TriggerHandle) = handle.cancel()
     }
 
-    private fun kit(bridgeDist: Map<String, ByteArray>): AppShellKit.AssembledShell =
+    private fun kit(bridgeDist: Map<String, ByteArray>): AssembledShell =
         AppShellKit.assemble(
             filesDir = files,
             cacheDir = cache,

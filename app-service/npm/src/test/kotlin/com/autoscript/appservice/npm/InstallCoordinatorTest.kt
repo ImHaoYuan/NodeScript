@@ -42,7 +42,7 @@ class InstallCoordinatorTest {
     private val I = "sha512-" + "a".repeat(24)
 
     /** T1 记录式执行体收到的 ScriptOp（每条用例各自断言，故是类级共享记录面）。 */
-    private val scriptOps = mutableListOf<InstallCoordinator.ScriptOp>()
+    private val scriptOps = mutableListOf<ScriptOp>()
 
     private val layout get() = NpmProjectLayout(ScriptPaths.projectsRoot(dir))
     private val journal get() = InstallJournal(dir.resolve(".autojs"))
@@ -51,10 +51,10 @@ class InstallCoordinatorTest {
 
     /** 假执行体：在暂存目录写包内容，模拟 reify 产物。 */
     private class FakeExecutor(
-        val block: suspend (InstallCoordinator.HeavyOp) -> Unit = {},
-    ) : InstallCoordinator.HeavyOpExecutor {
-        val calls = mutableListOf<InstallCoordinator.HeavyOp>()
-        override suspend fun execute(op: InstallCoordinator.HeavyOp, sink: InstallCoordinator.ProgressSink): String {
+        val block: suspend (HeavyOp) -> Unit = {},
+    ) : HeavyOpExecutor {
+        val calls = mutableListOf<HeavyOp>()
+        override suspend fun execute(op: HeavyOp, sink: ProgressSink): String {
             calls += op
             block(op)
             return "ok:${op.args.first()}"
@@ -66,9 +66,9 @@ class InstallCoordinatorTest {
      * `package.json` + `package-lock.json` 写回项目根（HostNodeExecutor 的真实行为）。
      * 只有承认这个前提，install 后的 lock 验签/快照导出才有对象可测。
      */
-    private fun harvesting(vararg deps: Pair<String, String>): InstallCoordinator.HeavyOpExecutor =
-        object : InstallCoordinator.HeavyOpExecutor {
-            override suspend fun execute(op: InstallCoordinator.HeavyOp, sink: InstallCoordinator.ProgressSink): String {
+    private fun harvesting(vararg deps: Pair<String, String>): HeavyOpExecutor =
+        object : HeavyOpExecutor {
+            override suspend fun execute(op: HeavyOp, sink: ProgressSink): String {
                 for ((name, version) in deps) {
                     val p = op.stageDir.resolve(name)
                     Files.createDirectories(p)
@@ -114,7 +114,7 @@ class InstallCoordinatorTest {
         NpmSnapshot(layout, dir.resolve(".autojs"), key)
 
     private fun coordinator(
-        executor: InstallCoordinator.HeavyOpExecutor = FakeExecutor(),
+        executor: HeavyOpExecutor = FakeExecutor(),
         free: Long = 10L * 1024 * 1024 * 1024,
         cache: CacheIndex = CacheIndex { false },
         ledger: ApprovalLedger = ApprovalLedger(),
@@ -129,7 +129,7 @@ class InstallCoordinatorTest {
          */
         registryOf: ((String) -> String?)? = null,
         /** T1 lifecycle 执行体（null = 缺省 [ScriptOpExecutor.Unavailable]，即"门禁过了也跑不起来"）。 */
-        script: InstallCoordinator.ScriptOpExecutor? = null,
+        script: ScriptOpExecutor? = null,
         /** 时钟（尺寸缓存的 TTL 判定读它；不注入则走真实时间）。 */
         now: () -> Long = { System.currentTimeMillis() },
     ) = InstallCoordinator(
@@ -149,7 +149,7 @@ class InstallCoordinatorTest {
         now = now,
         freeSpaceProbe = { free },
         registryOf = registryOf,
-        scriptExecutor = script ?: InstallCoordinator.ScriptOpExecutor.Unavailable,
+        scriptExecutor = script ?: ScriptOpExecutor.Unavailable,
     )
 
     /**
@@ -307,8 +307,8 @@ class InstallCoordinatorTest {
     fun `同一项目的并发安装不重入（per-project 锁原子入表）`() = runBlocking {
         val inflight = java.util.concurrent.atomic.AtomicInteger()
         val peak = java.util.concurrent.atomic.AtomicInteger()
-        val exec = object : InstallCoordinator.HeavyOpExecutor {
-            override suspend fun execute(op: InstallCoordinator.HeavyOp, sink: InstallCoordinator.ProgressSink): String {
+        val exec = object : HeavyOpExecutor {
+            override suspend fun execute(op: HeavyOp, sink: ProgressSink): String {
                 val now = inflight.incrementAndGet()
                 peak.updateAndGet { maxOf(it, now) }
                 delay(50)
@@ -661,8 +661,8 @@ class InstallCoordinatorTest {
         val gate = CompletableDeferred<Unit>()
         val c = coordinator(
             ledger = led,
-            script = object : InstallCoordinator.ScriptOpExecutor {
-                override suspend fun execute(op: InstallCoordinator.ScriptOp, sink: InstallCoordinator.ProgressSink): String {
+            script = object : ScriptOpExecutor {
+                override suspend fun execute(op: ScriptOp, sink: ProgressSink): String {
                     gate.await()
                     return "ok"
                 }
@@ -687,8 +687,8 @@ class InstallCoordinatorTest {
         val gate = CompletableDeferred<Unit>()
         val c = coordinator(
             ledger = led,
-            script = object : InstallCoordinator.ScriptOpExecutor {
-                override suspend fun execute(op: InstallCoordinator.ScriptOp, sink: InstallCoordinator.ProgressSink): String {
+            script = object : ScriptOpExecutor {
+                override suspend fun execute(op: ScriptOp, sink: ProgressSink): String {
                     gate.await()
                     sink.emit(InstallEvent.Progress("p1", op.handleId, InstallEvent.Phase.REIFY))
                     return "ok"
@@ -1142,10 +1142,10 @@ class InstallCoordinatorTest {
     }
 
     /** 记录式执行体（真引擎未接时它是 T1 的唯一可断言落点）。每次调用清一次记录面。 */
-    private fun recording(): InstallCoordinator.ScriptOpExecutor {
+    private fun recording(): ScriptOpExecutor {
         scriptOps.clear()
-        return object : InstallCoordinator.ScriptOpExecutor {
-            override suspend fun execute(op: InstallCoordinator.ScriptOp, sink: InstallCoordinator.ProgressSink): String {
+        return object : ScriptOpExecutor {
+            override suspend fun execute(op: ScriptOp, sink: ProgressSink): String {
                 scriptOps += op
                 return "ok:" + op.what
             }
@@ -1168,7 +1168,7 @@ class InstallCoordinatorTest {
 
     private fun runScriptOpCapture(
         projectId: String, manifest: String, name: String, args: List<String>,
-    ): InstallCoordinator.ScriptOp {
+    ): ScriptOp {
         writeManifest(projectId, manifest)
         val led = ApprovalLedger()
         approveRunScript(led, projectId, name)

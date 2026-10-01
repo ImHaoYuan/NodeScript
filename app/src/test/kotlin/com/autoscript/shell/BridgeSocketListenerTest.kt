@@ -85,7 +85,7 @@ class BridgeSocketListenerTest {
         ) = handle.cancel()
     }
 
-    private fun kit(): AppShellKit.AssembledShell = AppShellKit.assemble(
+    private fun kit(): AssembledShell = AppShellKit.assemble(
         filesDir = dir.resolve("files"),
         cacheDir = dir.resolve("cache"),
         schedulerProvider = RecordingProvider(),

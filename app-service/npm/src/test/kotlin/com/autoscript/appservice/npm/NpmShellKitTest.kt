@@ -58,10 +58,10 @@ class NpmShellKitTest {
         val h = NpmShellKit.assembleHandler(
             filesDir = dir.resolve("files"),
             cacheDir = dir.resolve("cache"),
-            scriptExecutor = object : InstallCoordinator.ScriptOpExecutor {
+            scriptExecutor = object : ScriptOpExecutor {
                 override suspend fun execute(
-                    op: InstallCoordinator.ScriptOp,
-                    sink: InstallCoordinator.ProgressSink,
+                    op: ScriptOp,
+                    sink: ProgressSink,
                 ): String {
                     seen += op.what
                     return "ok"

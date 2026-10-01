@@ -34,7 +34,11 @@ die() { printf '\033[1;31m[FATAL]\033[0m %s\n' "$*" >&2; exit 1; }
 # 首次调 native 方法才 UnsatisfiedLinkError → images.* 全 ERR_NOT_IMPLEMENTED，
 # 症状像"so 没交付"而不像"链接行漏文件"，见 RISKS.md §13）。
 IMG_CPP_DIR="$ROOT_DIR/bridge/image/src/main/cpp"
-[ -f "$IMG_CPP_DIR/imgnative.cpp" ] || die "桥面计算核缺失: $IMG_CPP_DIR/imgnative.cpp"
+# 计算核 2026-10-01 D7 起是三个 TU（帧表/基础算子 + match 族 + feature 族）：
+# 逐个存在性 assert，漏一个在 configure 前就红，而不是链接期一堆 undefined reference。
+for f in imgnative.cpp imgnative_match.cpp imgnative_feature.cpp images_jni.cc; do
+    [ -f "$IMG_CPP_DIR/$f" ] || die "桥面计算核缺失: $IMG_CPP_DIR/$f"
+done
 [ -f "$IMG_CPP_DIR/images_jni.cc" ] || die "桥面装载面缺失: $IMG_CPP_DIR/images_jni.cc（JNI 符号名 Kotlin 侧与之对表，缺一即不装）"
 
 WORK="${WORK_DIR:?WORK_DIR 未设置}"   # 本管线唯一的"从外面带进来的目录"约定：
@@ -225,6 +229,8 @@ done
     -I "$BUILD_DIR" \
     -o "$IMG_LIB" \
     "$IMG_CPP_DIR/imgnative.cpp" \
+    "$IMG_CPP_DIR/imgnative_match.cpp" \
+    "$IMG_CPP_DIR/imgnative_feature.cpp" \
     "$IMG_CPP_DIR/images_jni.cc" \
     -L"$BUILD_DIR/lib/arm64-v8a" -L"$BUILD_DIR/3rdparty/lib/arm64-v8a" \
     -Wl,--start-group \

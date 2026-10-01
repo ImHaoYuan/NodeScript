@@ -1,7 +1,8 @@
 // bridge/image —— libopencv.so 的装载面（docs §9.2）
 //
 // 分工（与 imgnative.cpp 的两层切法）：
-//   - imgnative.cpp 是**纯计算核**：extern "C" 十入口（decode/ingest/match/release/
+//   - imgnative*.cpp 是**纯计算核**（2026-10-01 D7 按算子族拆三个 TU：帧表+基础
+//     产出算子 / match 族 / feature 族，内部共享面见 imgnative_internal.h）：extern "C" 十入口（decode/ingest/match/release/
 //     color/gray/crop/resize/rotate/feature），
 //     零 JNI、可单独进 host 侧单测 —— 帧表（unordered_map<refId, Mat>）与
 //     状态码折折叠都在那一侧；

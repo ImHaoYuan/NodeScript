@@ -56,7 +56,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # 宿主机语义门禁（docs §9.2）：把 imgnative.cpp 直链进 x86_64 静态 OpenCV 跑像素断言。
+  # 宿主机语义门禁（docs §9.2）：把计算核三 TU（imgnative{,_match,_feature}.cpp）直链进 x86_64 静态 OpenCV 跑像素断言。
   # 与 build-opencv 的关系不是替代而是分工 —— NDK 那侧证明 aarch64 编得出、过 16KB/NEEDED
   # 门禁，本 job 证明**判读对**（通道序/ROI 偏移/扫过 vs 扫过 0 像素译反了照样出结论，
   # 上一处就是这么漏的：三门全绿之际 findColor 的 alpha 从未参与判定）。放在前面：

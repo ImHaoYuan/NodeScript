@@ -6,11 +6,11 @@ import android.util.Log
 import com.autoscript.appservice.npm.AssetTreeCliSource
 import com.autoscript.appservice.npm.NpmCliDeployer
 import com.autoscript.domain.host.CapabilityCenterSnapshot
+import com.autoscript.domain.host.ConsoleSnapshot
 import com.autoscript.domain.host.HostSummary
+import com.autoscript.domain.host.ShellSummary
 import com.autoscript.domain.host.TaskCenterSnapshot
 import com.autoscript.domain.host.TaskRegistration
-import com.autoscript.domain.host.ConsoleSnapshot
-import com.autoscript.domain.host.ShellSummary
 import com.autoscript.domain.permission.Capability
 import com.autoscript.domain.scripts.ScriptPaths
 import com.autoscript.engine.nodeprocess.NodeEngineConfig
@@ -27,6 +27,7 @@ import com.autoscript.shell.AndroidPermissionGates
 import com.autoscript.shell.AndroidScreenGate
 import com.autoscript.shell.AppShell
 import com.autoscript.shell.AppShellKit
+import com.autoscript.shell.AssembledShell
 import com.autoscript.shell.AutoScriptForegroundService
 import com.autoscript.shell.BootRecovery
 import com.autoscript.shell.BridgeSocketListener
@@ -39,14 +40,14 @@ import com.autoscript.shell.SchedulerAlarmRoute
 import com.autoscript.shell.ScreenGateAndroid
 import com.autoscript.shell.ScreenInteractive
 import com.autoscript.shell.launchGuaranteed
+import java.nio.file.Path
+import java.nio.file.Paths
 import kotlinx.coroutines.CoroutineName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import java.nio.file.Path
-import java.nio.file.Paths
 
 /**
  * 启动装配（docs §4.1 Composition Root，手写 DI，不用 Hilt）。
@@ -86,9 +87,9 @@ class AppShellApplication : Application(), HostSummary {
     @Volatile
     private var shell: AppShell? = null
 
-    /** 自装配产物的持久句柄（关壳时要成对释放；见 [AppShellKit.AssembledShell]）。 */
+    /** 自装配产物的持久句柄（关壳时要成对释放；见 [AssembledShell]）。 */
     @Volatile
-    private var assembled: AppShellKit.AssembledShell? = null
+    private var assembled: AssembledShell? = null
 
     /** 闹钟回投缝（[AlarmDispatch]）：装配前记账、装配后投递。 */
     private val alarmDispatch = AlarmDispatch()
@@ -475,7 +476,7 @@ class AppShellApplication : Application(), HostSummary {
      * 文案里点名"壳未装配"（与首屏的 `ShellSummary.shellReady` 是同一条事实的两种说法：
      * 首屏答"装配到哪一步了"，这里答"所以任务读不到"）。
      *
-     * 读的是 [AppShellKit.AssembledShell.taskCenter]（壳自己持有的两个寄存器），
+     * 读的是 [AssembledShell.taskCenter]（壳自己持有的两个寄存器），
      * 不让 UI 另开一份 `FileTaskStore`/`FileRunArchive`（第二个实例 = 写侧两份视图）。
      * 恢复账取 [recoverySnapshot]（[BootRecovery] 的账）：它答的是"重启后那些遗留任务
      * 怎么样了"，与任务列表是两件事，分列在快照里。
@@ -492,7 +493,7 @@ class AppShellApplication : Application(), HostSummary {
      * **壳没装好就抛**（与 [taskCenter] 同一条纪律）：返回一份空快照长得像"暂无日志"，
      * 而事实是"根本没读到" —— 用户会以为脚本安静地什么都没输出。
      *
-     * 读的是 [AppShellKit.AssembledShell.consoleView]（壳持有的收集器与在途表），
+     * 读的是 [AssembledShell.consoleView]（壳持有的收集器与在途表），
      * 不让 UI 另开收集器（第二个收集器收不到桥上的行）。
      */
     override suspend fun console(sinceSeq: Long, maxLines: Int): ConsoleSnapshot {
@@ -526,7 +527,7 @@ class AppShellApplication : Application(), HostSummary {
 
     /**
      * 立即执行（[HostSummary] 的生产实现，§8.6 操作面「立即执行」，`USER_CLICK`）。
-     * 壳没装好就抛；任务不存在/调度已收口由 [AppShellKit.AssembledShell.runTaskNow]
+     * 壳没装好就抛；任务不存在/调度已收口由 [AssembledShell.runTaskNow]
      * 现查后抛（`onTrigger` 对两者静默 return，不查会把 no-op 呈现成"已触发"）。
      */
     override suspend fun runTaskNow(taskId: String) {
@@ -538,7 +539,7 @@ class AppShellApplication : Application(), HostSummary {
     /**
      * 停止一次在途执行（[HostSummary] 的生产实现，§8.2 池四步 quiesce）。
      * 壳没装好就抛（同 [runTaskNow]）；已结算/从未存在回 false（在途表无此 run，
-     * 不是失败）；真停走回 true。读的是 [AppShellKit.AssembledShell.stopRun]
+     * 不是失败）；真停走回 true。读的是 [AssembledShell.stopRun]
      * （壳持有的在途表），不另开第二个 `RuntimeController`。
      */
     override suspend fun stopRun(runId: Long): Boolean {

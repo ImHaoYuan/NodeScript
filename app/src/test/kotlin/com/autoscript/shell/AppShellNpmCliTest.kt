@@ -52,7 +52,7 @@ class AppShellNpmCliTest {
     private fun assembleWith(
         source: NpmCliDeployer.CliSource?,
         nodeBin: String?,
-    ): AppShellKit.AssembledShell = AppShellKit.assemble(
+    ): AssembledShell = AppShellKit.assemble(
         filesDir = files,
         cacheDir = cache,
         schedulerProvider = NoopProvider(),
@@ -68,7 +68,7 @@ class AppShellNpmCliTest {
      * 的头一道自身前置就是它（缺了会在 exec 之前如实 ERR_INVALID_PARAM）—— 不放的话
      * 「执行体接上了没有」的判据会被这条前置挡住，测出来的是另一件事。
      */
-    private fun installResult(assembled: AppShellKit.AssembledShell): Pair<String, String> = runBlocking {
+    private fun installResult(assembled: AssembledShell): Pair<String, String> = runBlocking {
         val projectRoot = ScriptPaths.projectsRoot(files).resolve("main")
         Files.createDirectories(projectRoot)
         Files.write(projectRoot.resolve("package.json"), """{"name":"main","version":"0.0.1"}""".toByteArray())

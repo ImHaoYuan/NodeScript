@@ -66,7 +66,7 @@ class AppShellKitTest {
         scriptSources: Map<String, Map<String, ByteArray>> = emptyMap(),
         scriptProjects: List<String> = emptyList(),
         assetReader: ((String) -> Map<String, ByteArray>)? = null,
-    ): AppShellKit.AssembledShell = AppShellKit.assemble(
+    ): AssembledShell = AppShellKit.assemble(
         filesDir = files,
         cacheDir = cache,
         schedulerProvider = provider,

@@ -60,7 +60,7 @@ class P0LoopbackTest {
         override suspend fun cancelTrigger(handle: TriggerHandle) = Unit
     }
 
-    private fun kit(tree: InMemoryUiTree): AppShellKit.AssembledShell = AppShellKit.assemble(
+    private fun kit(tree: InMemoryUiTree): AssembledShell = AppShellKit.assemble(
         filesDir = files,
         cacheDir = cache,
         schedulerProvider = provider,
