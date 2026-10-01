@@ -36,10 +36,8 @@
 
 | # | 事项 | 证据位置 | 核实 | 成本 |
 |---|---|---|---|---|
-| **C1** | `README.md` 只有 **744 B**，没有前置/构建/测试/运行命令 —— 真正的步骤在面向 agent 的 `CLAUDE.md` 里，人类读者进不来 | `README.md` | ✅ 2026-10-01 | S |
 | **C2** | `CLAUDE.md` 构建节硬编码 `/root/android-sdk`、`/root/develop/claude/tools/jdk-17.0.17+10`、`/root/ndk/android-ndk-r28c` → 换成 `ANDROID_HOME` / `JAVA_HOME` / `ANDROID_NDK_HOME` 约定，私人路径别进跟踪文件 | `CLAUDE.md` 构建 / NDK 节 | ✅ 2026-10-01 | S |
-| **C4** | `SECURITY.md` 上报渠道：**仓库侧已改成实话**（2026-10-01，删掉 `TODO@example.invalid` 这类看起来像真地址的占位，直说「本仓当前没有生效的私密上报渠道」）。**只剩维护者动作**：在 GitHub 仓库设置里开通 **Security → Report a vulnerability**（私密漏洞上报），开通后把入口写回该节 | `SECURITY.md` 报告一节 | ✅ 2026-10-01 | 维护者 5 分钟 |
-| **C5** | 无 `CONTRIBUTING.md` / `CHANGELOG` / PR、issue 模板；`versionName` 硬编码 `0.1.0` | `app/build.gradle.kts:19` | ✅ 2026-10-01 | S |
+| **C4** | `SECURITY.md` 上报渠道：**仓库侧已改成实话**（2026-10-01，删掉 `TODO@example.invalid` 这类看起来像真地址的占位，直说「本仓当前没有生效的私密上报渠道」）。**只剩维护者动作**：在 GitHub 仓库设置里开通 **Security → Report a vulnerability**（私密漏洞上报），开通后把入口写回该节。**2026-10-01 复核**：`gh api repos/Ventus-Pluviam/NodeScript/private-vulnerability-reporting` 如实回 `{"enabled":false}` —— 该开关当前确为关闭（写入需仓库 admin，本机 token 未试）；开通后 `SECURITY.md` 报告一节改成两行字即可（把「没有生效渠道」换成入口链接 + 请勿公开 issue） | `SECURITY.md` 报告一节 | ✅ 2026-10-01 | 维护者 5 分钟 |
 | **C6** | `design-status.md` 122KB / 737 行、单元格极长，`design-decisions.md` 46KB —— 外审建议拆「当前状态页 + 按日期的日志文件」并加 `docs/README.md` 索引。**注意**：拆分要保住 § 锚点与「只追加」纪律（§号是唯一权威锚） | `docs/design-status.md` | ✅ 2026-10-01 | M |
 | **C7** | JS facade 没有**用户向** API 参考（`12-js-api.md` 是设计文档）→ 可从 `bridge/js` 生成 typedoc | `bridge/js/src` | 待核实（未评估 typedoc 覆盖度） | M |
 
@@ -71,7 +69,7 @@
 
 1. ~~**批 1（S）**：A2 / A3 / A1b / A4~~ —— **2026-10-01 已完成**，流水见 [`design-status.md`](design-status.md)（A2b 是修 A2 时露出的新口子，留在这里）。
 2. ~~**批 2（S）**：B2（CI 卫生）+ C3（失效引用）+ D4（README 归位）+ D2（删 sandbox 目录）~~ —— **2026-10-01 全部完成**，流水见 [`design-status.md`](design-status.md)。D2 当时因与 design-decisions 2026-09-30「目录留盘」裁定冲突而暂缓，经拍板后执行，口径变更追加在 design-decisions 同批。
-3. **批 3（S）**：C1/C5（人类 README + CONTRIBUTING）+ C4（只剩维护者开通上报入口）。
+3. ~~**批 3（S）**：C1/C5（人类 README + CONTRIBUTING）+ C4（只剩维护者开通上报入口）~~ —— **2026-10-01 完成**，流水见 [`design-status.md`](design-status.md)。**C4 仍留在本池**：它自始至终是维护者动作（GitHub 私密上报入口），仓库侧文案已如实，开通与否只能由人来点。
 4. **批 4（M，需先拍板）**：A1/A1c —— npm executor 与 lock 签名的**接线决策**（谁提供 `KeyProvider`、接缝形状、密钥生命周期）。
 5. **批 5（M）**：B1（CI 覆盖：nightly + assembleDebug + lint）。
 6. **批 6（M）**：D3/D5（platform 子包对齐）、D7（大文件拆分）—— 结构性改动，一次一个 PR。

@@ -42,6 +42,30 @@
 
 ## 流水（最新在上）
 
+### 2026-10-01 —— 待办池**批 3**（C1 / C5；C4 复核；分支 `hellish-shrimp`）
+
+- **C1 人类 README**：`README.md` 从 744 B 扩到 116 行 —— 补齐外审点名的四件事（**前置 / 构建 / 测试 / 运行**）与仓库地图，并把「以完整权限、无进程隔离运行脚本」这条安全前提提到正文最前。三条口径：
+  - **构建的硬前置是 facade dist**：`prepareBridgeDistAssets` 有 `require(copied > 0)` 且必须见到 `bootstrap.js`/`index.js`
+    ⇒ 不先 `npm --prefix bridge/js ci && run build`，`:app:assembleDebug` 必红。README 把这一步排成第一条命令。
+  - **引擎二进制缺失不挡 assemble**（「三件齐 / 半套红 / 全无警」照抄 `autoscript.engine-natives` 的语义）：README 如实写明
+    本机能出「**没有引擎的 APK**」，并给出 `LIBNODE` / `LIBOPENCV` / `ANDROID_NDK_HOME` 的候选位**指针**，不复制机器路径。
+  - **不写会漂的数字**：正文不出现模块数 / 测试任务数（派生门只盯 `CLAUDE.md` 与 §6，但 README 里写个「15 个模块」同样是漂移面）；
+    要引用就指向 `settings.gradle.kts` 与 `ci.yml`。
+  - **本轮实测（README 的构建节逐条跑过）**：`:app:assembleDebug` → `BUILD SUCCESSFUL`，产物
+    `app/build/outputs/apk/debug/app-debug.apk`（10.4 MB，**无引擎二进制**的那一种）；`prepareEngineNativeLibs` 三条
+    `[engine-natives] 未交付 …` 警告与「装配照过」语义一致 —— README 里那句「本机没有它们时装配照过」是**跑出来的**，不是照抄注释。
+- **C5 工程基建**：新建 `CONTRIBUTING.md`（文档即契约的四份分工表、冻结文件清单、提交信息格式与 trailer 约定、
+  提交前必跑的门与「skipped ≠ 绿」、一次一批、分支/PR 纪律、安全问题不开公开 issue）+ `.github/pull_request_template.md`
+  + `.github/ISSUE_TEMPLATE/{bug_report,design_proposal}.md` + `ISSUE_TEMPLATE/config.yml`（`contact_links` 指
+  `SECURITY.md` 与设计入口；只用了仓库**已有**的默认 label，`bug`/`enhancement` —— 不存在的 label 是 Dependabot 那次的教训）。
+  两条**裁定**追加在 [`design-decisions.md`](design-decisions.md#已推翻--已改口径)：
+  - **不设 `CHANGELOG`**：变更流水已在本文「流水」段（只追加、带 § 锚），第二份必漂成第二个事实来源；
+  - **`versionName` 保留硬编码占位**：本仓不发行正式版（§18 第 3 项），此刻把版本号接到 `gradle.properties` 只会多一处漂移面；
+    改为在 `app/build.gradle.kts` 该行上方写明「这是占位 + 真要发版怎么改（两数同改、`versionCode` 单调递增、同步 §13/§14）」。
+- **C4 复核（仍未完成，留在池里）**：`gh api repos/Ventus-Pluviam/NodeScript/private-vulnerability-reporting` 如实回
+  `{"enabled":false}` —— GitHub 私密上报入口确未开通。该条自始至终是**维护者动作**（写入需仓库 admin，本机 token 未试）；
+  开通后 `SECURITY.md` 报告一节改成两行字（把「没有生效渠道」换成入口链接 + 请勿公开 issue）即可。
+
 ### 2026-10-01 —— 待办池**批 2**（B2 / C3 / D4 / D2；分支 `hellish-shrimp`）
 
 - **B2 CI 卫生**：三个 workflow 一起收口 —— `permissions: contents: read`（三个都没有，默认令牌过宽；
