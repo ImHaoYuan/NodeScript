@@ -75,8 +75,18 @@
   [`design-decisions.md`](design-decisions.md#已推翻--已改口径)，升级路径登记在 `backlog.md`。
 - **门**：CI 同源 13 任务 `./gradlew` 全绿（**1208 tests / 0 skipped**，本机闭环含真 npm 的
   E2E 与 `NpmCliDeployerTest` 那例「部署出的 CLI 真能跑起来」）。
+- **剪裁口径实测过，不是推的**：把 `prepareNpmCliAssets` 用 `NPM_CLI_ROOT=/usr/lib/node_modules/npm`
+  跑出来的树（1668 文件 / 9MiB / **点条目 0**，剪掉了 npm 自己树里的 `.npmrc`、
+  `node_modules/.bin`、`node_modules/.package-lock.json`）拿去真跑：`npm ls --json`（**装进
+  `@npmcli/arborist`，整棵依赖树的真载入**）与 `npm install lodash@4.17.21 --ignore-scripts
+  --no-audit --no-fund --prefer-offline`（与 `HostNodeExecutor` 同参数）都通过，装出来的
+  `node_modules/lodash` 真能 `require` 出版本号。「AssetManager 看不到点条目会不会把 npm 弄瘸」
+  这一条至此是**实测结论**；`NpmCliDeployerTest` 里那两记探针（`--version` + `ls`）是给
+  以后改剪裁口径留的回归哨。
 - **未验**：真机（无设备）—— `assets/npm/**` 在真机 AssetManager 上的可见性、`libnoden.so`
-  作为 `nodeBin` 的 exec 权限，都只有本机同形逻辑 + 宿主 npm 树代跑的证据，不是设备实证。
+  作为 `nodeBin` 的 exec 权限，都只有本机同形逻辑 + 宿主 npm 树代跑的证据，不是设备实证；
+  gradle 随包任务→`assets/` 的**资产键形状**（`npm/<rel>`）也只有 bridge-dist 同款先例背书，
+  未在 `assembleDebug` 出的 APK 里解包核对过。
 
 ### 2026-10-01 —— 批 4 前半：**A1c 接缝形状**（`secretKey(): SecretKey`；分支 `hellish-shrimp`）
 

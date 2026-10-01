@@ -164,12 +164,29 @@ class NpmCliDeployerTest {
         }
         val r = NpmCliDeployer.deploy(dir, src) as NpmCliDeployer.Outcome.Ready
         // 真起一次：部署出来的树缺一个 require 得到的东西就当场炸（比"文件都在"强）
-        val proc = ProcessBuilder("node", r.cliJs.toAbsolutePath().toString(), "--version")
-            .redirectErrorStream(true)
-            .start()
-        val out = proc.inputStream.readBytes().toString(Charsets.UTF_8)
-        assertTrue(proc.waitFor(60, TimeUnit.SECONDS), "npm --version 不得挂死")
-        assertEquals(0, proc.exitValue(), "部署出的 CLI 起不来：$out")
+        val out = runCli(r, "--version")
         assertTrue(out.trim().isNotEmpty(), "npm --version 应有版本输出")
+        // 再打一记重的：`npm ls` 要**装进 @npmcli/arborist**（整棵依赖树的真载入），
+        // 而剪裁口径恰恰丢掉了 npm 自己树里的点条目（node_modules/.bin、
+        // node_modules/.package-lock.json）。2026-10-01 在本机实测过：这条路是通的
+        // （还跑通了真 install），这条断言是给"以后有人改剪裁口径"留的回归哨。
+        val ls = runCli(r, "ls", "--json", workDir = dir.resolve("probe"))
+        assertTrue(ls.contains("\"probe\"") || ls.trim().startsWith("{"), "npm ls 应有 JSON 输出：$ls")
+    }
+
+    /** 起一次部署出来的 CLI，返回合并后的输出；非 0 退出码即失败。 */
+    private fun runCli(r: NpmCliDeployer.Outcome.Ready, vararg args: String, workDir: Path? = null): String {
+        val pb = ProcessBuilder(listOf("node", r.cliJs.toAbsolutePath().toString()) + args)
+            .redirectErrorStream(true)
+        workDir?.let {
+            Files.createDirectories(it)
+            Files.write(it.resolve("package.json"), """{"name":"probe","version":"0.0.1"}""".toByteArray())
+            pb.directory(it.toFile())
+        }
+        val proc = pb.start()
+        val out = proc.inputStream.readBytes().toString(Charsets.UTF_8)
+        assertTrue(proc.waitFor(60, TimeUnit.SECONDS), "npm ${args.first()} 不得挂死")
+        assertEquals(0, proc.exitValue(), "npm ${args.first()} 退出码非 0：$out")
+        return out
     }
 }
