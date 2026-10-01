@@ -78,6 +78,15 @@
   要 12.x 只能另找素材来源（npm 12 本身是否存在仍未核实：本机 `registry.npmjs.org` 不可达）。
 - **门**：CI 同源 13 任务 `./gradlew` 全绿（**1208 tests / 0 skipped**，本机闭环含真 npm 的
   E2E 与 `NpmCliDeployerTest` 那例「部署出的 CLI 真能跑起来」）。
+- **素材来源本体也实测过（不等 CI）**：本机下载 `node-v24.21.0.tar.xz`（**sha256 与
+  `VERSIONS.env` 的 `NODE_SHA256` 逐字相符**）→ 解出 `deps/npm`：**官方源码树确实带
+  `node_modules`**（含 `node_modules/@npmcli/arborist`），版本 **11.19.0** ✓ —— 即 §9 的锚断言
+  （`node_modules/@npmcli/arborist/package.json`）成立。按 §9 原样预演一遍：`cp -RL` +
+  删 `docs/` `man/` + 清点条目 → **1846 文件 / 11.9MB 表观（18M 占盘）/ 点条目 0 / 三个锚齐**；
+  这棵树真跑：`--version` → 11.19.0、`npm ls`（arborist 真载入）、`npm install lodash@4.17.21`
+  （与 `HostNodeExecutor` 同参数）→ 装出来真能 `require`。**至此「素材能不能用」不再有推断成分**；
+  CI 那次跑（`node-slice`）保留作 artifact 出库与真机件来源。（顺带量到原树 `test/` 1.9M +
+  `tap-snapshots/` 816K 是纯测试件，可再剪 —— 记在 `backlog.md` B1 旁的观察位。）
 - **剪裁口径实测过，不是推的**：把 `prepareNpmCliAssets` 用 `NPM_CLI_ROOT=/usr/lib/node_modules/npm`
   跑出来的树（1668 文件 / 9MiB / **点条目 0**，剪掉了 npm 自己树里的 `.npmrc`、
   `node_modules/.bin`、`node_modules/.package-lock.json`）拿去真跑：`npm ls --json`（**装进

@@ -59,6 +59,7 @@
 | **E1** | APK 体积：§15 预算 ≤ 40MB，实测 **≈81MB** —— 重定基还是修（ABI split / strip / 裁 OpenCV 模块）？注意 `useLegacyPackaging=true` 是 exec 的前提，会抬安装体积 | `design-status.md` 接口期表已记「已超支」 | ✅ |
 | **E2** | 图像算子预算：A4 933.6ms、A2 计算段 1912.8ms 均 ❌（契约口径不达）—— 修还是改口径？ | `design-status.md` 流水 2026-09-30 实测段 | ✅ |
 | **E3** | 设备/仪器化测试道（含 16KB 页镜像）值不值得投入 L 级成本 | B3 | ✅ |
+| **E4** | npm 素材还能再剪：Node 源码树 `deps/npm` 原树里 `test/`（1.9MB 表观）+ `tap-snapshots/`（816K）是纯测试件，设备上永远用不到 —— 现在 §9 只剪 `docs/` `man/`。剪掉约省 2.7MB 表观（压缩后更少），**属 §15 体积预算那笔账**（已超支 81MB，见 E1）。改一行剪裁列表即可，但会触发 `node-slice` 全链回归（~2h20m；ccache 命中时短些），故与其它 `node-runtime-build` 改动合并成一次 | `node-runtime-build/scripts/fetch-and-build.sh` §9；2026-10-01 本机对 v24.21.0 tarball 实测的目录体量 | ✅ 2026-10-01（体量为本机实测，非估算） |
 
 ---
 
