@@ -86,10 +86,15 @@
   `node_modules/lodash` 真能 `require` 出版本号。「AssetManager 看不到点条目会不会把 npm 弄瘸」
   这一条至此是**实测结论**；`NpmCliDeployerTest` 里那两记探针（`--version` + `ls`）是给
   以后改剪裁口径留的回归哨。
-- **未验**：真机（无设备）—— `assets/npm/**` 在真机 AssetManager 上的可见性、`libnoden.so`
-  作为 `nodeBin` 的 exec 权限，都只有本机同形逻辑 + 宿主 npm 树代跑的证据，不是设备实证；
-  gradle 随包任务→`assets/` 的**资产键形状**（`npm/<rel>`）也只有 bridge-dist 同款先例背书，
-  未在 `assembleDebug` 出的 APK 里解包核对过。
+- **随包键形状在真 APK 里核过**：`NPM_CLI_ROOT=/usr/lib/node_modules/npm ./gradlew :app:assembleDebug`
+  → 解包 APK 实见 `assets/npm/bin/npm-cli.js`、`assets/npm/bin/npx-cli.js`（两个锚），
+  `assets/npm/` 下 **1643 个条目、点条目 0** —— 与 `AssetTreeCliSource("npm", assets::list/open)`
+  认的键形状逐字对上（不是「有 bridge-dist 先例所以应该行」）。**注意**：这个探针 APK
+  已删、素材已清（`prepareNpmCliAssets` 回到「未交付」态）—— 它里面装的是**宿主机** npm
+  10.9.8 树，留着会变成一份来源不明的可发布产物。
+- **未验**：真机（无设备）—— 真机 AssetManager 对 `assets/npm/**` 的实际可见性
+  （尤其 `bin/node-gyp-bin/` 这类深路径与无扩展名文件）、`libnoden.so` 作为 `nodeBin`
+  的 exec 权限，都只有本机同形逻辑 + 宿主 npm 树代跑的证据，不是设备实证。
 
 ### 2026-10-01 —— 批 4 前半：**A1c 接缝形状**（`secretKey(): SecretKey`；分支 `hellish-shrimp`）
 
