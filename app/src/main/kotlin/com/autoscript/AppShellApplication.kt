@@ -46,6 +46,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import java.nio.file.Path
+import java.nio.file.Paths
 
 /**
  * 启动装配（docs §4.1 Composition Root，手写 DI，不用 Hilt）。
@@ -202,7 +203,9 @@ class AppShellApplication : Application(), HostSummary {
             // §19 Kotlin spawn 生产装配：jniLibs 交付位的宿主（命名随打包管线，缺位预检点名 ——
             // 这一行就是接线点）。socket 名 = 桥监听**绑定成功才注入**（离线降级见上）；
             // addon 仍 null = 不预载（脚本照跑，桥调用点如实 ERR_ENGINE_STOPPED，不悬挂）。
-            val nativeDir = Path.of(applicationInfo.nativeLibraryDir)
+            // `Paths.get` 而不是 `Path.of`：后者在 Android 上 since=34（`api-versions.xml` 实查），
+            // minSdk 26 下 lint 的 NewApi 会红 —— 全仓 main 源已统一回 `Paths.get`（since=26）。
+            val nativeDir = Paths.get(applicationInfo.nativeLibraryDir)
             val built = AppShellKit.assemble(
                 filesDir = filesDir,
                 cacheDir = cacheDir,

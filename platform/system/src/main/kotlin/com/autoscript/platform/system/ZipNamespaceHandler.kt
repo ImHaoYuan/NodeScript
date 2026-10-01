@@ -10,6 +10,7 @@ import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
 import java.nio.file.Path
+import java.nio.file.Paths
 
 /**
  * `zip` 命名空间的桥处理器（§9.6；JS 对偶 `bridge/js/src/zip.ts`）。
@@ -69,6 +70,6 @@ class ZipNamespaceHandler(
         val s = request.requiredStr(fields, key)
         if (s.isBlank()) throw IllegalArgumentException("$key 不得为空白")
         // Path.of 对 NUL 等非法字符抛 InvalidPathException（IllegalArgumentException 子类）→ 调用方折叠
-        return Path.of(s)
+        return Paths.get(s)
     }
 }

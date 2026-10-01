@@ -16,6 +16,16 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
+    <!-- 通知（§9.4 dialogs prompt/choose 的通知通道 + §9.5 三态门禁）：
+         targetSdk 35 下**必须声明**才可能被授予 —— 不声明时 `areNotificationsEnabled()`
+         在 API 33+ 恒为 false，`SystemDialogOps` 每次都在 `requireNotificationsEnabled`
+         抛 ERR_PERMISSION_DENIED，且应用通知设置页里连开关都不给（用户无路可授）：
+         dialogs 的 prompt/choose 就成了永久不可用，而不是"用户没开"。声明 ≠ 可用：
+         门禁仍在 SPI 侧（NotificationContracts「未开则抛 ERR_PERMISSION_DENIED，不是回 false」），
+         授予路径 = 能力中心 → GrantPage.NOTIFICATIONS（ACTION_APP_NOTIFICATION_SETTINGS）。
+         低版本（<33）本权限自动授予，声明无副作用。 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <!-- 悬浮窗（§9.4）：普通通道 TYPE_APPLICATION_OVERLAY 需要本权限；
          可信通道 TYPE_ACCESSIBILITY_OVERLAY 随 a11y 服务授权获得，不需要它。
          两者都由能力中心三态门禁管（§9.5），声明权限 ≠ 直接可用。 -->

@@ -29,6 +29,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.Paths
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
@@ -389,7 +390,7 @@ class InstallCoordinator(
             "离线 bundle 导入未接线（NpmOfflineBundleImporter 未注入）：无法把 $uri 合入 npm 缓存",
         )
         val root = layout.projectRoot(projectId)   // projectId 合法性先过（防路径逃逸）
-        val src = Path.of(uri)
+        val src = Paths.get(uri)
         if (!Files.isRegularFile(src)) {
             throw AutojsException(ErrorCode.ERR_FILE_NOT_FOUND, "离线 bundle 不存在：$uri（SAF 副本是否已落地？）")
         }

@@ -10,6 +10,7 @@ import com.autoscript.platform.capabilities.screen.ProducedFrame
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
+import android.annotation.TargetApi
 import android.app.KeyguardManager
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -150,23 +151,53 @@ private class ServiceBridge(private val service: AccessibilityService) : A11yBri
                 "无障碍截图需 API30+（当前 $sdk）；MediaProjection 会话路径待接入",
             )
         }
+        return screenshotApi30Plus()
+    }
+
+    /**
+     * API30+ 的截图实现体 —— 版本分流在 [takeScreenshot] 一处做完，这里整体按 API30 起算。
+     *
+     * **为什么把整段搬进一个 `@TargetApi` 方法**：本文件原来是在 `takeScreenshot` 里
+     * `val sdk = Build.VERSION.SDK_INT` + `if (sdk >= 34)` 就地分支的，Android Lint 的
+     * NewApi **不追踪这种局部分支**（`api-versions.xml` 为证：`takeScreenshot` API30、
+     * `takeScreenshotOfWindow` API34），逐行报 error。`@TargetApi` 是 lint 认得的证据面 ——
+     * 它同时是给人看的：这个方法必须在 API30+ 上调用，守卫就在上一行。
+     * 行为逐字不变（同一个 deferred、同一个回调、同一个失败分类）。
+     */
+    @TargetApi(Build.VERSION_CODES.R)
+    private suspend fun screenshotApi30Plus(): ProducedFrame {
         val deferred = CompletableDeferred<Result<AccessibilityService.ScreenshotResult>>()
         // 具名嵌套类而非 object :（匿名类的合成名进不了 ArchUnit 服务面豁免名单）。
         val callback = ScreenshotCallback(deferred)
-        if (sdk >= 34) {
-            val windowId = activeWindowId()
-                ?: throw AutojsException(ErrorCode.ERR_SERVICE_DISABLED, "无活动窗口，截图通道不可用")
-            service.takeScreenshotOfWindow(windowId, service.mainExecutor, callback)
+        if (Build.VERSION.SDK_INT >= 34) {
+            requestWindowScreenshot(callback)
         } else {
-            service.takeScreenshot(Display.DEFAULT_DISPLAY, service.mainExecutor, callback)
+            requestDisplayScreenshot(callback)
         }
         val result = deferred.await().getOrElse { throw mapScreenshotFailure(it) }
         return frameOf(result)
     }
 
+    /** API34+ 窗口级截图（§9.2 默认通道）；调用点已 `SDK_INT >= 34` 显式判定。 */
+    @TargetApi(34)
+    private fun requestWindowScreenshot(callback: AccessibilityService.TakeScreenshotCallback) {
+        val windowId = activeWindowId()
+            ?: throw AutojsException(ErrorCode.ERR_SERVICE_DISABLED, "无活动窗口，截图通道不可用")
+        service.takeScreenshotOfWindow(windowId, service.mainExecutor, callback)
+    }
+
+    /** API30–33 显示级截图。 */
+    @TargetApi(Build.VERSION_CODES.R)
+    private fun requestDisplayScreenshot(callback: AccessibilityService.TakeScreenshotCallback) {
+        service.takeScreenshot(Display.DEFAULT_DISPLAY, service.mainExecutor, callback)
+    }
+
     private class ScreenshotFailed(val code: Int) : Exception("takeScreenshot failed: $code")
 
-    /** 回调 → deferred（具名类：ArchUnit 服务面豁免按简单名匹配，匿名合成名挂不上）。 */
+    /** 回调 → deferred（具名类：ArchUnit 服务面豁免按简单名匹配，匿名合成名挂不上）。
+     *  `@TargetApi`：`AccessibilityService.TakeScreenshotCallback` 是 API30 类型，
+     *  由 [screenshotApi30Plus]（同为 API30 面）构造。 */
+    @TargetApi(Build.VERSION_CODES.R)
     private class ScreenshotCallback(
         private val deferred: CompletableDeferred<Result<AccessibilityService.ScreenshotResult>>,
     ) : AccessibilityService.TakeScreenshotCallback {
@@ -216,6 +247,7 @@ private class ServiceBridge(private val service: AccessibilityService) : A11yBri
      * 的 RGBA 不依赖任何平台实现细节。代价是一份 `IntArray` 中间量（1080×2400
      * ≈ 10MB，截图本就有 333ms 节流，瞬态翻倍可接受）—— 换确定性，值。
      */
+    @TargetApi(Build.VERSION_CODES.R)
     private fun frameOf(result: AccessibilityService.ScreenshotResult): ProducedFrame {
         val buffer = result.hardwareBuffer
             ?: throw AutojsException(ErrorCode.ERR_IO, "截图结果无 HardwareBuffer")

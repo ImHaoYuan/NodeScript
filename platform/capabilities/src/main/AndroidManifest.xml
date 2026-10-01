@@ -2,8 +2,15 @@
 <!-- §9.1 无障碍服务声明（库清单，AGP 合并进 :app）。
      服务实现与配置见 AutoScriptAccessibilityService / res/xml/autoscript_a11y_service.xml。
      BIND_ACCESSIBILITY_SERVICE 是系统绑定专用权限（signature 级），第三方拿不到。 -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <uses-permission android:name="android.permission.BIND_ACCESSIBILITY_SERVICE" />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- lint 的 ProtectedPermissions 是"第三方应用拿不到"的告警；这里**正是**该权限的
+         合法持有者：无障碍服务的声明权限按定义只能由系统绑定，服务侧同时以
+         android:permission 自我限定（下方 service 节点）——与 :app 里 PACKAGE_USAGE_STATS
+         同一处理（tools:ignore 就地说明，不做全局静音）。 -->
+    <uses-permission
+        android:name="android.permission.BIND_ACCESSIBILITY_SERVICE"
+        tools:ignore="ProtectedPermissions" />
 
     <application>
         <service

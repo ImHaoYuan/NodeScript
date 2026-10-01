@@ -8,6 +8,7 @@ import java.io.File
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.Paths
 import java.nio.file.StandardOpenOption
 import java.security.DigestOutputStream
 import java.security.MessageDigest
@@ -46,7 +47,7 @@ class NpmSnapshot(
      * 本类保持零 android.*（archUnit 守护），故只提供文件系统形态。
      */
     fun sync(built: Build, uri: String) {
-        val dest = Path.of(uri)
+        val dest = Paths.get(uri)
         Files.createDirectories(dest.parent)
         Files.copy(built.zip, dest, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
         java.nio.channels.FileChannel.open(dest, StandardOpenOption.WRITE).use { it.force(true) }
