@@ -12,7 +12,7 @@ import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
 import java.security.MessageDigest
 import javax.crypto.Mac
-import javax.crypto.spec.SecretKeySpec
+import javax.crypto.SecretKey
 
 /**
  * lockfile 带外签名（docs §10.5-1 · `files/.autojs/lock.sig`）。
@@ -45,9 +45,21 @@ class LockSigner(
     /** lock.sig 的字节布局：`v1 <hex>`（算法版本前缀，便于将来换 ECDSA 而不破坏旧文件）。 */
     private val file: Path = dir.resolve("lock.sig")
 
-    /** 应用密钥接缝（Android Keystore / 测试用固定字节）。 */
+    /**
+     * 应用密钥接缝（Android Keystore / 测试用固定字节）。
+     *
+     * **形状给的是 [SecretKey] 句柄，不是 `ByteArray`**（2026-10-01 拍板，backlog A1c）：
+     * Keystore 里的密钥材料**不出库**（`SecretKey.getEncoded()` 拿不到字节），签名只能在库内完成 ——
+     * 原先那种「交出密钥字节」的形状**接不上** Keystore。给句柄则两边都成立：
+     * Keystore 的 HMAC 密钥（`KeyProperties.KEY_ALGORITHM_HMAC_SHA256`，API 23+；minSdk 26 ✓）
+     * 与测试用的固定字节密钥都能直接喂 `Mac.init(SecretKey)`。
+     * 语义一字不变：仍是 HMAC-SHA256，`v1 <hex>` 落盘格式与原子写都不动。
+     *
+     * 实现落点口径（同批拍板）：Keystore 版住 `:app` 装配层（Composition Root 已依赖本模块，
+     * 零契约变更）；本模块仍零 `android.*`（archUnit 守护）。
+     */
     fun interface KeyProvider {
-        fun keyBytes(): ByteArray
+        fun secretKey(): SecretKey
     }
 
     /**
@@ -113,7 +125,7 @@ class LockSigner(
 
     private fun hmac(body: ByteArray): String {
         val mac = Mac.getInstance("HmacSHA256")
-        mac.init(SecretKeySpec(key.keyBytes(), "HmacSHA256"))
+        mac.init(key.secretKey())
         return mac.doFinal(body).joinToString("") { "%02x".format(it) }
     }
 

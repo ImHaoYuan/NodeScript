@@ -1,5 +1,6 @@
 package com.autoscript.appservice.npm
 
+import javax.crypto.spec.SecretKeySpec
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -19,7 +20,7 @@ class LockSignerTest {
     @TempDir
     lateinit var dir: Path
 
-    private val key = LockSigner.KeyProvider { "test-app-key-32bytes-aaaaaaaaaaaa".toByteArray() }
+    private val key = LockSigner.KeyProvider { SecretKeySpec("test-app-key-32bytes-aaaaaaaaaaaa".toByteArray(), "HmacSHA256") }
     private val lock get() = dir.resolve("package-lock.json")
 
     private fun writeLock(text: String = """{"lockfileVersion":3,"packages":{"node_modules/lodash":{"version":"4.17.21"}}}""") {
@@ -63,7 +64,7 @@ class LockSignerTest {
     fun `密钥切换（重装或恢复出厂）则旧签失效`() {
         writeLock()
         LockSigner(dir.resolve(".autojs"), key).sign("p1", lock)
-        val other = LockSigner(dir.resolve(".autojs"), LockSigner.KeyProvider { "other-key".toByteArray() })
+        val other = LockSigner(dir.resolve(".autojs"), LockSigner.KeyProvider { SecretKeySpec("other-key".toByteArray(), "HmacSHA256") })
         assertThrows(AutojsException::class.java) { other.verifyOrThrow("p1", lock) }
         // 重新签即可恢复（显式动作，不静默）
         other.sign("p1", lock)

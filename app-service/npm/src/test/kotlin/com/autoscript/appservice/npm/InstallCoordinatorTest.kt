@@ -1,5 +1,6 @@
 package com.autoscript.appservice.npm
 
+import javax.crypto.spec.SecretKeySpec
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
 import com.autoscript.domain.scripts.ScriptPaths
@@ -109,7 +110,7 @@ class InstallCoordinatorTest {
         return "sha512/${hex.substring(0, 2)}/${hex.substring(2, 4)}/${hex.substring(4)}"
     }
 
-    private fun snapshots(key: LockSigner.KeyProvider = LockSigner.KeyProvider { "test-app-key-32bytes-aaaaaaaaaaaa".toByteArray() }) =
+    private fun snapshots(key: LockSigner.KeyProvider = LockSigner.KeyProvider { SecretKeySpec("test-app-key-32bytes-aaaaaaaaaaaa".toByteArray(), "HmacSHA256") }) =
         NpmSnapshot(layout, dir.resolve(".autojs"), key)
 
     private fun coordinator(
@@ -814,7 +815,7 @@ class InstallCoordinatorTest {
         val out = dir.resolve("out/snap2.zip")
         val snapper = snapshots()
         // 带锁签名器：install 成功后重签（harvest 写回了新 lock，旧签会让紧随的 ci 失败）
-        val signer = LockSigner(dir.resolve(".autojs"), LockSigner.KeyProvider { "test-app-key-32bytes-aaaaaaaaaaaa".toByteArray() })
+        val signer = LockSigner(dir.resolve(".autojs"), LockSigner.KeyProvider { SecretKeySpec("test-app-key-32bytes-aaaaaaaaaaaa".toByteArray(), "HmacSHA256") })
         val c = coordinator(executor = exec, snapshots = snapper, lockSigner = signer)
         c.install("p1", listOf(PackageSpec("axios", "1.7.0")))
         assertTrue(Files.exists(dir.resolve(".autojs/lock.sig")), "install 后必须重签")

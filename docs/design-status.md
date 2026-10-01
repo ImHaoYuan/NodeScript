@@ -42,6 +42,27 @@
 
 ## 流水（最新在上）
 
+### 2026-10-01 —— 批 4 前半：**A1c 接缝形状**（`secretKey(): SecretKey`；分支 `hellish-shrimp`）
+
+- **拍板（2026-10-01）**：`LockSigner.KeyProvider` 由 `keyBytes(): ByteArray` 改成 **`secretKey(): SecretKey`**；
+  Keystore 实现的落点定为 **`:app` 装配层内联**（Composition Root 已依赖 `:app-service:npm`，零契约变更）。
+  口径追加在 [`design-decisions.md`](design-decisions.md#已推翻--已改口径)。
+- **为什么必须改形状**：Keystore 里的密钥材料**不出库**（`getEncoded()` 拿不到字节），签名只能在库内完成 ——
+  原形状**接不上** Keystore，而 Keystore 正是 §11.3 第 3 条写的密钥存放处。给句柄则两边都成立：
+  Keystore 的 HMAC 密钥（`KeyProperties.KEY_ALGORITHM_HMAC_SHA256`，API 23+；minSdk 26 ✓）与测试用的
+  `SecretKeySpec` 都能直接喂 `Mac.init(SecretKey)`。**语义一字不变**：仍 HMAC-SHA256、落盘仍 `v1 <hex>`、
+  原子写不动。注：Keystore 那一半是按 Android 文档语义推的，本机无设备可实测。
+- **改动面**（改形状便宜的实证）：`LockSigner.kt:116` 与 `NpmSnapshot.kt:209` 两个用点
+  （`mac.init(SecretKeySpec(key.keyBytes(), …))` → `mac.init(key.secretKey())`）+ 三份测试夹具共 6 处
+  （`LockSignerTest` / `NpmSnapshotTest` / `InstallCoordinatorTest`）+ 两处 KDoc。`git grep keyBytes` 现已零命中。
+- **这不是接线**：生产装配的 `lockKey` 仍是 `null` —— `lock.sig` 依然既不签也不验；`SECURITY.md` 密钥表与
+  §11.3 第 3/8 条的「目标形态，非现状」口径只补了一句「接缝形状已就位」，结论不变。
+- **A1（真接线）仍未做，且体量比外审估计的大** —— 深挖出四个子缺口（按依赖序）：① 随包 npm CLI 素材根本不存在
+  （`assets/npm/**` 无目录、无产出任务）；② `NpmCliDeployer.CliSource` 零实现（KDoc 说的 assets 版没人写）；
+  ③ 无人调用 `deploy`（`:app` 零引用）；④ 才轮到注入 `HostNodeExecutor`。证据已写进 `backlog.md` 的 A1 行。
+  下一步卡在**「npm CLI 素材从哪来」（CI 产 / 入库 / 取本机 npm 目录）**这个构建管线决定上。
+- 门：`:app-service:npm:test` 全绿（6 处夹具全跑）。
+
 ### 2026-10-01 —— backlog **C2** 收口（机器路径出跟踪文件；分支 `hellish-shrimp`）
 
 > 编号提醒：这里的 C2 是**外审待办池的 C2**，与 2026-09-30 那批 A/B/C 编号（C1/C2/C3 = 实测回填项）无关 —— 同名不同批。

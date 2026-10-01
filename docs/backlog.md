@@ -19,8 +19,7 @@
 
 | # | 事项 | 证据位置 | 核实 | 影响 | 成本 |
 |---|---|---|---|---|---|
-| **A1** | **npm 生产装配没接线**：`executor` 与 `lockKey` 都走缺省 —— 真机上安装返回 `ERR_NOT_IMPLEMENTED`，且 `lock.sig` 不生成、`npm ci` 不验签、快照不导出（§10.5-1 的带外信任锚在生产装配里缺席） | `AppShellKit.kt:403` 调 `NpmShellKit.assembleHandler(filesDir, cacheDir)` 用缺省；`NpmShellKit.kt:49` `executor` 缺省 `HeavyOpExecutor.Unavailable`、`:53` `lockKey` 缺省 `null`；`HostNodeExecutor` 在 `app/src/main` **零引用**（只在 `P0LoopbackTest` / `HostNodeNpmE2ETest` 里注入） | ✅ 2026-10-01 | 头等功能不可用 + 安全文档与代码不符 | M（接线）/ S（只改文档） |
-| **A1c** | 若真接 Keystore：`LockSigner.KeyProvider.keyBytes(): ByteArray` 这个形状**与不可导出的 Keystore 密钥冲突**，接缝可能要改成 `sign(bytes)/verify(bytes)`（密钥不出 Keystore） | `LockSigner.kt:35` | 待核实（外审推论，未核实 Keystore 细节） | 影响 A1 的接缝设计，先定形状再动手 | S（调研） |
+| **A1** | **npm 生产装配没接线**（2026-10-01 深挖：**不止差一个参数**）。`AppShellKit.kt:403` 调 `NpmShellKit.assembleHandler(filesDir, cacheDir)` 走全缺省 → 真机安装回 `ERR_NOT_IMPLEMENTED`。四个子缺口，按依赖序：① **随包 npm CLI 素材根本不存在** —— `NpmCliDeployer` 要 `filesDir/npm/bin/npm-cli.js`，素材来自 `assets/npm/**`，而全仓**没有该目录、也没有任何 gradle 任务产出它**（`:app` 的 assets 只有生成的 bridge-dist 与 addon）；② **`NpmCliDeployer.CliSource` 零实现** —— KDoc 说「Android 侧 `assets.list/open("npm/…")`」，但全仓只有测试里的 私有 `DirSource`，assets 版没人写；③ **没人调用 `deploy`** —— `:app` 侧零引用，启动期不部署 CLI；④ 才轮到注入 `HostNodeExecutor(npmCliJs, cacheDir, nodeBin)`（该类**已在 `:app-service:npm/src/main`**，只是无生产调用点；`nodeBin` 应为 `nativeLibraryDir/libnoden.so`，同 `AppShellApplication.kt:203` 的引擎宿主）。另：`scriptExecutor`（T1 lifecycle spawn）按 §10.3 本就属 P1 未落，不在本项内；`lockKey` 见 A1c | `AppShellKit.kt:403`、`NpmShellKit.kt:46`、`NpmCliDeployer.kt:23`（`CliSource`/`deploy`）、`:app` 无 `assets/npm` | ✅ 2026-10-01（四处子缺口逐个核实） | M–L（接线）/ S（只改文档） |
 | **A2b** | **shell 捕获输出无上限**（2026-10-01 新增）：`PipeReader` 把 stdout/stderr 全量读进内存，`cat` 一个大文件就能把宿主撑爆。加 cap 属**契约口径**（§9.6 写的是「双流并发读干」）：截断=静默有损、超限报错=合法大输出被拒，两条都要先拍板取哪个数、哪种语义 —— 故本次 A2 只修超时/收尸，不夹带 | `AndroidShellExecutor.PipeReader` | ✅ 2026-10-01（病灶属实） | S（定了口径就快） |
 | **A5** | 桥没有 per-engine 身份：同一 uid 的任何进程可达全部命名空间（`SECURITY.md` 已承认是有意为之），无法按脚本/按 run 归因与审计 | 同 uid 门禁 `BridgeSocketListener.kt:117-122` 是 fail-closed；abstract 名可预测 | ✅ 2026-10-01 | 以后想加 per-run 权限会很贵 | M（协议变更，须与 `main.cpp` + JS bootstrap 同批） |
 
@@ -68,7 +67,7 @@
 1. ~~**批 1（S）**：A2 / A3 / A1b / A4~~ —— **2026-10-01 已完成**，流水见 [`design-status.md`](design-status.md)（A2b 是修 A2 时露出的新口子，留在这里）。
 2. ~~**批 2（S）**：B2（CI 卫生）+ C3（失效引用）+ D4（README 归位）+ D2（删 sandbox 目录）~~ —— **2026-10-01 全部完成**，流水见 [`design-status.md`](design-status.md)。D2 当时因与 design-decisions 2026-09-30「目录留盘」裁定冲突而暂缓，经拍板后执行，口径变更追加在 design-decisions 同批。
 3. ~~**批 3（S）**：C1/C5（人类 README + CONTRIBUTING）+ C4（只剩维护者开通上报入口）~~ —— **2026-10-01 完成**，流水见 [`design-status.md`](design-status.md)。C4 当时因「只剩维护者动作」留在池里 —— **该动作 2026-10-01 已由维护者完成**（GitHub 私密上报入口开通，`private-vulnerability-reporting` 复核为 `enabled:true`），仓库侧四处照实写法同批改掉，C4 随之出池。
-4. **批 4（M，需先拍板）**：A1/A1c —— npm executor 与 lock 签名的**接线决策**（谁提供 `KeyProvider`、接缝形状、密钥生命周期）。
+4. **批 4（M）**：A1/A1c —— **A1c 已收口（2026-10-01，接缝形状 `secretKey(): SecretKey` + 实现落 `:app` 装配层，口径追加在 [`design-decisions.md`](design-decisions.md#已推翻--已改口径)）**；**A1 仍未做**：四个子缺口（随包 npm CLI 素材 / `CliSource` 资产实现 / 启动期 `deploy` 调用 / 注入 `HostNodeExecutor`）按依赖序补，接线位置本就只有一处（`AppShellKit` 是 `assembleHandler` 的调用点，住 `:app` 装配层；`nodeBin` = `nativeLibraryDir/libnoden.so`），**只差动手 —— 但先要定 npm CLI 素材从哪来**（CI 产 / 入库 / 本机 npm 目录），这条是 §6 冻结面之外的构建管线决定。
 5. **批 5（M）**：B1（CI 覆盖：nightly + assembleDebug + lint）。
 6. **批 6（M）**：D3/D5（platform 子包对齐）、D7（大文件拆分）—— 结构性改动，一次一个 PR。
 7. **批 7（L/产品）**：E1/E2/E3 + B3 —— 需要人拍板后再排。

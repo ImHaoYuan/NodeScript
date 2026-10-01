@@ -12,7 +12,6 @@ import java.nio.file.StandardOpenOption
 import java.security.DigestOutputStream
 import java.security.MessageDigest
 import javax.crypto.Mac
-import javax.crypto.spec.SecretKeySpec
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
@@ -206,7 +205,7 @@ class NpmSnapshot(
 
     private fun hmac(body: ByteArray): String {
         val mac = Mac.getInstance("HmacSHA256")
-        mac.init(SecretKeySpec(key.keyBytes(), "HmacSHA256"))
+        mac.init(key.secretKey())
         return hex(mac.doFinal(body))
     }
 

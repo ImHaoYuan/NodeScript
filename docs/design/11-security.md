@@ -46,7 +46,7 @@
 
 1. **进程隔离不存在** —— 见 §11.1 第 1 条。这是 §18 第 1 项拍板的直接后果，不是待修的 bug。
 2. **安装脚本「一个都没真跑过」**：T0 全程 `--ignore-scripts`，回执 `scripts-skipped`。等 spawn 桥（P1）落地后，「用户选择跑」这条才有落点；**在那之前，安装脚本永不执行**（§18 第 7 项 + §10.5-3）。
-3. **`lock.sig` 是本地信任锚，不是第三方可验证**：签名用应用私钥，只能证明「这份 lock 是本机签过的」，不构成跨设备/跨用户的可验证来源证明。应用私钥丢失 = 显式「安全降级」失败（`LockSigner` KDoc 口径），不静默放行。**密钥从哪来：目前没有实现** —— 接缝是 `LockSigner.KeyProvider`，设计口径是 Android Keystore 包装的应用密钥，但全仓没有任何 `KeyProvider` 实现、生产装配传 `null`（见第 8 条），所以「生产走 Keystore」这句现在是**目标形态**，不是现状。
+3. **`lock.sig` 是本地信任锚，不是第三方可验证**：签名用应用私钥，只能证明「这份 lock 是本机签过的」，不构成跨设备/跨用户的可验证来源证明。应用私钥丢失 = 显式「安全降级」失败（`LockSigner` KDoc 口径），不静默放行。**密钥从哪来：目前没有实现** —— 接缝是 `LockSigner.KeyProvider`（2026-10-01 起形状为 `secretKey(): SecretKey`：给句柄而非字节，Keystore 密钥材料不出库也接得上；实现落点已拍板住 `:app` 装配层），设计口径是 Android Keystore 包装的应用密钥，但全仓没有任何 `KeyProvider` 实现、生产装配传 `null`（见第 8 条），所以「生产走 Keystore」这句现在是**目标形态**，不是现状。
 4. **MediaProjection 高清会话未落**：授权 UI + FGS 那一档还没接，P0 由同一 a11y 帧源连续截图承接（§9.2）。这不是安全缺口，是能力边界，列此只为避免被当成「高清会话已有门禁」。
 5. **16KB 页机未测**：真机红测只有 16KB 模拟器镜像或 Pixel 8+ 能给，SELinux enforcing 上下文与 targetSdk 提取策略同样待真机（design-status「仍未验」块）。
 6. **审批卡呈现层未排期**：审批账本与桥面拉取口已通（`drainApprovals` → `NpmBridgeHandler` → JS `pumpApprovals`），但能力中心的审批卡不在当前排期内，期间审批只能靠脚本侧拉取。
