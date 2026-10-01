@@ -31,6 +31,29 @@ class ModuleGraphTest {
             .map { it.groupValues[1] }
             .toSet()
 
+    /** CI 真跑的测试任务（`ci.yml` 的 ./gradlew 行）—— 「测试任务数」的唯一事实来源。 */
+    private val ciTestTasks: Set<String> =
+        File(root, ".github/workflows/ci.yml").readLines()
+            .filter { it.contains("./gradlew") }
+            .flatMap { line ->
+                Regex("""(:[A-Za-z0-9_:\-]+):test(?:DebugUnitTest)?""")
+                    .findAll(line).map { it.groupValues[1] }.asIterable()
+            }
+            .toSet()
+
+    /** 计数扫描面。settings 两处是**冻结文件**，只读扫描：数字不对时由协调者改。 */
+    private val scannedFiles = listOf(
+        "CLAUDE.md",
+        "docs/design/06-modules.md",
+        "settings.gradle.kts",
+        "build-logic/settings.gradle.kts",
+    )
+
+    /** 引文/历史片段：扫描前抠掉，免得把「别人的建议」当成本仓现状。 */
+    private val quotedCounts = mapOf(
+        "约 12 个模块" to "§6 开头引的批判建议原文（「约 12 个模块、不要过度拆分」）",
+    )
+
     /** 模块 → 它在 build.gradle.kts 里声明的其他模块依赖（Gradle 依赖边的唯一事实来源）。 */
     private val edges: Map<String, Set<String>> = declaredModules.associateWith { module ->
         val buildFile = File(root, moduleDirOf(module) + "/build.gradle.kts")
@@ -97,7 +120,8 @@ class ModuleGraphTest {
     fun `模块表与 settings_gradle 一致（新增模块必须同步登记依赖规则）`() {
         assertEquals(
             allowed.keys, declaredModules,
-            "settings.gradle.kts 与 §6 允许依赖表不一致：新增/删除模块时必须同步本表（§6 冻结 15 个模块）",
+            "settings.gradle.kts 与 §6 允许依赖表不一致：新增/删除模块时必须同步本表"
+                + "（模块数以 settings.gradle.kts 的 include 条数为准，计数由下面的派生门看着）",
         )
     }
 
@@ -135,7 +159,44 @@ class ModuleGraphTest {
         assertTrue(selfLoops.isEmpty(), "模块依赖自身：$selfLoops")
     }
 
+    /**
+     * 文档与构建脚本里的「N 个模块」「N 个测试任务」计数守护 —— 计数不再手抄。
+     *
+     * 由来：这两个数曾在 CLAUDE.md、§6、settings 注释、build-logic 注释、本文件里各写一遍，
+     * 改一次模块要改五处；已漂过一次（`:engine:sandbox` 摘除后 design-status 里留下「不计 14 模块」）。
+     * 口径改成两条：
+     * - **测试任务数从 `ci.yml` 自己数**，并与「有 `src/test` 的模块集合」**双向相等** ——
+     *   新模块加了测试却漏进 CI、或 CI 里留了已删模块的任务，都在这里当场红；
+     * - **文档里的数字只做校验**：可以整句不写数字（口径写在别处即可），写了就必须等于派生值。
+     *
+     * 扫描面**不含 ledger**（`design-status.md` / `design-decisions.md` / `docs/archive/`）：
+     * 那三处是沿革，「14 → 15」这类历史数字是记录不是错误，改它才是篡改。
+     */
+    @Test
+    fun `模块数与测试任务数都从 settings 与 ci_yml 派生（文档里的数字只做校验）`() {
+        val withTests = declaredModules
+            .filter { File(root, "${moduleDirOf(it)}/src/test").isDirectory }
+            .toSet()
+        assertEquals(
+            withTests, ciTestTasks,
+            "CI 测试任务与「有 src/test 的模块」不一致 —— 新模块要么补测试要么补 CI 任务行",
+        )
+
+        val expected = mapOf("模块" to declaredModules.size, "测试任务" to ciTestTasks.size)
+        val problems = scannedFiles.flatMap { rel ->
+            var text = File(root, rel).readText()
+            quotedCounts.keys.forEach { text = text.replace(it, "") }   // 引文先抠掉
+            Regex("""(\d+)\s*个?\s*(模块|测试任务)""").findAll(text).mapNotNull { m ->
+                val (n, what) = m.destructured
+                val want = expected.getValue(what)
+                if (n.toInt() == want) null else "$rel：「$what」写成 $n，派生值是 $want"
+            }
+        }
+        assertTrue(problems.isEmpty(), "计数漂了（改模块时这几处要一起改）：\n" + problems.joinToString("\n"))
+    }
+
     // —— 工具 ——
+
 
     private fun moduleDirOf(module: String): String = module.removePrefix(":").replace(':', '/')
 

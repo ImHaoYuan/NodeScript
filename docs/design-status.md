@@ -21,7 +21,7 @@
 |---|---|---|
 | §18 | 开放决策点 | **已全部拍板**（第 8/9 项 2026-09-25，第 1–7 项 2026-09-26，见 [`design-decisions.md`](design-decisions.md)；§18 保留作决策台账） |
 | §14 P1 | MediaProjection 高清会话 | 未落（授权 UI + FGS；换 producer 即插，语义面不动） |
-| §14 P1 | QuickJS `:sandbox` 进程 | 未落；模块壳 **2026-09-30 已从 settings 注释摘除**（目录留盘、不计 14 模块；复活 = 注释回 + ModuleGraphTest 登记） |
+| §14 P1 | QuickJS `:sandbox` 进程 | 未落；模块壳 **2026-09-30 已从 settings 注释摘除**（目录留盘、不计入模块数；复活 = 注释回 + ModuleGraphTest 登记） |
 | §14 P1 | `ui` 原生 XML UI 宿主 / `ui_web` | 未落 |
 | §9.7 | OCR（P1）/ 插件（P2） | 未落 |
 | §10.5 | 生物特征二次确认 | 未落（`BiometricPrompt` 全仓零引用） |
