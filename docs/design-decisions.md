@@ -31,6 +31,125 @@
       JS 侧**不预检**（同 payload 发出去、宿主回错），两处校验必然漂移（与空事件名同一条纪律）。
     - **仍待覆盖**：期限只覆盖声明了期限的 run，且只在看门狗轮转真在跑时有效；池空退避周期内新起的 run 最坏晚一个退避周期才被看到。
 
+2026-10-01 拍板（文档计数门口径；非 §18 编号项，原口径不涉）：
+
+15. **文档里的「模块数 / 测试任务数」保持「手写 + 派生校验」，不改生成片段**（外审建议 → **作者本人撤回**）：
+    第二次外审的文档组曾建议把 `ModuleGraphTest` 读的那三处文档数字（`CLAUDE.md`、`docs/design/06-modules.md`、
+    `.github/workflows/ci.yml`）改成「生成到片段、文档 include」，理由是「改散文就会红」。**2026-10-01 作者撤回该建议，
+    裁定「保持现状，不动作」**（条目已从 `docs/backlog.md` 移出，按该文件第 1 条纪律落到这里）。理由：
+    - **前提不成立**：该测试**只在「散文写了数字且与派生值不等」时红**；改散文、或干脆不写数字，都不会红。
+      「散文被测试绑住」的印象是错的 —— 这正是这条纪律按设计工作（数字可写，但必须等于派生值）。
+    - **生成片段是口径变更，不是小改进**：能生成的只有数字本身；「15 个模块」「13 个测试任务」是嵌在句子里的
+      人话（还带着「即全部带 `src/test` 的模块」这类限定），没法机器生成。为此把契约散文降级成生成物，
+      与 `docs/design/` 「人读的契约」定位相悖。
+    - **两条附带观察，均不构成动作**（记录备查）：(a) 抓取正则 `(\d+)\s*个?\s*(模块|测试任务)` 偏宽 ——
+      任何 `N 个模块` 的写法都会被抓；逃逸阀是 `quotedCounts` 白名单（现仅一条：§6 引的批判建议原文
+      「约 12 个模块」），引文照此登记即可。(b) `ciTestTasks` 只认含 `./gradlew` 的行 —— 方向是**缺省即红**
+      （新模块漏登记 CI 任务行会被 `withTests == ciTestTasks` 断言抓住），比反向宽松安全。
+    - `domain/build.gradle.kts` 已把被扫文件声明为 `inputs.files(...)`（只改文档不会 UP-TO-DATE 静默跳过门），
+      该做对的地方保持不动。
+
+2026-10-01 拍板（安全防线：本地状态不进系统备份；非 §18 编号项，原口径不涉）：
+
+16. **`files/.autojs/` 不参与系统备份与换机迁移 —— `allowBackup="false"`，契约侧登记为 §11.2 新增 T9**：
+    依 §11.4「新增/加强防线走 §18 决策台账，不在设计文档里悄悄添」，防线先在这里记账再落契约。
+    - **要守的是什么**：`.autojs/` 里没有可再生的用户数据，全是**信任锚与审计面** —— `lock.sig`（「这份 lock
+      是本机签过的」§10.5-1）、审批台账（`pkg+versionHash` 的 APPROVED）、安装 journal/history、意图日志。
+    - **为什么关**：默认（`allowBackup` 缺省 = true）它们进 Auto Backup / D2D 迁移，落到**另一个设备上下文**：
+      `lock.sig` 在新机上验不过（密钥不出本机，Keystore 不随备份走），而审批台账与安装 history 会以
+      「已批准 / 已完成」的姿态照常出现 —— 恢复出来的状态**既不可信也不可解释**；`adb backup` 还是一条把
+      信任锚整包拷出设备的现成路径。
+    - **代价（如实说）**：换机不再自动带走过往审批与历史，需要重装/重批 —— 这是有意的，不是遗漏。
+    - **落点**：`app/src/main/AndroidManifest.xml`（`:app` 是唯一设 application 级属性的模块，库 manifest 合并面
+      不动）；契约行在 §11.2 T9。
+
+2026-10-01 拍板（backlog 批 7 的三项 S 级；非 §18 编号项，原口径不涉）：
+
+17. **`:app-service:permission-center` 维持独立模块，不并回**（backlog D1，91 行的小模块）：
+    外部审查的疑问是「独立模块偏重」，逐条核对依赖图后维持现状 ——
+    - **它是 §9.5 那条例外的物理载体**：契约写「所有模块不得直接查 Settings/ActivityCompat，一律经此门禁」，
+      而 `:platform:*` 的 archUnit 黑名单含 `com.autoscript.appservice..`（所以门禁不能放在平台模块里）。
+      独立模块把这条边界变成**依赖图上的硬边**（`ModuleGraphTest`：`permission-center → :domain` 单点），
+      并回任何 `:app-service:*` 则要把「app-service 内部不许直查系统设置」变成口头约定 —— 用架构手段守的边界
+      不该降级成约定。
+    - **并回的代价大于收益**：它只依赖 `:domain`；并进 runtime/scheduler 任一个都要给那个模块新增一条上游
+      依赖或开子包，而那些模块已经有各自的清晰职责。
+    - **「等它长」已有征兆**：门禁面在长（`Capability` 九项），行为面（reader/launcher 两道缝）也在长。
+    - 记这条是为了让下次再看到「91 行」时不必重查一遍。
+
+18. **命名统一到此为止：`.autojs` 目录与 `autojs-lock-v1` 前缀**保留**（backlog D6 的剩余部分）**：
+    描述面（9 处 `@autojs/*`）已按事实侧改成 `auto` / `bridge_native.node`（`AutoJsPro` 九处保留 —— 那是
+    **对标产品名**）。但存储面两处**不改**，理由是它们不是命名而是**已落盘的格式**：
+    - `files/.autojs/` 是 §10.2 写进契约的存储布局（`lock.sig`/审批账/journal/history 的落位），实现与测试
+      共 30+ 处一致使用；
+    - `autojs-lock-v1|` 是 **lock 签名前缀**（§10.5-1 带外信任锚的输入串）。改它 = 旧设备上已签的
+      `lock.sig` **全部验不过**，而失败形态是「明明签过的 lock 被判未签」—— 对一个安全锚来说是往危险方向退。
+    - 要改的话须带兼容策略（新前缀 + 旧前缀验签回退，或一次性重签），属契约变更，须先拍板。
+    - **发布用的 npm scope 归属未核**（`bridge/js` 标 `"private": true`、不发布 registry）—— 需维护者确认。
+
+19. **第三方许可声明 = 生成物，且随 APK 分发**（backlog D8；`README.md` 许可节同批改写）：
+    - **为什么生成**：版本事实来源是 `node-runtime-build/VERSIONS.env`（Node/NDK/OpenCV/KleidiCV/npm 全部
+      钉在那里），手写声明必然在某次版本变更后与事实脱节，而**许可声明脱节在分发时是法律问题**。
+      `node-runtime-build/licenses/gen-notices.mjs` 从 VERSIONS.env 渲染 `THIRD_PARTY_NOTICES.md`，
+      CI 有一道 `gen-notices.mjs && git diff --exit-code` 门（照抄 js-tests 的 `gen:wire` 形状）。
+    - **原文与清单分开**：逐字许可原文入 `node-runtime-build/licenses/`（Node 1586 行 / OpenCV /
+      KleidiCV / libjpeg-turbo 双许可含 IJG 原文 / libpng / zlib），生成器**只渲染清单面**——
+      转述上游许可即失真，改原文即伪造。
+    - **随 APK 分发**：仓里一份只解决审计面；装到用户手机上的二进制，其许可条款必须**随分发可达**，
+      故 `prepareNoticesAssets`（`autoscript.engine-natives` 约定插件）把它与七份原文拷进
+      `assets/third-party/`。**判据与前三件不同**：本件在 git 里（生成物已入库），缺件是**仓库破损**而不是
+      「本机没构建」——按 `bridgeDist` 口径红，不按选填件口径只 warn。
+    - **NDK/libc++ 一行如实写「见 NDK 随附 NOTICE（未随包）」**：工具链 NOTICE 体积大且随 NDK 分发，
+      声明它而不复制，比复制一份可能过期的副本诚实。
+
+20. **APK 体积超支：接受 + 在能力中心明示安装体积**（backlog E1；§15 唯一被实测推翻的条目）：
+    - **选项 (a)**，2026-10-02 拍板。(b) 按需分发与 (c) 继续裁 OpenCV 面都否掉，理由是实测：
+      OpenCV 只占 7.0 MiB / 6.6%（按 ICU 后 92MB 分母折算，原 7.8%/8.6% 同样不改变结论），
+      **(c) 的收益上限就是那 6.6%**，而 `imgcodecs` 已只留 PNG/JPEG，再裁要动 SPI 承诺；
+      (b) 要给 `libnode.so` 找 exec 之外的落位链（§19 未解决），是比"披露一个大数字"大得多的工程。
+    - **改的是披露，不是预算**：§15 表里 `≤ 40MB release` 那一行**保留原样并标注已超支**，
+      证据链（`node-slice` artifact 体积 + `SHASUMS256` + `VERSIONS.env`）也保留。推翻一个契约要留账，
+      静默把数字改大就是"账被擦了"。
+    - **UI 给的是实测值，不是抄文档**：§15 记的 ≈92MB 是 node-slice 产物的**未压缩** jniLibs
+      三件套合计，用户装的是**压缩后**的 APK，两者不是同一个数。抄文档数字进 UI 就是呈现层说谎。
+      故 `InstallSizeRead`（`:app`，纯 JVM 可测）量 `applicationInfo.sourceDir` 与
+      `nativeLibraryDir` 的**真实文件**，`CapabilityCenterSnapshot.installSize` 传下去，
+      `InstallSizeState.text()` 出文案（`MiB` 口径，不与 MB 混用）。
+    - **三件都要说全**：总数、其中引擎那一段（超支全在它身上，不分段就答不上"为什么这么大"）、
+      引擎 .so 在不在。**量不到就说未量到，不显示 0** —— 0 会被读成"安装包是空的"；
+      引擎缺失时体积照报（同一条纪律的另一面：装了个跑不了脚本的壳是事实，隐去比显示更糟）。
+
+21. **shell 捕获输出超限：静默截断 + 显式日志 Warning + 返回截断标志**（backlog A2b；§9.6 原口径只写「双流并发读干」，没定过上限）：
+    - **背景**：`AndroidShellExecutor.PipeReader` 把 stdout/stderr **全量**读进内存，一条 `cat` 大文件
+      就能把宿主撑爆。这是 2026-10-01 修 A2（超时/收尸）时露出的口子，当时刻意不夹带 ——
+      加 cap 是**契约口径**变更，两条路都合法且代价不同：**超限报错**让合法的大输出直接失败，
+      **截断**有损但可用。故先拍板再动手。
+    - **拍板**：**截断**。「静默」指的是**调用方不因此失败**（不抛 `ERR_*`、`code` 仍是子进程真实
+      退出码、`isSuccess` 语义不变），**不是瞒着** —— 三处同时留痕，缺一处就是悄悄丢字节：
+      ① `ShellResult.truncated`（**程序**读的那个，纯增量字段、缺省 false）；
+      ② 可注入 `LogSink` 的 Warning（**运维**读的那个，真机进 logcat，带命令本身与丢弃字节数）；
+      ③ 被截那条流末尾追加 `TRUNCATION_MARK` 说明行（**人**读的那个 —— 否则半截输出看起来
+      就是一条正常结束的输出）。
+    - **上限 = 每条流 1 MiB**（`ShellCaptureLimit.MAX_CAPTURE_BYTES`），不是随手取的整数，三条约束：
+      ① 正常 shell 输出是 KB 级，1 MiB 对合法用途"够不着"；② 1 MiB 文本 JSON 编码后仍 ≈1 MiB，
+      远在单帧上限 8 MiB（§7.5）之下；③ **最坏情况**：`DomainJson.appendQuoted` 把 `c.code < 0x20`
+      转义成 `\uXXXX`（**6 倍**膨胀，非估算 —— `ShellCaptureLimitTest` 拿 `DomainJson` 真编一遍钉住），
+      1 MiB × 6 ≈ 6 MiB 仍不触顶。**这条余量是必须的**：单帧超限在桥上是 `FrameTooLargeException`
+      → 读循环 `break` → **关连接**，比截断重得多，所以上限必须在实现侧先兜住。
+    - **两条流各自计数**（stdout 截了不挤掉 stderr 的额度）：错误信息短、且最该留住，
+      共用一份额度会让啰嗦的 stdout 把它挤掉。
+    - **到顶后仍然读到 EOF**（关键，写错就退化成死锁）：只是不再往缓冲里放字节。停下来不读的话，
+      子进程会阻塞在写满的管道上 —— 那正是 §9.6「双流必须并发读干」要防的死锁，截断反而把它请回来。
+      `AndroidShellExecutorTest` 用记账读端（`CountingStream`）钉住"全部字节都被读走"。
+    - **日志不走 `android.util.Log`**：`:platform:system` 的 JVM 单测没有 `isReturnDefaultValues`，
+      直接调会抛 "not mocked"，一条"输出超限"的告警不该把测试判红。故走可注入的 `LogSink`
+      （缺省 `java.util.logging`，其 `ConsoleHandler` 写 `System.err`，Android 把 `System.err`
+      重定向进 logcat —— 落得到，但 tag 不叫包名；要精确 tag/优先级就注入自己的 `LogSink`）。
+    - **落地面**：`ShellContracts.kt`（`truncated` 字段）/ `ShellCaptureLimit.kt`（上限 + 日志缝）/
+      `AndroidShellExecutor.kt`（cap + 播报）/ `ShellNamespaceHandler.kt`（四字段载荷）/
+      `bridge/js/src/extras.ts`（`ShellResult.truncated`，**双侧逐字对齐**）；契约正文见 §9.6，
+      示例见 §12.3。
+
 2026-09-30 拍板（外部审查整改步骤 7；非 §18 编号项，原口径不涉）：
 
 13. **`images` 匹配链路提速方案**（2026-09-30 评审拍板；A2–A4 实测 ❌ 后的出路裁决）：
@@ -203,7 +322,8 @@
        别让读者以为四修之后 findFeature 变成了万能定位器。
 
 12. **wire 面单一事实来源 = `bridge/schema/wire.schema.json`；与 §12.4 的 d.ts 分工**：
-    - **schema 管 wire 面**（每 ns 的方法表 + aliases + dynamicSinks + facade 归属），`generate.mjs` 双发射 `bridge/js/src/generated/wire-types.ts` 与 `:domain` `WireMethods.kt`（生成物入库、`--check` + CI `git diff --exit-code` 双门）；19 个 handler 的 `methods()` 申报单源指 `BY_NS.getValue(ns)` —— 表不手抄，杜绝「申报与 `when` 两份手抄互相漂移」。对账三门分工：`wire-schema.test.cjs` 四向（生成物同步 / facade→schema / register↔schema / 申报↔schema + 死分支 aliases 真伪）、`wiring-table.test.cjs` 表↔schema、`pull-wire`/`event-wire`/`err-catalog` 各管自己的拉取环与错误目录。
+    - **schema 管 wire 面**（每 ns 的方法表 + aliases + dynamicSinks + facade 归属），`generate.mjs` 双发射 `bridge/js/src/generated/wire-types.ts` 与 `:domain` `WireMethods.kt`（生成物入库、`--check` + CI `git diff --exit-code` 双门）；19 个 handler 的 `methods()` 申报单源指 `BY_NS.getValue(ns)` —— 表不手抄，杜绝「申报与 `when` 两份手抄互相漂移」。
+      对账三门分工：`wire-schema.test.cjs` 四向（生成物同步 / facade→schema / register↔schema / 申报↔schema + 死分支 aliases 真伪）、`wiring-table.test.cjs` 表↔schema、`pull-wire`/`event-wire`/`err-catalog` 各管自己的拉取环与错误目录。
     - **d.ts 仍是对外 API 评审面（§12.4 口径不动）**：d.ts 描述脚本作者看得见的 TS 形状（参数/返回/重载），schema 描述桥线上跑的 wire 名 —— 对象不同，不合并：把参数形状塞进 schema，生成器就得长出第二套类型系统；把 wire 名塞进 d.ts，内部协议就变成了公共 API 承诺。两份都入库、各有一道门。
     - **正则测试处置**：`wire-reconcile`（花括号计数啃 `when` 块、全局方法名集合）删 —— 底账脆且不认 ns 归属；`wiring-table` 换表↔schema 基；`jni-names`/`docs-surface` **保留**（JNI 编译面 / 文档表面积门，不是镜像测试，偏差与理由在此记明）。
     - **`bridge/js/dist` 出库**：tsc 产物改构建产物口径 —— 每次 build 弄脏工作树的 38 文件消失，代价是 CI jvm-tests job 与本机都要先 `npm --prefix bridge/js run build`（两处报错文案已点名命令）。
@@ -211,15 +331,19 @@
 2026-09-30 拍板（外部审查整改步骤 3；非 §18 编号项，原口径不涉）：
 
 11. **JSON codec 合一 = `:domain` 手写值族 `DomainJson`；kotlinx.serialization 评估后不采纳**：
-    仓内 5 个手写 codec（`A11yBridgeJson` 步骤 4 迁入、`NpmBridgeJson`、`EngineBridgeJson`、`TinyJson`、内联 `WmJson`）与 `JsonLine` 的递归下降 Parser 全部收敛到唯一 codec `DomainJson`（六值族 `Value` + `decode/decodeObject/encode/encodeParsed` + `reqStr`/`opt*` 字段读取族），调用点只换名不改形状 —— `Map<String, Value>` + 抛 IAE → `RpcNamespaceHandler` 折 `ERR_INVALID_PARAM` 的口径不变。不选 kotlinx.serialization 的理由：① 全仓零该依赖，选它 = catalog/插件面 churn（根 `libs.versions.toml` 冻结，审查亦要求零改动）；② 现网 60+ 调用点已是 `Map<String, Value>` + `requiredStr` 语义，迁移近似改包名，却要引入 `@Serializable` 注解 + `Json {}` 解码器配置两套心智；③ 动态 wire payload（桥载荷、jsonl 行）的目标是 `Map`/值域裁剪，不是 data class，@Serializable 的强项用不上。备选评估到此为止。
+    仓内 5 个手写 codec（`A11yBridgeJson` 步骤 4 迁入、`NpmBridgeJson`、`EngineBridgeJson`、`TinyJson`、内联 `WmJson`）与 `JsonLine` 的递归下降 Parser 全部收敛到唯一 codec `DomainJson`（六值族 `Value` + `decode/decodeObject/encode/encodeParsed` + `reqStr`/`opt*` 字段读取族），调用点只换名不改形状 —— `Map<String, Value>` + 抛 IAE → `RpcNamespaceHandler` 折 `ERR_INVALID_PARAM` 的口径不变。
+    不选 kotlinx.serialization 的理由：① 全仓零该依赖，选它 = catalog/插件面 churn（根 `libs.versions.toml` 冻结，审查亦要求零改动）；② 现网 60+ 调用点已是 `Map<String, Value>` + `requiredStr` 语义，迁移近似改包名，却要引入 `@Serializable` 注解 + `Json {}` 解码器配置两套心智；③ 动态 wire payload（桥载荷、jsonl 行）的目标是 `Map`/值域裁剪，不是 data class，@Serializable 的强项用不上。
+    备选评估到此为止。
     边界两处不计入「多头」：`JsonLine`（scheduler persist）保留为**薄件协议垫片**（~80 行：冻结行格式四型值域裁剪 + IOException 保型），编解码本体走 `DomainJson` —— 行 framing 是协议不是 codec；`ConsoleCollector` 保留自写 `handle`（非 RPC 形的 sink 面，不经错误折叠契约）。
     兼容边（同步记 design-status 流水）：`DomainJson.parseString` 拒未转义控制字符（老 `JsonLine.quote` 会把控制符直塞裸字节），且 `decode` 查尾部多余字符（老 JsonLine/TinyJson 忽略尾随）—— 存量含裸控制符的 journal 行将被拒，落在 IOException 保型内，表现仍是「行损坏」响亮失败；方向是收紧（响亮失败不静默）。
 
 2026-09-30 拍板（外部审查整改步骤 4；非 §18 编号项，原口径不涉）：
 
 10. **RPC 处理器基类收口 `:domain`；`*Lite` 自定义形状废除**：
-    全部桥命名空间 handler（`:platform:capabilities` 14 个、`:app-service:runtime` 的 `EnginesNamespaceHandler`、`:app-service:packager` 的 `NpmBridgeHandler`、`:app` 装配包的 `WorkManager`/`PowerManager`）统一继承 `:domain` 的 `RpcNamespaceHandler` —— `handle` 为 **final**，只折叠两类：`AutojsException`（原码透传）与 `IllegalArgumentException`（→ `ERR_INVALID_PARAM`）；未知异常照穿（bug 显形，不伪造参数错）。子类只剩 `dispatch`（`when (request.method)` 分发 + 业务 + 参数校验）。解码 helpers（`decodeObject`/`requiredStr`/…，原 `SystemNamespaces.kt` internal 泛化）与唯一 codec `DomainJson`（原 `A11yBridgeJson` 迁入）同批入 `:domain`；`methods()` 留位步骤 7 的 schema 方法表。
-    废除的旧口径：① 每个 handler 自带一份 `try { Ok } catch (Autojs) catch (IAE)` 折叠（全仓 ~60 处 `catch (e: AutojsException)`）；② `BridgeRequestLite`/`ResponseLite`（capabilities 为绕「禁直连 `:bridge:java`」自造的桥形状）与 a11y/screen/engines 的嵌套自定义 `Request`/`Response` —— 类型本就住 `:domain`，门禁理由不成立，签名换 `BridgeRequest`/`BridgeResponse`；③ 各 handler 的 `mount(): NamespaceHandler` 包装（类本身即 `NamespaceHandler`，调用点直挂，`AppShell.handleLike` 适配扩展随之删除）。收敛后残留的 `catch (e: AutojsException)` 只剩基类一处 + 与桥无关的业务面（ApkRepacker/InstallCoordinator/FloatingWindow/SensorSource/Zip）；保留自写 `handle` 的只有 `ConsoleCollector`（非 RPC 形的 sink 面，不经错误折叠契约）。
+    全部桥命名空间 handler（`:platform:capabilities` 14 个、`:app-service:runtime` 的 `EnginesNamespaceHandler`、`:app-service:packager` 的 `NpmBridgeHandler`、`:app` 装配包的 `WorkManager`/`PowerManager`）统一继承 `:domain` 的 `RpcNamespaceHandler` —— `handle` 为 **final**，只折叠两类：`AutojsException`（原码透传）与 `IllegalArgumentException`（→ `ERR_INVALID_PARAM`）；
+    未知异常照穿（bug 显形，不伪造参数错）。子类只剩 `dispatch`（`when (request.method)` 分发 + 业务 + 参数校验）。解码 helpers（`decodeObject`/`requiredStr`/…，原 `SystemNamespaces.kt` internal 泛化）与唯一 codec `DomainJson`（原 `A11yBridgeJson` 迁入）同批入 `:domain`；`methods()` 留位步骤 7 的 schema 方法表。
+    废除的旧口径：① 每个 handler 自带一份 `try { Ok } catch (Autojs) catch (IAE)` 折叠（全仓 ~60 处 `catch (e: AutojsException)`）；② `BridgeRequestLite`/`ResponseLite`（capabilities 为绕「禁直连 `:bridge:java`」自造的桥形状）与 a11y/screen/engines 的嵌套自定义 `Request`/`Response` —— 类型本就住 `:domain`，门禁理由不成立，签名换 `BridgeRequest`/`BridgeResponse`；
+    ③ 各 handler 的 `mount(): NamespaceHandler` 包装（类本身即 `NamespaceHandler`，调用点直挂，`AppShell.handleLike` 适配扩展随之删除）。收敛后残留的 `catch (e: AutojsException)` 只剩基类一处 + 与桥无关的业务面（ApkRepacker/InstallCoordinator/FloatingWindow/SensorSource/Zip）；保留自写 `handle` 的只有 `ConsoleCollector`（非 RPC 形的 sink 面，不经错误折叠契约）。
 
 2026-09-26 拍板（原 §18 第 1–7 项；2026-09-30 自 §18 迁入，原文整段保留，§号与编号不变——迁移前这些条目写在契约 §18 里、标注「已拍板（2026-09-26）」）：
 
@@ -235,8 +359,10 @@
    **已拍板（2026-09-26）：不发行**——非商业化项目、不分发，故 Play 政策冲突面（specialUse FGS / 精确闹钟 / 全盘存储）**根本不存在**，上面那组"若上 Play 要砍什么"的代价不用付，保活与 `SCHEDULE_EXACT_ALARM` 原样保留。落地形态 = 本机自装 APK；Play/F-Droid/官网分发轨不进排期。
 4. **ICU 取舍：全量 ICU（完整 Unicode/时区/国际化，体积 +20MB 级）还是配 `--with-intl=none`（体积小但字符串/时区残缺，自动化和 UI 场景产物不友好）？**
    推荐**全量 ICU + 裁剪为所需 subset**（也可放 assets 按需加载），自动化 app 大量依赖正则/时区/日期格式化。
-   **已拍板（2026-09-26）：只要中文 + 英文**——即 locale 面收成 `{zh, en}`，既不停在 `none`（那样连 `zh-CN` 的 `Intl.*`/`toLocaleString` 都不可用，等于还是残缺），也不背全量的 +20MB。落点是 Node 构建旗标 **`--with-intl=small-icu --with-icu-locales=zh,en`**。**旗标已改（2026-09-26，同日）**：`node-runtime-build/scripts/fetch-and-build.sh` 由 `--with-intl=none` 换成上述两行；数据源是仓内 canned ICU（`deps/icu-small/` 带 `README-FULL-ICU.txt` → `configure.py` 走 `canned_is_full`），**不联网下载 icu4c**，`root` 由 configure 自动并入。
-   跟进（构建轨，Actions 跑，本机不编）：旗标已改 → **重编已过（run `36185853302`，success，2026-09-25T23:01Z，约 2h34m）** → **体积差已量并回填 §15**：`libnode.so` 70,725,976 → **81,950,376 B（+11,224,400 B = +10.70 MiB = +15.87%）**，取证两个 `node-slice` artifact（基线 `36153816811` intl=none / 新 `36185853302`）+ `config.gypi`（`icu_small=true`、`icu_locales=en,root,zh`、`icu_path=deps/icu-small`、`icu_ver_major=78`）。旧估数 "~10MB+" 是 small-icu **默认面**，`zh,en` 实测比它还略高一点（ICU 数据不是按 locale 线性摊的）。`RISKS.md` §3 同批改成「已改 + 已量」。**仍待设备**：`Intl.DateTimeFormat`/`Collator` 在 zh/en 上的运行期实测（arm64 二进制本机跑不了，归 §8b 那批真机账）。副作用要写明：`toLocaleString('ja_JP')` 之类非 zh/en locale 会回落 en —— 脚本作者该知道这不是 bug。
+   **已拍板（2026-09-26）：只要中文 + 英文**——即 locale 面收成 `{zh, en}`，既不停在 `none`（那样连 `zh-CN` 的 `Intl.*`/`toLocaleString` 都不可用，等于还是残缺），也不背全量的 +20MB。落点是 Node 构建旗标 **`--with-intl=small-icu --with-icu-locales=zh,en`**。**旗标已改（2026-09-26，同日）**：`node-runtime-build/scripts/fetch-and-build.sh` 由 `--with-intl=none` 换成上述两行；
+   数据源是仓内 canned ICU（`deps/icu-small/` 带 `README-FULL-ICU.txt` → `configure.py` 走 `canned_is_full`），**不联网下载 icu4c**，`root` 由 configure 自动并入。
+   跟进（构建轨，Actions 跑，本机不编）：旗标已改 → **重编已过（run `36185853302`，success，2026-09-25T23:01Z，约 2h34m）** → **体积差已量并回填 §15**：`libnode.so` 70,725,976 → **81,950,376 B（+11,224,400 B = +10.70 MiB = +15.87%）**，取证两个 `node-slice` artifact（基线 `36153816811` intl=none / 新 `36185853302`）+ `config.gypi`（`icu_small=true`、`icu_locales=en,root,zh`、`icu_path=deps/icu-small`、`icu_ver_major=78`）。
+   旧估数 "~10MB+" 是 small-icu **默认面**，`zh,en` 实测比它还略高一点（ICU 数据不是按 locale 线性摊的）。`RISKS.md` §3 同批改成「已改 + 已量」。**仍待设备**：`Intl.DateTimeFormat`/`Collator` 在 zh/en 上的运行期实测（arm64 二进制本机跑不了，归 §8b 那批真机账）。副作用要写明：`toLocaleString('ja_JP')` 之类非 zh/en locale 会回落 en —— 脚本作者该知道这不是 bug。
 5. **无障碍服务与脚本进程共享与否的极限形态**：本设计定案「a11y 在 `:main`、脚本在 `:nodeN`」。若未来遇到「无障碍回调海量 + 脚本高频读树」压垮 `:main`，可演进出
    `:accessibility` 第三进程（§9.1 的接口已留好接缝）。P0 不做——保持最少进程数。
    **已拍板（2026-09-26）：采纳推荐，P0 不做**（接口缝照留；真出现压垮证据再切）。
@@ -247,10 +373,15 @@
    - 默认 registry：推荐 `registry.npmmirror.com`（国内实测存活）——若你的目标用户全球分布则改 `npmjs.org` + 可切换。种子缓存与「离线秒装」文案都要绑定默认镜像。
    - 脚本审批默认值：推荐出厂 **global-deny**（全部 install 脚本默认拒绝，人工逐个批准）。代价是与 AutoJsPro 既有的「默认跑脚本」用户习惯不同，新旧用户需要文档/示例适配；若你更看重无缝迁移，可出厂 allow-listed 常用安全包 + 黑名单模式。
    **已拍板（2026-09-26）**：
-   - **默认 registry = 官方 `registry.npmjs.org`**——不分发、不面向陌生用户（第 3 项），镜像加速不是开箱前提；用户要快自己 `setRegistry` 切 npmmirror。`HostNodeExecutor`（实际装包用的那家）与 `NpmRegistryVerifier`（交叉校验的首选）**两处缺省同批改**，§10.2/§10.4 的"默认 npmmirror"同批改。**第二意见的规则同时改写**：交叉校验要的是**两个运营主体**，不是"官方那一家"——首选官方时镜像做第二意见，首选任意别家时官方做第二意见（`secondary` 缺省跟着 `primary` 走），否则会出现 primary 与 secondary 同站、自己跟自己比也算通过。
+   - **默认 registry = 官方 `registry.npmjs.org`**——不分发、不面向陌生用户（第 3 项），镜像加速不是开箱前提；用户要快自己 `setRegistry` 切 npmmirror。`HostNodeExecutor`（实际装包用的那家）与 `NpmRegistryVerifier`（交叉校验的首选）**两处缺省同批改**，
+     §10.2/§10.4 的"默认 npmmirror"同批改。**第二意见的规则同时改写**：交叉校验要的是**两个运营主体**，不是"官方那一家"——首选官方时镜像做第二意见，
+     首选任意别家时官方做第二意见（`secondary` 缺省跟着 `primary` 走），否则会出现 primary 与 secondary 同站、自己跟自己比也算通过。
    - **lifecycle 脚本不做出厂卡口，安装时让用户自己选**——既不是 global-deny 也不是白名单：装包时按包如实告知 `hasInstallScript`（**禁止静默**，§10.12 那条保留），跑不跑由这次安装的使用者当场决定；`requestApprove`/审批接口保留为这条选择的落点。
    - **实现落差（明写，不当已办）**：现网 T0 是 `--ignore-scripts` 全程 + npm12 `allowScripts=none`，lifecycle 脚本**一个都没跑过**，安装回执显式发 `scripts-skipped`（禁止静默那条就是为这个静默面立的）。"用户选择跑"要先有 spawn 桥（`child_process` 真执行），那是 §14 的 **P1 项**——**口径在此定死，实现排 P1**，P1 落地时按本条写交互，不重新拍。
-   - **门禁侧已落（2026-09-29，存盘于本地 `node-slice`；2026-10-01 移植进 main，见 `design-status.md` 流水）**：`runScript`/`exec` 走「宿主从盘上 manifest 重算 `(pkg, versionHash)` → ledger 命中 APPROVED 才放行 → 纯 JS bin 白名单」，**未获批时把请求自请入队**（approvals 流 + `drainApprovals` 拉取口）让用户在审批卡上当场选，而不是干巴巴拒回或由脚本自批 —— 这就是「安装时让用户自己选」的交互落点。执行体是 `ScriptOpExecutor` 接缝（不复用 `HeavyOpExecutor`：lifecycle 不做 reify）。**安装侧 `hasInstallScript` 的当场告知与选择仍缺**（那要先有 spawn 桥才兑现得了"跑了"），见 [`design/10-npm.md`](design/10-npm.md) §10.3 的 T1 落地追记与「仍未落」段。本条**口径未变**，只是实现进度推进。
+   - **门禁侧已落（2026-09-29，存盘于本地 `node-slice`；2026-10-01 移植进 main，见 `design-status.md` 流水）**：`runScript`/`exec` 走「宿主从盘上 manifest 重算 `(pkg, versionHash)` → ledger 命中 APPROVED 才放行 → 纯 JS bin 白名单」，
+     **未获批时把请求自请入队**（approvals 流 + `drainApprovals` 拉取口）让用户在审批卡上当场选，而不是干巴巴拒回或由脚本自批 —— 这就是「安装时让用户自己选」的交互落点。
+     执行体是 `ScriptOpExecutor` 接缝（不复用 `HeavyOpExecutor`：lifecycle 不做 reify）。**安装侧 `hasInstallScript` 的当场告知与选择仍缺**（那要先有 spawn 桥才兑现得了"跑了"），
+     见 [`design/10-npm.md`](design/10-npm.md) §10.3 的 T1 落地追记与「仍未落」段。本条**口径未变**，只是实现进度推进。
 
 2026-09-25 拍板。编号与 §18 原编号一致（第 8、9 项），原文整段保留：
 
@@ -259,14 +390,19 @@
    - (a) **`screen` 面加 `save(path)`**：把 a11y 已产出的 JPEG 字节原样落盘。设备面已经在压 JPEG 了，最小改动；代价是**有损**——`findColor` 的分量判定会吃到压缩伪影（§9.2 的契约是按分量精确夹的），"屏幕上这个色还在吗"这类判读会变钝。
    - (b) **两缝共用一个帧表**（producer 直接把帧写进 `images` 的帧表）：收益是真正的 0 拷贝直连（§7.4 所有权边界仍是每个句柄一份 Mat，变的是**发号那一侧**归谁）；代价是"帧不通用"这条纪律取消，`screen`/`images` 两个命名空间的释放语义要重新对齐（谁 release 谁背 STALE）。
    - (c) **`images` 面加 `decodeBytes(byte[])`**：屏幕字节不落盘直进 native；代价是 bytes 要过桥，§7.7 的"屏幕帧→native 0 拷贝"这条在**两个维度上**都要重新记账，且 §7.4 的多一路径 = 多一处规格要守。
-   **已拍板 (b)**（2026-09-25）：只有它同时保住了"0 拷贝"与"按分量精确判定"两条被契约明确承诺的性质，(a) 切掉的是判读精度、(c) 切掉的是性能口径。(a) 不作为过渡 —— 过渡方案一旦进示例就会被抄成正式用法，而带 JPEG 往返的链路不叫「屏幕帧→native 0 拷贝」，§7.7 的买单口径不为它改。落地时动的是 §7.4 所有权边界（发号侧归一），`screen`/`images` 的句柄纪律届时同批重写，"帧不通用"那条纪律取消。
+   **已拍板 (b)**（2026-09-25）：只有它同时保住了"0 拷贝"与"按分量精确判定"两条被契约明确承诺的性质，(a) 切掉的是判读精度、(c) 切掉的是性能口径。(a) 不作为过渡 —— 过渡方案一旦进示例就会被抄成正式用法，而带 JPEG 往返的链路不叫「屏幕帧→native 0 拷贝」，§7.7 的买单口径不为它改。
+   落地时动的是 §7.4 所有权边界（发号侧归一），`screen`/`images` 的句柄纪律届时同批重写，"帧不通用"那条纪律取消。
 
 9. **`images.decode` 的相对路径口径**（2026-09-25 实测记账，影响 §9.2/§12.3 的示例写法）：
-   `:domain` 的 `ImageAnalyzer.decode` KDoc 写着「路径解析（相对项目根 or filesDir）由实现定」，但**四层里没有任何一层解析路径**（计算核 `std::fopen`/`cv::imread` 直取、装载面与 `NativeImageAnalyzer` 原样透传、handler 只挡空白串）。host 侧实测把这条钉死了：传相对路径时按**进程 CWD** 解析——同一个文件，绝对写法与「chdir 到该目录 + 相对写法」都回 `ERR_IO(3)`（说明相对写法确实命中到了文件），而不存在的相对路径回 `ERR_FILE_NOT_FOUND(2)`。`libopencv.so` 载在 `:main` 进程里，那个进程的 CWD 是 `/`（Android 对 zygote 后代的固定行为），于是脚本写 `images.decode('part.png')` 会在根目录找一个并不存在的文件——**回的是 `ERR_FILE_NOT_FOUND`，且报的路径是对的**，所以看起来像"文件真的不在"，不像"口径没定"。
+   `:domain` 的 `ImageAnalyzer.decode` KDoc 写着「路径解析（相对项目根 or filesDir）由实现定」，但**四层里没有任何一层解析路径**（计算核 `std::fopen`/`cv::imread` 直取、
+   装载面与 `NativeImageAnalyzer` 原样透传、handler 只挡空白串）。host 侧实测把这条钉死了：传相对路径时按**进程 CWD** 解析——同一个文件，绝对写法与「chdir 到该目录 + 相对写法」都回 `ERR_IO(3)`（说明相对写法确实命中到了文件），
+   而不存在的相对路径回 `ERR_FILE_NOT_FOUND(2)`。`libopencv.so` 载在 `:main` 进程里，那个进程的 CWD 是 `/`（Android 对 zygote 后代的固定行为），于是脚本写 `images.decode('part.png')` 会在根目录找一个并不存在的文件—
+   —**回的是 `ERR_FILE_NOT_FOUND`，且报的路径是对的**，所以看起来像"文件真的不在"，不像"口径没定"。
    两条出路，代价不同：
    - (a) **就在契约里写明"路径必须是绝对的"**（示例改成 `/sdcard/...` 或让脚本自己拼 `filesDir`）。零实现改动，代价是 v9 的 `fromFile('part.png')` 这种相对用法在 AutoScript 直接不成立，脚本要改写法。
    - (b) **在 handler 层加一层基准解析**（相对路径按项目根 / `filesDir` 拼绝对再往下传）。保住 v9 的写法，代价是要定"基准是谁"（项目根？脚本所在目录？filesDir？）——**三选一本身又是一个要拍板的策略**，且 §9.2 的「不做路径策略」那条边界要重画。
-   **已拍板 (a)**（2026-09-25）：路径必须是绝对的 —— 把"相对路径"从契约里去掉而不是猜一个基准。(b) 不给：基准三选一本身又是一个策略，且 §9.2「不做路径策略」的边界不重画。**§12.3 已按 (a) 改写**：示例路径一律绝对（`fromFile('/sdcard/part.png')`），并写明了相对写法为什么回 `ERR_FILE_NOT_FOUND`。跟进动作：`:domain` `ImageAnalyzer.decode` KDoc 里「路径解析由实现定」那句要收紧为"只收绝对路径"（见下）。
+   **已拍板 (a)**（2026-09-25）：路径必须是绝对的 —— 把"相对路径"从契约里去掉而不是猜一个基准。(b) 不给：基准三选一本身又是一个策略，且 §9.2「不做路径策略」的边界不重画。**§12.3 已按 (a) 改写**：示例路径一律绝对（`fromFile('/sdcard/part.png')`），并写明了相对写法为什么回 `ERR_FILE_NOT_FOUND`。
+   跟进动作：`:domain` `ImageAnalyzer.decode` KDoc 里「路径解析由实现定」那句要收紧为"只收绝对路径"（见下）。
 
 ---
 
@@ -310,11 +446,19 @@
 | §12.2「语义层（handler）住 `:platform:capabilities`」+「为什么 handler 不住 `:platform:system`」两层理由 | §12.2「分两层，别混」段（原两句原文见本节末引用块） | **口径反转（审查步骤 6，零新模块方案）**：handler 归位实现模块 —— 系统面十一件住 `:platform:system` 的 `SystemNamespaces.kt`（与 `SystemSpis`/契约同模块，2026-09-30 步骤 6a/6b/6d 分批迁入），`dialogs` 留 `:platform:capabilities`（`DialogHost` 实现按约定在同模块），`workManager` 归 `:app-service:scheduler`、`power_manager` 归 `:platform:system`；原理由 (1) 共担门禁组 → 校验仍单点住在 `SystemNamespaces` 工厂束（同模块一处，不各写一份），(2) 装配层双模块直连 → `PlatformWiring` 本就经 §6 包级例外二同时可见两模块、根包经工厂缝零 platform 类型（`ArchitectureTest` 依赖级门禁验证）；与 `EnginesNamespaceHandler` 住 `:app-service:runtime` 同形态（handler 归位实现模块）。§6 两行、§12.2 表 handler 列与两段散文同批改 | 2026-09-30 |
 
 | `engines.exec` 的 `timeoutMillis` 可选（缺省交给引擎/看门狗自行兜底） | §8.6 原「仍待覆盖」段 + `bridge/js` `EngineRunRequest` | **改必填**：桥路径无人 await 终结，缺席即 `ERR_INVALID_PARAM`；到点由看门狗期限线落 `KillCause.TIMEOUT`（§8.6 期限线，判据 = 发起方等不等） | 2026-10-01 |
+| `:engine:sandbox`「**目录留盘**」（2026-09-30 摘壳时的附带口径） | 本表上一则 `:engine:sandbox` 行 | **目录删除**（2026-10-01 拍板，backlog D2）：裁撤口径本身不变（§18 第 1 项「不要沙箱」），只是把空壳目录从盘上清掉 —— 目录里只有 1 个 `build.gradle.kts`（QuickJS 白名单/独立进程那条轨的残骸，P1 再实装的口子），模块早在 2026-09-30 就不在 `settings.gradle.kts` 的模块表里。**复活 = 重建模块目录 + 注释回 include + ModuleGraphTest 允许集登记**（比原口径多「重建目录」一步）；`build.gradle.kts` 可从 git 历史取回（`git show <摘除前的 sha>:engine/sandbox/build.gradle.kts`）。`settings.gradle.kts` 里那行 `// include(":engine:sandbox")` 是协调者冻结文件，本次不动 | 2026-10-01 |
+| `settings.gradle.kts` 里 `// include(":engine:sandbox")` 那行注释「留作复活提示」 | 本表上一则 `:engine:sandbox` 行末句 | **注释行删除**（2026-10-01 同日拍板，承上一则）：目录既然已不在盘上，留一行指向不存在目录的注释只剩误导 —— 它引用的两个事实（空壳摘除、复活办法）在文档侧都有登记，而**冻结文件**里留死引用正是 C3 那批刚清掉的形态。复活口径随之定为「重建模块目录 + include 行加回 + ModuleGraphTest 允许集登记」（不再有「取消注释」这一步）；ModuleGraphTest 的 `include` 正则锚行首，删注释行不影响派生计数（`:domain:test` 已重跑验证） | 2026-10-01 |
+| 外审 C5：「无 `CHANGELOG`」 | `docs/backlog.md` C5 | **不设 `CHANGELOG`**（2026-10-01 拍板）：变更流水已经在 `docs/design-status.md` 的「流水」段（只追加、按日期、带 § 锚），再开一份 `CHANGELOG` 必然漂成第二个事实来源 —— 本仓对「同一事实写两遍」的代价有明确判据（`ModuleGraphTest` 的派生计数就是为此立的门）。外审同一行的另外两项**已采纳**：`CONTRIBUTING.md` 与 PR / issue 模板已建（批 3）。发版流程真立起来那天再谈（口径随 §18 第 3 项「不发行」） | 2026-10-01 |
+| 外审 C5：`versionName` 硬编码 `"0.1.0"` | `app/build.gradle.kts` | **保留硬编码占位**（2026-10-01 拍板）：本仓不发行正式版（§18 第 3 项），没有发版流程 —— 此刻把版本号接到 `gradle.properties` / 版本目录只会**多出一个会漂的事实来源**，换不来任何东西。改为在该行上方写明：这是占位、为什么不引第二个来源、真要发版时该怎么改（两数同改、`versionCode` 单调递增、同步 §13/§14 交付轨） | 2026-10-01 |
+| `LockSigner.KeyProvider.keyBytes(): ByteArray`（应用密钥接缝的原始形状） | `LockSigner.kt`（`:app-service:npm`） | **改 `secretKey(): SecretKey`**（2026-10-01 拍板，backlog A1c）：Keystore 里的密钥材料**不出库**，`getEncoded()` 拿不到字节 ⇒ 原形状**接不上** Keystore，而 Keystore 正是设计口径的密钥存放处。给句柄则两边都成立（Keystore HMAC 密钥与测试用 `SecretKeySpec` 都能喂 `Mac.init(SecretKey)`），语义一字不变（仍 HMAC-SHA256、落盘仍 `v1 <hex>`）。**同时拍板实现落点：Keystore 版住 `:app` 装配层**（Composition Root 已依赖 `:app-service:npm`，零契约变更；`:app-service:npm` 保持零 `android.*`）。**注意：这是接缝形状，不是接线** —— 生产装配的 `lockKey` 仍是 `null`（`SECURITY.md` / §11.3 第 8 条口径不变） | 2026-10-01 |
+| **「vendored npm CLI 素材从哪来」**（backlog A1 的卡点：CI 产 / 入库 / 取本机 npm 目录三选一，2026-10-01 之前未定） | `docs/backlog.md` A1、§10.1 脊梁 | **取 Node 源码树自带的 `deps/npm`，随 libnode 同批出库**（第四选项）：`fetch-and-build.sh` §9 收敛到 `OUT/npm` → `node-slice.yml` artifact → gradle `prepareNpmCliAssets` 随包 `assets/npm/` → 启动期幂等落位 `files/npm/`。**选它的理由**：素材与 `NODE_VERSION` 同一把锁（换 Node 版本时 npm 跟着走，`NPM_CLI_VERSION` 与素材 `package.json` 逐字比对，漂移当场红 —— 逼一次显式决策），不引入第二条下载源与第二套校验，且与 libnode 同批出库（同一个 artifact、同一次构建、同一份基表纪律）。**代价（明写，不当已办）**：Node 24.21.0 携带的是 **npm 11.19.0**，**低于 §10.1 脊梁写的「npm 12.x 系」** —— npm 12 的「拒绝全部 lifecycle + allow-git=none + allow-remote=none」这层**官方默认语义当前不在位**。护栏并没有因此静默消失，但**只剩一层**：`HostNodeExecutor` 对每条命令硬编码 `--ignore-scripts`（§11.1 T1 的零 spawn 主路径），它与 npm 版本无关；而**非脚本** spawn 路径的第二层兜底（§10.12 末行的 child_process 拦截 shim）本就未落。升级到 12.x 是**独立一件事**，已登记 backlog；**同日追加实测**：`nodejs.org/dist/index.json` 的 868 条官方发布里**没有任何一条携带 npm 12.x**（最新 v26.10.0 / 2026-09-21 带的是 npm 11.19.1）→「等 Node 线携带」这条升级路径**原理上不成立**，要 12.x 只能另找素材来源；改 `NPM_CLI_VERSION` 即触发全链回归 | 2026-10-01 |
 ### 附：§12.2 被反转口径原文照抄（2026-09-30 步骤 6 摘录前的原文）
 
 > - **语义层**（handler）住 `:platform:capabilities` 的 `SystemNamespaces.kt`，纯 JVM 可测（假 SPI 注入即可跑）：参数校验（spec 守卫、必填字段、`timeout > 0`）、枚举字面量解析（`ShellMode`/`DialogMode`，拼错即报错不静默套默认）、默认值（shell 超时 30s）、错误分类**透传**（`AutojsException.error` 原码回桥）、响应形状编码（与 `extras.ts` 逐字对齐）；
 
-> 所以「为什么 handler 不住 `:platform:system`」有两层理由：(1) 五个命名空间共享一套门禁组（OVERLAY/ROOT/ADB_INPUT），语义放一起才不会各写一份校验；(2) handler 若住 `:platform:system`，装配层就得同时直连 `:platform:capabilities` 与 `:platform:system` 两个模块才凑得齐 Router —— §6 对 `:app` 非装配包明令禁止这一直连（装配包 shell 的生产装配 `PlatformWiring` 经包级例外二放行，但那只是"把 SPI 拼成束"，不构成把 handler 挪去 `:platform:system` 的理由：主因仍是 (1) 的共担门禁）。
+> 所以「为什么 handler 不住 `:platform:system`」有两层理由：(1) 五个命名空间共享一套门禁组（OVERLAY/ROOT/ADB_INPUT），语义放一起才不会各写一份校验；(2) handler 若住 `:platform:system`，
+> 装配层就得同时直连 `:platform:capabilities` 与 `:platform:system` 两个模块才凑得齐 Router —— §6 对 `:app` 非装配包明令禁止这一直连（装配包 shell 的生产装配 `PlatformWiring` 经包级例外二放行，
+> 但那只是"把 SPI 拼成束"，不构成把 handler 挪去 `:platform:system` 的理由：主因仍是 (1) 的共担门禁）。
 
 ---
 

@@ -10,7 +10,7 @@ import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Path
 
 /**
- * 控制台读口的**装配侧**验证（[AppShellKit.AssembledShell.consoleView]）——
+ * 控制台读口的**装配侧**验证（[AssembledShell.consoleView]）——
  * 也就是 `AppShellApplication.console()` 在真机上会走的那条路。
  *
  * 单元级的游标/投影规则在 [ConsoleReadTest]；这里钉的只有装配层才定的一件事：
@@ -32,7 +32,7 @@ class AppShellConsoleTest {
         override suspend fun cancelTrigger(handle: TriggerHandle) = handle.cancel()
     }
 
-    private fun kit(): AppShellKit.AssembledShell = AppShellKit.assemble(
+    private fun kit(): AssembledShell = AppShellKit.assemble(
         filesDir = files,
         cacheDir = cache,
         schedulerProvider = NoopProvider(),

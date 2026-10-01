@@ -19,7 +19,7 @@ import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Path
 
 /**
- * 任务中心操作面的**装配侧**验证（[AppShellKit.AssembledShell] 的
+ * 任务中心操作面的**装配侧**验证（[AssembledShell] 的
  * `registerTask`/`cancelTask`/`runTaskNow`）—— 也就是 `AppShellApplication`
  * 三个写口在真机上会走的那条路。
  *
@@ -51,11 +51,13 @@ class AppShellTaskOpsTest {
     private fun kit(
         provider: SchedulerProvider = RecordingProvider(),
         screenGate: ScreenGate = ScreenGate.AllowAll,
-    ): AppShellKit.AssembledShell = AppShellKit.assemble(
+    ): AssembledShell = AppShellKit.assemble(
         filesDir = files,
         cacheDir = cache,
         schedulerProvider = provider,
         screenGate = screenGate,
+        // 假 /proc：pid 4242 在 CI runner 上是真实进程，裁决输入不能借宿主环境（见 fakeProcMonitor）
+        monitor = fakeProcMonitor(),
     )
 
     private fun reg(
@@ -189,6 +191,8 @@ class AppShellTaskOpsTest {
                 FakeEngineForDispatcher(id, pid = 4242, autoExitAfterMillis = null)
                     .also { engines += it }
             },
+            // 假 /proc：pid 4242 在 CI runner 上是真实进程，裁决输入不能借宿主环境（见 fakeProcMonitor）
+        monitor = fakeProcMonitor(),
         )
         k.use { s ->
             s.registerTask(reg(id = "t1", schedule = ScheduleSpec.Daily(7, 5)))

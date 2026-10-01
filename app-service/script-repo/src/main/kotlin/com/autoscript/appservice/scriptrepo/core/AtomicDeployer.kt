@@ -5,6 +5,7 @@ import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
 import java.util.UUID
+import java.util.stream.Collectors
 
 /**
  * 原子部署器（docs §9.6）：
@@ -110,7 +111,12 @@ class AtomicDeployer(
             // 递归清理空目录（finalize 移出文件后可能留下空子目录如 lib/）
             fun emptyIfEmpty(d: Path): Boolean {
                 // 先快照目录内容（Files.list stream 在迭代中删除可能不反映变更）
-                val entries = Files.list(d).toList()
+                // `collect(toList())` 而不是 `Stream.toList()`：后者在 Android 上 **API 34**
+                // 才出现（Kotlin 的 kotlin.streams.toList 扩展被 Java 成员函数遮蔽，救不了），
+                // minSdk 26 的设备上走到这里就是 NoSuchMethodError。
+                // `.use{}` 顺手收口流：Files.list 是**目录流**，不 close 就是一次 fd 泄漏
+                // （原写法靠 GC 收尾，清理路径每次 finalize 都漏一个）。
+                val entries = Files.list(d).use { it.collect(Collectors.toList()) }
                 if (entries.isEmpty()) {
                     Files.deleteIfExists(d)
                     return true
@@ -120,7 +126,7 @@ class AtomicDeployer(
                     emptyIfEmpty(child)
                 }
                 // 子目录清理后重新检查当前目录是否变空
-                val remaining = Files.list(d).toList()
+                val remaining = Files.list(d).use { it.collect(Collectors.toList()) }
                 if (remaining.isEmpty()) {
                     Files.deleteIfExists(d)
                     return true

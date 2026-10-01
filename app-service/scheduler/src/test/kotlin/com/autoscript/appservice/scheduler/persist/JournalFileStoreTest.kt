@@ -142,6 +142,54 @@ class JournalFileStoreTest {
     }
 
     @Test
+    fun `回放按块读也不切坏行：超长行与多字节字符跨块边界`() = runBlocking {
+        // 单行 > 64KB 读取块（JournalFileStore.REPLAY_CHUNK_BYTES）：必然跨块，
+        // 且内容是多字节字符 —— 按块解 UTF-8 的写法会在这里切坏字符或截断行。
+        val huge = "参数据".repeat(20_000)
+        val log1 = newLog()
+        val a = log1.appendStart(
+            "p", "a.js", "n-huge", TriggerSource.TIMED, 5000, ScreenGuarantee.ANY,
+            null, args = listOf(huge), timeoutMillis = 1234,
+        )
+        log1.commit(a.runId, RunOutcome.Succeeded)
+        log1.close()
+
+        val log2 = newLog()          // 重启 → 流式 replay
+        val back = log2.all().first()
+        assertEquals(listOf(huge), back.args, "超长参数行必须完好回放")
+        assertEquals(1234L, back.timeoutMillis)
+        assertEquals(RunOutcome.Succeeded, back.outcome)
+        assertTrue(log2.isCommitted("n-huge"), "已提交 nonce 表也要跨块重建")
+        val next = log2.appendStart(
+            "p", "b.js", "n-next", TriggerSource.TIMED, 5000, ScreenGuarantee.ANY, null,
+        )
+        assertTrue(next.runId > a.runId, "流式 replay 后 runId 仍必须单调不复用")
+        log2.close()
+    }
+
+    @Test
+    fun `回放容得下空文件与只有半行的文件`() = runBlocking {
+        // ① 空文件：上一次实例只建了文件就退出（`newLog()` 第二次进同一目录就是这形态）。
+        //    回放走「有文件但一行完整行都没有」这条路 —— `SortedMap.lastKey()` 在空表上抛
+        //    NoSuchElementException（不是返回 null），曾经把这条常态直接炸成启动崩溃。
+        Files.createDirectories(dir)
+        Files.write(dir.resolve("intent-log.jsonl"), ByteArray(0))
+        val empty = newLog()
+        assertTrue(empty.uncommitted().isEmpty())
+        assertEquals(1L, start(empty, "n-empty").runId)
+        empty.close()
+
+        // ② 文件里只有半行（写中断截断，且没有更早的完整行）：半行丢弃，runId 从 1 起。
+        val d2 = dir.resolve("half-only")
+        Files.createDirectories(d2)
+        Files.write(d2.resolve("intent-log.jsonl"), """{"op":"start","runId":7""".toByteArray())
+        val half = PersistentIntentLog(JournalFileStore(d2))
+        assertTrue(half.uncommitted().isEmpty(), "半行必须丢弃")
+        assertEquals(1L, start(half, "n-half").runId, "没有完整 Start 行 → 下一个 runId 从 1 起")
+        half.close()
+    }
+
+    @Test
     fun `Crashed 终态携带 message 且计入已提交 nonce`() = runBlocking {
         val log = newLog()
         val a = start(log, "crash-msg")

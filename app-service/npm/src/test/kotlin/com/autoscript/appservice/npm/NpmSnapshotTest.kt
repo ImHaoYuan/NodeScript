@@ -1,5 +1,6 @@
 package com.autoscript.appservice.npm
 
+import javax.crypto.spec.SecretKeySpec
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
 import com.autoscript.domain.scripts.ScriptPaths
@@ -23,7 +24,7 @@ class NpmSnapshotTest {
 
     private val layout get() = NpmProjectLayout(ScriptPaths.projectsRoot(dir))
     private val ledgerDir get() = dir.resolve(".autojs")
-    private val key = LockSigner.KeyProvider { "snapshot-key-32bytesaaaaaaaaaaaa".toByteArray() }
+    private val key = LockSigner.KeyProvider { SecretKeySpec("snapshot-key-32bytesaaaaaaaaaaaa".toByteArray(), "HmacSHA256") }
     private val out get() = dir.resolve("snap.zip")
 
     private fun snapshot(key: LockSigner.KeyProvider = this.key) = NpmSnapshot(layout, ledgerDir, key)
@@ -131,7 +132,7 @@ class NpmSnapshotTest {
     fun `密钥切换则旧签失效，重导即恢复`() = runBlocking {
         seedProject()
         snapshot().export("p1", out)
-        val other = NpmSnapshot(layout, ledgerDir, LockSigner.KeyProvider { "rotated-key".toByteArray() })
+        val other = NpmSnapshot(layout, ledgerDir, LockSigner.KeyProvider { SecretKeySpec("rotated-key".toByteArray(), "HmacSHA256") })
         assertThrows(AutojsException::class.java) { other.verify("p1", out) }
         other.export("p1", out)
         other.verify("p1", out)

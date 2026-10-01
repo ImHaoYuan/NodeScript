@@ -16,6 +16,16 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
+    <!-- 通知（§9.4 dialogs prompt/choose 的通知通道 + §9.5 三态门禁）：
+         targetSdk 35 下**必须声明**才可能被授予 —— 不声明时 `areNotificationsEnabled()`
+         在 API 33+ 恒为 false，`SystemDialogOps` 每次都在 `requireNotificationsEnabled`
+         抛 ERR_PERMISSION_DENIED，且应用通知设置页里连开关都不给（用户无路可授）：
+         dialogs 的 prompt/choose 就成了永久不可用，而不是"用户没开"。声明 ≠ 可用：
+         门禁仍在 SPI 侧（NotificationContracts「未开则抛 ERR_PERMISSION_DENIED，不是回 false」），
+         授予路径 = 能力中心 → GrantPage.NOTIFICATIONS（ACTION_APP_NOTIFICATION_SETTINGS）。
+         低版本（<33）本权限自动授予，声明无副作用。 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <!-- 悬浮窗（§9.4）：普通通道 TYPE_APPLICATION_OVERLAY 需要本权限；
          可信通道 TYPE_ACCESSIBILITY_OVERLAY 随 a11y 服务授权获得，不需要它。
          两者都由能力中心三态门禁管（§9.5），声明权限 ≠ 直接可用。 -->
@@ -27,8 +37,17 @@
         tools:ignore="ProtectedPermissions" />
 
     <!-- P0 最小闭环宿主：精确闹钟/开机续排/保活 FGS 三件已接线（§8.6/§8.7） -->
+    <!--
+      allowBackup="false"（§11.2 T9）：本应用的本地状态**不是**可再生的用户数据，
+      而是信任锚与审计面 —— `files/.autojs/` 下有 lock.sig（「这份 lock 是本机签过的」）、
+      审批台账、安装 journal/history、意图日志。默认（allowBackup 缺省 = true）它们会进
+      Auto Backup / 设备迁移，落到**另一个设备上下文**里：签名在那台机器上验不过（密钥不同），
+      审批台账却会以「已批准」的姿态跟着走 —— 恢复出来的状态既不可信也不可解释。
+      代价如实说：换机不再自动带走过往的审批与历史，需要重装/重批（这是有意的，不是遗漏）。
+    -->
     <application
         android:name=".AppShellApplication"
+        android:allowBackup="false"
         android:label="AutoScript"
         android:supportsRtl="true">
 

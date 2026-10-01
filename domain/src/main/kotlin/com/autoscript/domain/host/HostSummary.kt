@@ -10,8 +10,8 @@ import com.autoscript.domain.permission.CapabilityState
  * 为什么接口住 `:domain` 而不是 `:ui` 或 `:app`：装配产物（壳、漏投账本）住在
  * `:app` 的 `AppShellApplication` 里，呈现层住 `:ui` —— 让 `:ui` import `:app`
  * 会成环（app→ui），让 `:app` import `:ui` 只为实现接口又会把 compose 拖回
- * `:app` 源码（与「UI 拆独立模块」决策相悖，且裸 kotlinc 旁路没有 androidx 坐标，
- * jvm-test 的 app 模块会直接编不过）。接口放中间的 `:domain`，两侧各只认它：
+ * `:app` 源码（与「UI 拆独立模块」决策相悖：`:app` 的价值就是零 compose 的装配层）。
+ * 接口放中间的 `:domain`，两侧各只认它：
  * `:app` 实现（`AppShellApplication : HostSummary`）、`:ui` 消费（`as? HostSummary`）。
  * 装配知识仍归 `:app` —— 本接口只回快照，不暴露壳/调度器本体。
  */
@@ -125,10 +125,32 @@ interface HostSummary {
  * @property degradedAlarmTaskIds 降级中的定时任务（`AlarmSchedulerProvider.degradedTasks` 的键，
  *   精确闹钟不可用时降 `setWindow` 的那些 —— §8.6 承诺在 UI 标注「可能偏差」）。
  *   非空是如实记账，不是错误。
+ * @property installSize 安装体积（§15 的 E1 处置「接受超支并在能力中心明示」；**不给默认值** ——
+ *   见 [InstallSize] 的 KDoc）。填 null 的快照是"没量到"，UI 据此显示「未量到」而不是 0。
  */
 data class CapabilityCenterSnapshot(
     val rows: List<CapabilityRow>,
     val degradedAlarmTaskIds: List<String>,
+    val installSize: InstallSize? = null,
+)
+
+/**
+ * 安装体积的实测值（§15：预算 ≤40MB release 已被实测推翻，2026-10-02 拍板选「接受 + 明示」）。
+ *
+ * **为什么是实测而不是文档里的 92MB**：92MB 是 node-slice 产物的**未压缩**三件套合计，
+ * 而用户装的是**压缩后**的 APK，两者不是同一个数。把预算数字抄进 UI 就是"呈现层说谎"——
+ * 与能力中心同一条诚实纪律（不读到的就不显示）。所以这里给的是宿主现场量的字节数。
+ *
+ * @property totalBytes 已安装 APK 文件总长（`applicationInfo.sourceDir` 的文件长度）。
+ * @property engineBytes 其中引擎两条 native 轨（libnode/libnoden/libc++_shared + libopencv）
+ *   的合计。分出来是因为**超支全在这一段**（图像面只占 6.6%），给用户一个可比较的数。
+ * @property engineFilesPresent 引擎 .so 真的在不在。**false 仍照报体积**：那正是
+ *   "装了个跑不了脚本的壳"的事实，隐去比显示更糟（真机可执行包由 node-slice 补，见 backlog B5）。
+ */
+data class InstallSize(
+    val totalBytes: Long,
+    val engineBytes: Long,
+    val engineFilesPresent: Boolean,
 )
 
 /**

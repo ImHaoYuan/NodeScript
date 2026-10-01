@@ -1,0 +1,32 @@
+---
+name: 缺陷报告
+about: 行为与设计契约不符，或构建 / 测试失败
+title: "[bug] "
+labels: bug
+---
+
+<!-- 先确认：这不是安全问题。安全问题走私密渠道（见 SECURITY.md，不要开公开 issue）：
+     https://github.com/Ventus-Pluviam/NodeScript/security/advisories/new -->
+
+## 现象
+
+<!-- 观察到了什么。越具体越好：报错原文、错误码（如 ERR_NOT_IMPLEMENTED）、失败用例名。 -->
+
+## 复现步骤
+
+1.
+
+## 期望行为
+
+<!-- 引契约条款更好：docs/design/ 对应分卷的 § 号 + 原文一行。 -->
+
+## 环境
+
+- 模块：<!-- 如 :app-service:npm -->
+- 分支 / 提交：
+- 真机问题：设备型号 + Android 版本
+- 构建问题：JDK / SDK / Node 版本
+
+## 证据
+
+<!-- 日志、`./gradlew` 输出、测试报告片段。贴之前删掉设备序列号与任何密钥。 -->

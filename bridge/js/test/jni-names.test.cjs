@@ -7,15 +7,16 @@
  * **声明** `external fun` 的那个类的名字，而不是注释里写、也不是历史上叫过的名字。
  * 这道门用三处独立事实互相钉：
  *
- * - 断言 A（声明类）：`platform/system/.../NativeImageAnalyzer.kt` 里**顶层**
- *   `class JniOps`（brace depth 0，不是嵌套类）的类体里有 10 个
+ * - 断言 A（声明类）：`platform/system/src/main/kotlin/com/autoscript/platform/system/images/JniOps.kt`
+ *   里**顶层** `class JniOps`（brace depth 0，不是嵌套类）的类体里有 10 个
  *   `external fun {decode,ingest,match,release,color,gray,crop,resize,rotate,feature}Native`，
- *   包名 `com.autoscript.platform.system`；
+ *   包名 `com.autoscript.platform.system.images`（2026-10-01 D3 把该类从 `NativeImageAnalyzer.kt`
+ *   的同包拆件、随之**包名加了一段 `images`**，符号名与 cc 同批改）；
  * - 断言 B（cc 符号）：`images_jni.cc` 的 `^Java_<包>_<类>_<方法>(` 十个的类名段
  *   必须全是 `JniOps`（2026-09-26 之前是 `NativeImageAnalyzer_`，与声明类对不上，
  *   本门抓到后已修；旧前缀出现即回潮）；
  * - 断言 C（改编期望）：按缺省规则算出期望符号
- *   `Java_com_autoscript_platform_system_JniOps_<m>`，十个必须**在场**——缺一个，
+ *   `Java_com_autoscript_platform_system_images_JniOps_<m>`，十个必须**在场**——缺一个，
  *   真机 `loadOrNull()` 就回 null，那条 images 缝全 NOT_IMPLEMENTED。
  *
  * 手边的 `node-runtime-build/out-opencv/libopencv.so` 是 gitignore 产物，不进门：
@@ -35,7 +36,7 @@ const ROOT = (() => {
   throw new Error('找不到仓库根')
 })()
 
-const KT_PATH = 'platform/system/src/main/kotlin/com/autoscript/platform/system/NativeImageAnalyzer.kt'
+const KT_PATH = 'platform/system/src/main/kotlin/com/autoscript/platform/system/images/JniOps.kt'
 const CC_PATH = 'bridge/image/src/main/cpp/images_jni.cc'
 const KT = fs.readFileSync(path.join(ROOT, KT_PATH), 'utf8')
 const CC = fs.readFileSync(path.join(ROOT, CC_PATH), 'utf8')
@@ -61,9 +62,9 @@ function topLevelClassBody(src, name) {
 
 const METHODS = ['decodeNative', 'ingestNative', 'matchNative', 'releaseNative', 'colorNative', 'grayNative', 'cropNative', 'resizeNative', 'rotateNative', 'featureNative']
 
-test('声明类：顶层 class JniOps 的类体里有 5 个 external fun（不是嵌套类）', () => {
+test('声明类：顶层 class JniOps 的类体里有 10 个 external fun（不是嵌套类）', () => {
   const pkg = (KT.match(/^package\s+([\w.]+)/m) || [])[1]
-  assert.strictEqual(pkg, 'com.autoscript.platform.system', `包名漂了: ${pkg}`)
+  assert.strictEqual(pkg, 'com.autoscript.platform.system.images', `包名漂了: ${pkg}`)
   const { body, depthAtMatch } = topLevelClassBody(KT, 'JniOps')
   assert.ok(body, '找不到 class JniOps——被改名/删了？')
   assert.strictEqual(depthAtMatch, 0, 'JniOps 被嵌进别的类里了——JNI 改编名会带上外部类（Class_Outer_Inner_…），cc 全得改')
@@ -76,19 +77,19 @@ test('cc 符号：十个 JNI 函数名的类名段全是 JniOps（旧 NativeImag
   assert.strictEqual(syms.length, 10, `cc 里只解析到 ${syms.length} 个 JNI 函数——images_jni.cc 结构漂了`)
   const pkgs = [...new Set(syms.map((m) => m[1]))]
   const classes = [...new Set(syms.map((m) => m[2]))]
-  assert.deepStrictEqual(pkgs, ['com_autoscript_platform_system'], `cc 包名段漂了: ${pkgs.join(', ')}`)
+  assert.deepStrictEqual(pkgs, ['com_autoscript_platform_system_images'], `cc 包名段漂了: ${pkgs.join(', ')}`)
   assert.deepStrictEqual(classes, ['JniOps'], `cc 类名段不是 JniOps（声明类是 JniOps，见断言 A）: ${classes.join(', ')}`)
 })
 
 test('改编期望：JVM 要找的十个 JniOps_ 符号必须全在 cc 里（缺一个，真机那条缝就全 NOT_IMPLEMENTED）', () => {
-  const expected = METHODS.map((m) => `Java_com_autoscript_platform_system_JniOps_${m}`)
+  const expected = METHODS.map((m) => `Java_com_autoscript_platform_system_images_JniOps_${m}`)
   const missing = expected.filter((s) => !CC.includes(s))
   assert.deepStrictEqual(missing, [], `cc 缺 JVM 要找的符号（声明类 JniOps，改编名 JniOps_）: ${missing.join(', ')}`)
 })
 
 test('CI 符号面断言同批：check-opencv-alignment.sh 查的必须也是 JniOps_（CI 侧漏改即红）', () => {
   const sh = fs.readFileSync(path.join(ROOT, 'node-runtime-build/scripts/check-opencv-alignment.sh'), 'utf8')
-  const prefixes = [...new Set([...sh.matchAll(/Java_com_autoscript_platform_system_([A-Za-z_]+?)_\$\{sym\}/g)].map((m) => m[1]))]
+  const prefixes = [...new Set([...sh.matchAll(/Java_com_autoscript_platform_system_images_([A-Za-z_]+?)_\$\{sym\}/g)].map((m) => m[1]))]
   assert.deepStrictEqual(prefixes, ['JniOps'], `check 脚本查的类名段不是 JniOps（CI 与本门分叉）: ${prefixes.join(', ') || '(没解析到)'}`)
   for (const m of METHODS) {
     assert.ok(sh.includes(m.replace(/Native$/, '')), `check 脚本的符号循环里缺 ${m}`)

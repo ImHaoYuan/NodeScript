@@ -19,9 +19,10 @@ import org.junit.jupiter.api.Test
  * `Settings.ACTION_*` 全是编译期字符串常量，JVM 单测引用不碰框架
  * （与 `BootEventsTest` 引 `Intent.ACTION_BOOT_COMPLETED` 同理）。
  * `specFor` 的 `sdkInt` **一律显式传值**：缺省参数在调用点求值 `Build.VERSION.SDK_INT`，
- * 那是运行期字段读——本机旁路（tools/jvm-test.sh）的 android.jar 只上编译期，
- * 缺省一求值就 `NoClassDefFoundError: android/os/Build$VERSION`。显式传参既绕开
- * 缺省求值，又是钉分支本来就该做的事（`VERSION_CODES.S/R` 是编译期常量，内联不碰框架）。
+ * 那是**运行期字段读** —— JVM 单测的 android.jar 是桩，这个字段读出来是桩值 0
+ * （只有 `VERSION_CODES.S/R` 这类编译期常量才会被内联）。走缺省就等于把每条断言
+ * 静默钉在「SDK 0」那一支上：31/33 的分支根本没被测到，还不报错 —— 比抛异常更难查。
+ * 显式传参既是钉分支本来就该做的事，也让本测试与桩字段无关。
  * 生产路径（`AndroidSettingsPageOpener`）继续用缺省读真 SDK——真机运行时才有该字段。
  */
 class AndroidPermissionGatesTest {

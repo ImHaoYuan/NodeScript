@@ -1,17 +1,20 @@
 package com.autoscript.bridge
 
 import com.autoscript.domain.bridge.BridgeResponse
+import com.autoscript.domain.core.ErrorCode
 import java.io.BufferedInputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.ServerSocket
 import java.net.Socket
 import java.nio.charset.StandardCharsets
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.launch
 
 /**
@@ -20,7 +23,10 @@ import kotlinx.coroutines.launch
  * 与 `bridge/js` 的 `SocketBootstrap` 双侧对齐：
  * - 一行一帧：请求 `{"t":"req",...}\n` → [BridgeRouter.dispatch] → 响应 `{"t":"ok"|"err",...}\n` 回写；
  * - 每行独立协程 dispatch，响应按 requestId 关联（允许乱序回包，客户端按 id 结算）；
- * - 非法帧（超 [maxFrameBytes] / 非法 JSON / 非请求信封）→ 记 [onProtocolError]，未知 id 无法回包则丢弃，
+ * - 在途帧数**有界**（[maxInFlight]）：到顶就压住读循环（背压），不无限起协程 ——
+ *   一帧一个协程没有上限时，对端狂发小帧就能把进程堆栈/内存吃光；
+ * - 非法帧（超 [maxFrameBytes] / 非法 JSON / 非请求信封）→ 记 [onProtocolError]；
+ *   **取得到信封 id 就回错误帧**（否则对端要干等到 TTL 才醒），取不到才丢弃；
  *   连接保持（除超限帧：直接关连接，防内存吞噬）；
  * - EOF 即正常结束；[close] 取消全部在途任务并关闭监听。
  *
@@ -32,8 +38,12 @@ class NewlineFrameServer(
     private val transport: JsonTransport = JsonTransport(),
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     private val maxFrameBytes: Int = DEFAULT_MAX_FRAME_BYTES,
+    private val maxInFlight: Int = DEFAULT_MAX_IN_FLIGHT,
     private val onProtocolError: (reason: String) -> Unit = {},
 ) : AutoCloseable {
+
+    /** 在途帧配额：读循环在起协程**之前**取，取不到就挂起 —— 背压，不是排队。 */
+    private val inFlight = Semaphore(maxInFlight)
 
     /** 监听循环：每个 accept 起一个连接任务。返回监听 Job（取消即停）。 */
     fun acceptLoop(serverSocket: ServerSocket): Job = scope.launch {
@@ -77,26 +87,56 @@ class NewlineFrameServer(
             } ?: break // EOF：对端正常关闭
             // 每帧独立 server-scope 协程（scope.launch 非连接 Job.launch）：
             // 慢请求不挡快请求，响应按 id 关联可乱序；EOF 关连接时在途 dispatch 不被连带取消。
+            // 配额在**起协程前**取：满了就挂起读循环（背压），在途帧数因此永远 ≤ maxInFlight。
+            inFlight.acquire()
             scope.launch {
-                val response: BridgeResponse = try {
-                    val req = transport.decodeRequest(frame)
-                    router.dispatch(req)
-                } catch (e: IllegalArgumentException) {
-                    onProtocolError("非法请求帧: ${e.message}")
-                    return@launch // 无有效 id，无法回包，丢弃
-                } catch (e: Exception) {
-                    onProtocolError("dispatch 异常: ${e.message}")
-                    return@launch
+                try {
+                    handleFrame(frame, output)
+                } finally {
+                    inFlight.release()
                 }
-                val line = transport.encodeResponse(response) + LF
-                synchronized(output) {
-                    try {
-                        output.write(line)
-                        output.flush()
-                    } catch (_: Exception) {
-                        // 写失败（对端已走）：丢弃，不抛
-                    }
-                }
+            }
+        }
+    }
+
+    /** 单帧：解码 → dispatch → 回包。**任何**解码/dispatch 失败都尽量回错误帧而不是丢弃。 */
+    private suspend fun handleFrame(frame: ByteArray, output: OutputStream) {
+        val request = try {
+            transport.decodeRequest(frame)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            onProtocolError("非法请求帧: ${e.message}")
+            // 帧坏了，但信封 id 常还在（缺字段/值型不对才抛）—— 取得到就回错误帧，
+            // 否则对端要等满 TTL 才醒，看起来像"服务端没反应"。取不到（非 JSON）只能丢。
+            replyOrDrop(transport.probeRequestId(frame)?.let { id ->
+                BridgeResponse.Err(id, ErrorCode.ERR_INVALID_PARAM.code, "非法请求帧: ${e.message}")
+            }, output)
+            return
+        }
+        val response = try {
+            router.dispatch(request)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // dispatch 自己已把 handler 异常折成 Err（含 ERR_TIMEOUT）；走到这里说明是
+            // 桥内部的漏网异常，仍按 Router 的老口径（ERR_INVALID_PARAM）回，不静默丢包。
+            onProtocolError("dispatch 异常: ${e.message}")
+            BridgeResponse.Err(request.id, ErrorCode.ERR_INVALID_PARAM.code, "dispatch 异常: ${e.message}")
+        }
+        replyOrDrop(response, output)
+    }
+
+    /** 写回一帧；`null` 或写失败（对端已走）即丢弃 —— 写不出去不该炸掉 server。 */
+    private fun replyOrDrop(response: BridgeResponse?, output: OutputStream) {
+        if (response == null) return
+        val line = transport.encodeResponse(response) + LF
+        synchronized(output) {
+            try {
+                output.write(line)
+                output.flush()
+            } catch (_: Exception) {
+                // 丢弃，不抛
             }
         }
     }
@@ -127,7 +167,16 @@ class NewlineFrameServer(
     }
 
     companion object {
-        const val DEFAULT_MAX_FRAME_BYTES: Int = 64 * 1024 * 1024
+        /**
+         * 单帧上限。§7.5 的口径是**控制面结构化小对象**（大二进制走 side-channel，不过 JSON），
+         * 8MB 已覆盖最肥的合法帧（整屏 a11y 树 dump）并留足余量；64MB 那个值是「没人想过」的
+         * 默认，一帧一协程无界时它等于「单帧能吃掉 64MB 堆」。两侧同值：`bridge/js` 的
+         * `DEFAULT_MAX_FRAME`（`bootstrap.ts`）必须一起改。
+         */
+        const val DEFAULT_MAX_FRAME_BYTES: Int = 8 * 1024 * 1024
+
+        /** 在途帧上限：超出的连接被背压压住读循环，而不是继续起协程。 */
+        const val DEFAULT_MAX_IN_FLIGHT: Int = 256
     }
 }
 

@@ -1,5 +1,6 @@
 package com.autoscript.appservice.npm
 
+import javax.crypto.spec.SecretKeySpec
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
 import com.autoscript.domain.scripts.ScriptPaths
@@ -14,8 +15,10 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -39,7 +42,7 @@ class InstallCoordinatorTest {
     private val I = "sha512-" + "a".repeat(24)
 
     /** T1 记录式执行体收到的 ScriptOp（每条用例各自断言，故是类级共享记录面）。 */
-    private val scriptOps = mutableListOf<InstallCoordinator.ScriptOp>()
+    private val scriptOps = mutableListOf<ScriptOp>()
 
     private val layout get() = NpmProjectLayout(ScriptPaths.projectsRoot(dir))
     private val journal get() = InstallJournal(dir.resolve(".autojs"))
@@ -48,10 +51,10 @@ class InstallCoordinatorTest {
 
     /** 假执行体：在暂存目录写包内容，模拟 reify 产物。 */
     private class FakeExecutor(
-        val block: suspend (InstallCoordinator.HeavyOp) -> Unit = {},
-    ) : InstallCoordinator.HeavyOpExecutor {
-        val calls = mutableListOf<InstallCoordinator.HeavyOp>()
-        override suspend fun execute(op: InstallCoordinator.HeavyOp, sink: InstallCoordinator.ProgressSink): String {
+        val block: suspend (HeavyOp) -> Unit = {},
+    ) : HeavyOpExecutor {
+        val calls = mutableListOf<HeavyOp>()
+        override suspend fun execute(op: HeavyOp, sink: ProgressSink): String {
             calls += op
             block(op)
             return "ok:${op.args.first()}"
@@ -63,9 +66,9 @@ class InstallCoordinatorTest {
      * `package.json` + `package-lock.json` 写回项目根（HostNodeExecutor 的真实行为）。
      * 只有承认这个前提，install 后的 lock 验签/快照导出才有对象可测。
      */
-    private fun harvesting(vararg deps: Pair<String, String>): InstallCoordinator.HeavyOpExecutor =
-        object : InstallCoordinator.HeavyOpExecutor {
-            override suspend fun execute(op: InstallCoordinator.HeavyOp, sink: InstallCoordinator.ProgressSink): String {
+    private fun harvesting(vararg deps: Pair<String, String>): HeavyOpExecutor =
+        object : HeavyOpExecutor {
+            override suspend fun execute(op: HeavyOp, sink: ProgressSink): String {
                 for ((name, version) in deps) {
                     val p = op.stageDir.resolve(name)
                     Files.createDirectories(p)
@@ -107,11 +110,11 @@ class InstallCoordinatorTest {
         return "sha512/${hex.substring(0, 2)}/${hex.substring(2, 4)}/${hex.substring(4)}"
     }
 
-    private fun snapshots(key: LockSigner.KeyProvider = LockSigner.KeyProvider { "test-app-key-32bytes-aaaaaaaaaaaa".toByteArray() }) =
+    private fun snapshots(key: LockSigner.KeyProvider = LockSigner.KeyProvider { SecretKeySpec("test-app-key-32bytes-aaaaaaaaaaaa".toByteArray(), "HmacSHA256") }) =
         NpmSnapshot(layout, dir.resolve(".autojs"), key)
 
     private fun coordinator(
-        executor: InstallCoordinator.HeavyOpExecutor = FakeExecutor(),
+        executor: HeavyOpExecutor = FakeExecutor(),
         free: Long = 10L * 1024 * 1024 * 1024,
         cache: CacheIndex = CacheIndex { false },
         ledger: ApprovalLedger = ApprovalLedger(),
@@ -126,7 +129,9 @@ class InstallCoordinatorTest {
          */
         registryOf: ((String) -> String?)? = null,
         /** T1 lifecycle 执行体（null = 缺省 [ScriptOpExecutor.Unavailable]，即"门禁过了也跑不起来"）。 */
-        script: InstallCoordinator.ScriptOpExecutor? = null,
+        script: ScriptOpExecutor? = null,
+        /** 时钟（尺寸缓存的 TTL 判定读它；不注入则走真实时间）。 */
+        now: () -> Long = { System.currentTimeMillis() },
     ) = InstallCoordinator(
         services = NpmServices(
             layout = layout,
@@ -141,9 +146,10 @@ class InstallCoordinatorTest {
             registryVerifier = registryVerifier,
         ),
         executor = executor,
+        now = now,
         freeSpaceProbe = { free },
         registryOf = registryOf,
-        scriptExecutor = script ?: InstallCoordinator.ScriptOpExecutor.Unavailable,
+        scriptExecutor = script ?: ScriptOpExecutor.Unavailable,
     )
 
     /**
@@ -269,6 +275,50 @@ class InstallCoordinatorTest {
 
         assertEquals(InstallJournal.State.FAIL, journal.all().lastOrNull()?.state)
         assertTrue(events.filterIsInstance<InstallEvent.Finished>().any { !it.success })
+    }
+
+    @Test
+    fun `句柄账与项目锁在终态即逐出（长跑不涨）`() = runBlocking {
+        val c = coordinator()
+        c.install("p1", listOf(PackageSpec("axios")))
+        c.install("p2", listOf(PackageSpec("axios")))
+        assertTrue(cHandles(c).isEmpty(), "安装结束的句柄仍留在账上：${cHandles(c).keys}")
+        assertTrue(cProjectLocks(c).isEmpty(), "项目锁用完没摘：${cProjectLocks(c).keys}")
+
+        // 失败路径同样收口（不留残迹才算收口）
+        val bad = coordinator(executor = FakeExecutor { throw IllegalStateException("boom") })
+        runCatching { bad.install("p1", listOf(PackageSpec("axios"))) }
+        assertTrue(cHandles(bad).isEmpty() && cProjectLocks(bad).isEmpty(), "失败路径留了残迹")
+
+        // 取消路径同样收口
+        val gate = CompletableDeferred<Unit>()
+        val cancelling = coordinator(executor = FakeExecutor { gate.await() })
+        val job = launch { runCatching { cancelling.install("p1", listOf(PackageSpec("axios"))) } }
+        withTimeout(5_000) { while (cHandles(cancelling).isEmpty()) yield() }
+        val tracked = cHandles(cancelling).values.single()
+        val hf = tracked.javaClass.getDeclaredField("handle").apply { isAccessible = true }
+        cancelling.cancel(hf.get(tracked) as InstallHandle)
+        gate.complete(Unit)
+        job.join()
+        assertTrue(cHandles(cancelling).isEmpty() && cProjectLocks(cancelling).isEmpty(), "取消路径留了残迹")
+    }
+
+    @Test
+    fun `同一项目的并发安装不重入（per-project 锁原子入表）`() = runBlocking {
+        val inflight = java.util.concurrent.atomic.AtomicInteger()
+        val peak = java.util.concurrent.atomic.AtomicInteger()
+        val exec = object : HeavyOpExecutor {
+            override suspend fun execute(op: HeavyOp, sink: ProgressSink): String {
+                val now = inflight.incrementAndGet()
+                peak.updateAndGet { maxOf(it, now) }
+                delay(50)
+                inflight.decrementAndGet()
+                return "ok"
+            }
+        }
+        val c = coordinator(executor = exec)
+        (1..6).map { launch { runCatching { c.install("p1", listOf(PackageSpec("axios"))) } } }.forEach { it.join() }
+        assertEquals(1, peak.get(), "同一项目出现并行安装：per-project 锁没生效")
     }
 
     // ═══ 审计史（§10.2 install-history） ═══
@@ -611,8 +661,8 @@ class InstallCoordinatorTest {
         val gate = CompletableDeferred<Unit>()
         val c = coordinator(
             ledger = led,
-            script = object : InstallCoordinator.ScriptOpExecutor {
-                override suspend fun execute(op: InstallCoordinator.ScriptOp, sink: InstallCoordinator.ProgressSink): String {
+            script = object : ScriptOpExecutor {
+                override suspend fun execute(op: ScriptOp, sink: ProgressSink): String {
                     gate.await()
                     return "ok"
                 }
@@ -637,8 +687,8 @@ class InstallCoordinatorTest {
         val gate = CompletableDeferred<Unit>()
         val c = coordinator(
             ledger = led,
-            script = object : InstallCoordinator.ScriptOpExecutor {
-                override suspend fun execute(op: InstallCoordinator.ScriptOp, sink: InstallCoordinator.ProgressSink): String {
+            script = object : ScriptOpExecutor {
+                override suspend fun execute(op: ScriptOp, sink: ProgressSink): String {
                     gate.await()
                     sink.emit(InstallEvent.Progress("p1", op.handleId, InstallEvent.Phase.REIFY))
                     return "ok"
@@ -685,7 +735,7 @@ class InstallCoordinatorTest {
     }
 
     @Test
-    fun `storage 遍历算尺寸`() = runBlocking {
+    fun `storage 冷缓存遍历算尺寸`() = runBlocking {
         val nm = layout.nodeModules("p1")
         Files.createDirectories(nm.resolve("axios"))
         Files.write(nm.resolve("axios/index.js"), ByteArray(100))
@@ -765,7 +815,7 @@ class InstallCoordinatorTest {
         val out = dir.resolve("out/snap2.zip")
         val snapper = snapshots()
         // 带锁签名器：install 成功后重签（harvest 写回了新 lock，旧签会让紧随的 ci 失败）
-        val signer = LockSigner(dir.resolve(".autojs"), LockSigner.KeyProvider { "test-app-key-32bytes-aaaaaaaaaaaa".toByteArray() })
+        val signer = LockSigner(dir.resolve(".autojs"), LockSigner.KeyProvider { SecretKeySpec("test-app-key-32bytes-aaaaaaaaaaaa".toByteArray(), "HmacSHA256") })
         val c = coordinator(executor = exec, snapshots = snapper, lockSigner = signer)
         c.install("p1", listOf(PackageSpec("axios", "1.7.0")))
         assertTrue(Files.exists(dir.resolve(".autojs/lock.sig")), "install 后必须重签")
@@ -1051,12 +1101,36 @@ class InstallCoordinatorTest {
         return f.get(c) as Map<String, Any>
     }
 
+    private fun cProjectLocks(c: InstallCoordinator): Map<String, Any> {
+        val f = InstallCoordinator::class.java.getDeclaredField("projectLocks")
+        f.isAccessible = true
+        return f.get(c) as Map<String, Any>
+    }
+
     // —— P1 T1 helpers ——
 
     private fun writeManifest(projectId: String, json: String) {
         val root = layout.projectRoot(projectId)
         Files.createDirectories(root)
         Files.write(root.resolve("package.json"), json.toByteArray())
+    }
+
+    @Test
+    fun `node_modules 尺寸走缓存：TTL 内不重算，过期才重测`() = runBlocking {
+        var clock = 1_000_000L
+        val c = coordinator(now = { clock })
+        val nm = layout.nodeModules("p1")
+        Files.createDirectories(nm)
+        Files.write(nm.resolve("a.bin"), ByteArray(1000))
+
+        assertEquals(1000L, c.storage()["p1"]!!.totalBytes)
+
+        // TTL 内目录变了也**不**重算：这正是省掉那次全量遍历的代价（陈旧上界 = TTL）
+        Files.write(nm.resolve("b.bin"), ByteArray(500))
+        assertEquals(1000L, c.storage()["p1"]!!.totalBytes, "TTL 内必须命中缓存，不再遍历")
+
+        clock += InstallCoordinator.SIZE_CACHE_TTL_MILLIS + 1
+        assertEquals(1500L, c.storage()["p1"]!!.totalBytes, "TTL 过期必须重测")
     }
 
     /** 走「未获批 → 自请入队 → 人工批准」完整路径，返回宿主重算出的内容哈希。 */
@@ -1068,10 +1142,10 @@ class InstallCoordinatorTest {
     }
 
     /** 记录式执行体（真引擎未接时它是 T1 的唯一可断言落点）。每次调用清一次记录面。 */
-    private fun recording(): InstallCoordinator.ScriptOpExecutor {
+    private fun recording(): ScriptOpExecutor {
         scriptOps.clear()
-        return object : InstallCoordinator.ScriptOpExecutor {
-            override suspend fun execute(op: InstallCoordinator.ScriptOp, sink: InstallCoordinator.ProgressSink): String {
+        return object : ScriptOpExecutor {
+            override suspend fun execute(op: ScriptOp, sink: ProgressSink): String {
                 scriptOps += op
                 return "ok:" + op.what
             }
@@ -1094,7 +1168,7 @@ class InstallCoordinatorTest {
 
     private fun runScriptOpCapture(
         projectId: String, manifest: String, name: String, args: List<String>,
-    ): InstallCoordinator.ScriptOp {
+    ): ScriptOp {
         writeManifest(projectId, manifest)
         val led = ApprovalLedger()
         approveRunScript(led, projectId, name)

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# 宿主机语义测试：把 bridge/image/src/main/cpp/imgnative.cpp（纯计算核、零 JNI）
-# 与**同 commit** 的 OpenCV 4.14.0 静态库链成一个 x86_64 可执行文件，跑断言。
+# 宿主机语义测试：把计算核（`bridge/image/src/main/cpp/imgnative*.cpp` 三个 TU ——
+# 纯计算核、零 JNI，2026-10-01 D7 按算子族拆开）与**同 commit** 的 OpenCV 4.14.0
+# 静态库链成一个 x86_64 可执行文件，跑断言。
 #
 # 为什么需要它：NDK `-fsyntax-only` 只证明编得过，不证明判读对。计算核里有几处
 # "译反了照样出结论"的判读（Vec4b 通道序、ROI 偏移回加、扫过 vs 扫过 0 像素）,
@@ -95,10 +96,16 @@ LIBS=(-L"$BUILD/lib" -L"$BUILD/3rdparty/lib"
 OUT=$(mktemp -d)
 trap 'rm -rf "$OUT"' EXIT
 failed=0
+# 计算核的三个 TU（拆分后**必须三个都编进来**：漏一个就是一组 undefined reference，
+# 链接期就红 —— 这里列全而不是 glob，漏加新 TU 时错误出现在这里，而不是变成一条
+# 「测试还是绿的、只是某个算子没编进去」的静默）。
+IMG_SRC=(bridge/image/src/main/cpp/imgnative.cpp
+         bridge/image/src/main/cpp/imgnative_match.cpp
+         bridge/image/src/main/cpp/imgnative_feature.cpp)
 for t in host_ingest_test host_color_test host_decode_norm_test host_match_test host_gray_test host_crop_test host_resize_test host_rotate_test host_feature_test; do
   printf '[cc] %s\n' "$t"
   g++ -std=c++17 -O2 -Wall -Wextra "${INC[@]}" -o "$OUT/$t" \
-    "$HERE/$t.cpp" bridge/image/src/main/cpp/imgnative.cpp "${LIBS[@]}"
+    "$HERE/$t.cpp" "${IMG_SRC[@]}" "${LIBS[@]}"
   printf '[run] %s\n' "$t"
   if ! "$OUT/$t"; then
     printf '[FAIL] %s\n' "$t" >&2

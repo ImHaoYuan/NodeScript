@@ -27,8 +27,8 @@ class NpmBridgeHandlerTest {
     private val layout get() = NpmProjectLayout(ScriptPaths.projectsRoot(dir))
     private val installed = mutableListOf<Pair<String, List<PackageSpec>>>()
 
-    private class RecordingExecutor(val sink: (String, List<PackageSpec>) -> Unit) : InstallCoordinator.HeavyOpExecutor {
-        override suspend fun execute(op: InstallCoordinator.HeavyOp, sink2: InstallCoordinator.ProgressSink): String {
+    private class RecordingExecutor(val sink: (String, List<PackageSpec>) -> Unit) : HeavyOpExecutor {
+        override suspend fun execute(op: HeavyOp, sink2: ProgressSink): String {
             sink(op.projectId, op.args.drop(1).map { s -> parseLikeHandler(s) })
             return "ok"
         }
@@ -41,7 +41,7 @@ class NpmBridgeHandlerTest {
         }
     }
 
-    private fun handler(executor: InstallCoordinator.HeavyOpExecutor = RecordingExecutor { p, s -> installed += p to s }) = NpmBridgeHandler(
+    private fun handler(executor: HeavyOpExecutor = RecordingExecutor { p, s -> installed += p to s }) = NpmBridgeHandler(
         InstallCoordinator(
             services = NpmServices(
                 layout = layout,

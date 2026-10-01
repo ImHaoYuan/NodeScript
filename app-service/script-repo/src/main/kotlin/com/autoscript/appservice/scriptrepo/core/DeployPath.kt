@@ -58,8 +58,13 @@ object DeployPath {
     }
 }
 
-/** URL 编码关键字段，避免行式 journal 被分隔符污染。 */
+/** URL 编码关键字段，避免行式 journal 被分隔符污染。
+ *
+ * 用 `(String, String)` 重载而不是 `(String, Charset)`：后者在 Android 上 **API 33** 才出现
+ * （minSdk 26 走到即 NoSuchMethodError）；字符集名写 `StandardCharsets.UTF_8.name()` ——
+ * 与 Charset 重载语义逐字相同（都是 UTF-8 百分号编码，空格编成 `+`）。
+ * JDK 侧这个重载自 Java 10 起 deprecated，Android 侧不是；为 minSdk 26 只能选它。 */
 internal object FieldCodec {
-    fun enc(s: String): String = java.net.URLEncoder.encode(s, StandardCharsets.UTF_8)
-    fun dec(s: String): String = java.net.URLDecoder.decode(s, StandardCharsets.UTF_8)
+    fun enc(s: String): String = java.net.URLEncoder.encode(s, StandardCharsets.UTF_8.name())
+    fun dec(s: String): String = java.net.URLDecoder.decode(s, StandardCharsets.UTF_8.name())
 }

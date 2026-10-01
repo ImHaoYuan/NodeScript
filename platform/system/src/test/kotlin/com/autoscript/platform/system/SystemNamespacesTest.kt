@@ -6,6 +6,14 @@ import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
 import com.autoscript.domain.bridge.HandleRef
+import com.autoscript.platform.system.app.AppLauncher
+import com.autoscript.platform.system.device.DeviceInfoProvider
+import com.autoscript.platform.system.device.DeviceProfile
+import com.autoscript.platform.system.floatingWindow.FloatingWindowHost
+import com.autoscript.platform.system.floatingWindow.FloatingWindowSpec
+import com.autoscript.platform.system.shell.ShellExecutor
+import com.autoscript.platform.system.shell.ShellMode
+import com.autoscript.platform.system.shell.ShellResult
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -19,7 +27,7 @@ import org.junit.jupiter.api.Test
  * capabilities 的 DialogsNamespaceHandlerTest）。
  *
  * 判据与 [CapabilityNamespacesTest] 同一套口径，另加三件本组特有的事：
- * 1. **载荷形状与 JS facade 逐字对齐**：`{code,stdout,stderr}`、`{value,confirmed}`、
+ * 1. **载荷形状与 JS facade 逐字对齐**：`{code,stdout,stderr,truncated}`、`{value,confirmed}`、
  *    裸下标（取消 -1）、`{refId,generation}` —— 桥只透传，改一侧另一侧就收 undefined；
  * 2. **错误分类不被抹平**：SPI 抛的 `AutojsException` 原码透传（ERR_PERMISSION_DENIED /
  *    ERR_STALE_HANDLE），参数非法一律 ERR_INVALID_PARAM，未知方法 ERR_NOT_IMPLEMENTED；
@@ -75,7 +83,10 @@ class SystemNamespacesTest {
     // ── shell ───────────────────────────────────────────────────────
 
     @Test
-    fun `shell exec 三字段载荷与超时透传`() = runBlocking {
+    fun `shell exec 四字段载荷与超时透传`() = runBlocking {
+        // 第四个字段 truncated 是 2026-10-02 新增（backlog A2b 的拍板口径）：
+        // 形状与 `extras.ts` 的 `ShellResult` 逐字对齐，这里同时钉住"缺省 false"
+        // 与"实现报 true 时原样透出"—— 桥只透传，不自己判截断。
         val fake = FakeShell(result = { ShellResult(0, "out", "err") })
         val h = SystemNamespaces.shell(fake, defaultTimeoutMillis = 12_345)
         val resp = h.handle(BridgeRequest(1, "shell", "exec", """{"cmd":"id","timeout":9000}""", 5_000))
@@ -84,6 +95,7 @@ class SystemNamespacesTest {
         assertEquals("0", (o["code"] as DomainJson.Value.N).raw)
         assertEquals("out", (o["stdout"] as DomainJson.Value.S).v)
         assertEquals("err", (o["stderr"] as DomainJson.Value.S).v)
+        assertEquals(false, (o["truncated"] as DomainJson.Value.B).v)
         assertEquals(9_000L, fake.timeout)
         // 缺 timeout → 走 handler 默认（不是 0、不是无限）
         h.handle(BridgeRequest(2, "shell", "exec", """{"cmd":"id"}""", 5_000))
@@ -105,6 +117,19 @@ class SystemNamespacesTest {
             h.handle(BridgeRequest(3, "shell", "exec", """{"cmd":"id","mode":"Rootx"}""", 5_000)),
         )
         assertEquals(ErrorCode.ERR_INVALID_PARAM.code, bad.errorCode)
+        Unit
+    }
+
+    @Test
+    fun `shell 截断标志原样透出：截断不改退出码也不折成错误`() = runBlocking {
+        val fake = FakeShell(result = { ShellResult(0, "big", null, truncated = true) })
+        val resp = SystemNamespaces.shell(fake)
+            .handle(BridgeRequest(1, "shell", "exec", """{"cmd":"cat big"}""", 5_000))
+        val ok = assertInstanceOf(BridgeResponse.Ok::class.java, resp)
+        val o = DomainJson.decodeObject(ok.payload!!)
+        // 仍走 Ok（不是 Err）：截断是捕获策略，命令本身跑成功了。
+        assertEquals("0", (o["code"] as DomainJson.Value.N).raw)
+        assertEquals(true, (o["truncated"] as DomainJson.Value.B).v)
         Unit
     }
 

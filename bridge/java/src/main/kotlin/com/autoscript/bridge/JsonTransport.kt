@@ -15,7 +15,7 @@ import java.nio.charset.StandardCharsets
  * "side" 为传输层扩展：大二进制（Bitmap/像素）走 §7.4 side-channel 时携带句柄引用；
  * 领域类型 BridgeRequest/BridgeResponse 不感知（payload 内自持，由实现方约定）。
  *
- * 编解码走 `:domain` [DomainJson]（审查步骤 3 合一后的仓内唯一 codec —— 原 TinyJson 已删）；
+ * 编解码走 `:domain` [DomainJson]（仓内唯一 codec —— 原 TinyJson 已删）；
  * [decodeFlat] 的 allowed 白名单是**传输层协议纪律**（未知字段如实拒绝，防乱码注入），
  * 不是 codec 的一部分。
  */
@@ -74,6 +74,19 @@ class JsonTransport : BridgeTransport {
             "err" -> BridgeResponse.Err(id, str(m, "code"), detailOrNull(m))
             else -> throw IllegalArgumentException("未知响应类型")
         }
+    }
+
+    /**
+     * 尽力取 id（不抛）：[decodeRequest] 抛错后仍能回错误帧的唯一依据。
+     *
+     * 走一遍 `decodeObject` 但不做白名单与信封校验 —— 正是这些校验在报错，
+     * 此时「id 还读不读得到」才是问题。读不到（非 JSON / 无 id / id 非数字）回 null。
+     */
+    override fun probeRequestId(bytes: ByteArray): Long? = try {
+        val id = DomainJson.decodeObject(String(bytes, StandardCharsets.UTF_8))["id"]
+        (id as? DomainJson.Value.N)?.raw?.toLongOrNull()
+    } catch (_: Exception) {
+        null
     }
 
     /** payload 契约：字符串（JSON 编码参数）或 null。非字符串值显式拒绝 —— 静默丢 null 会让 handler 收到无参请求。 */

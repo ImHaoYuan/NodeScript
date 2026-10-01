@@ -2,6 +2,7 @@ package com.autoscript.ui
 
 import com.autoscript.domain.host.CapabilityCenterSnapshot
 import com.autoscript.domain.host.CapabilityRow
+import com.autoscript.domain.host.InstallSize
 import com.autoscript.domain.permission.Capability
 import com.autoscript.domain.permission.CapabilityState
 
@@ -21,13 +22,16 @@ import com.autoscript.domain.permission.CapabilityState
  * - 「去授权」按钮的显隐取 [CapabilityRow.canRequestGrant]（`:domain`
  *   `CapabilityLifecycle` 的判据）—— 呈现层不自己写 `state != GRANTED`，那是第二套判据；
  * - 降级中的定时任务**单列一段**（§8.6 承诺「可能偏差」要在 UI 上标注）：它们不是
- *   权限问题，塞进能力行里会让人找不到。
+ *   权限问题，塞进能力行里会让人找不到；
+ * - 安装体积**单列一段**（§15 的 E1 处置：2026-10-02 拍板「接受超支并在能力中心明示」）：
+ *   超支是既成事实，不披露等于让用户装完才发现。没量到就说没量到，不显示 0。
  */
 data class CapabilityCenterState(
     val loaded: Boolean,
     val loadError: String?,
     val rows: List<CapabilityRowState>,
     val degradedAlarmTaskIds: List<String>,
+    val installSize: InstallSizeState?,
 ) {
     companion object {
         /** 首帧哨兵：没读到过（**不是**"读成功但为空"，见类 KDoc）。 */
@@ -36,6 +40,7 @@ data class CapabilityCenterState(
             loadError = null,
             rows = emptyList(),
             degradedAlarmTaskIds = emptyList(),
+            installSize = null,
         )
 
         /** 读取成功。 */
@@ -44,6 +49,8 @@ data class CapabilityCenterState(
             loadError = null,
             rows = snapshot.rows.map { CapabilityRowState.of(it) },
             degradedAlarmTaskIds = snapshot.degradedAlarmTaskIds,
+            // null（没量到）原样传下去：UI 那一条「未量到」与「量到了 0」必须长得不一样。
+            installSize = snapshot.installSize?.let { InstallSizeState.of(it) },
         )
 
         /**
@@ -55,6 +62,7 @@ data class CapabilityCenterState(
             loadError = t.message ?: t.javaClass.simpleName,
             rows = emptyList(),
             degradedAlarmTaskIds = emptyList(),
+            installSize = null,
         )
     }
 }
@@ -108,5 +116,41 @@ data class CapabilityRowState(
             CapabilityState.DEGRADED -> "降级可用"
             CapabilityState.DENIED -> "被拒绝"
         }
+    }
+}
+
+/**
+ * 安装体积的呈现态（§15 的 E1 处置；文案与换算都在这里，让「说成多少 MB」也可测）。
+ *
+ * **为什么自己算 MB 而不在装配层算好**：换算口径（MiB vs MB、按什么除）是个会被漂移的
+ * 决定，放进纯 JVM 呈现态才能被 `CapabilityCenterStateTest` 钉住。
+ *
+ * @property engineFilesPresent 引擎 .so 真的在不在。false 时 UI **如实说「引擎未随包」**——
+ *   那正是「装了个跑不了脚本的壳」的事实，隐去体积会让人以为装全了。
+ */
+data class InstallSizeState(
+    val totalBytes: Long,
+    val engineBytes: Long,
+    val engineFilesPresent: Boolean,
+) {
+    /** 给用户看的那句话。三件事都要在：总数、其中引擎多少、为什么这么大。 */
+    fun text(): String {
+        val total = "${mib(totalBytes)} MiB"
+        if (!engineFilesPresent) {
+            return "安装体积 $total（引擎未随包，脚本暂时跑不了；完整说明见 docs/design/13-roadmap-budget.md）"
+        }
+        val rest = (totalBytes - engineBytes).coerceAtLeast(0L)
+        return "安装体积 $total（其中引擎 ${mib(engineBytes)} MiB，其余 ${mib(rest)} MiB）"
+    }
+
+    companion object {
+        fun of(size: InstallSize) = InstallSizeState(
+            totalBytes = size.totalBytes,
+            engineBytes = size.engineBytes,
+            engineFilesPresent = size.engineFilesPresent,
+        )
+
+        /** MiB（1 MiB = 1024² B），一位小数。**不是** MB —— 两套口径混用正是"体积对不上"的来源。 */
+        fun mib(bytes: Long): String = String.format("%.1f", bytes / (1024.0 * 1024.0))
     }
 }

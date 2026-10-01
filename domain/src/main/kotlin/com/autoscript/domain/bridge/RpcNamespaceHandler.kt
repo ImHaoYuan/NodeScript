@@ -4,7 +4,7 @@ import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
 
 /**
- * RPC 处理器基类（审查步骤 4）：**错误映射收口在这里**，子类只写业务分发。
+ * RPC 处理器基类：**错误映射收口在这里**，子类只写业务分发。
  *
  * 折叠规则与全仓 60 处手写 catch 逐字同语义，只收两类：
  * - [AutojsException] → `ERR`（SPI 原码透传，`e.error.code`）；
@@ -15,7 +15,7 @@ import com.autoscript.domain.core.ErrorCode
  * 未知方法不在这里兜：`dispatch` 的 `else` 分支按各自命名空间回
  * `ERR_NOT_IMPLEMENTED`（消息带方法名，§7.5 不猜别名）。
  *
- * [methods] 挂点在 [NamespaceHandler]（步骤 7）：本基类不再重复声明，子类申报。
+ * [methods] 挂点在 [NamespaceHandler]：本基类不再重复声明，子类申报。
  */
 abstract class RpcNamespaceHandler : NamespaceHandler {
 

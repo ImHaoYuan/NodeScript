@@ -11,13 +11,13 @@ import com.autoscript.platform.capabilities.a11y.AndroidUiTree
 import com.autoscript.platform.capabilities.CapabilityNamespaces
 import com.autoscript.platform.capabilities.screen.ScreenshotSource
 import com.autoscript.platform.capabilities.device.SystemDialogOps
-import com.autoscript.platform.system.AndroidWakeLockOps
-import com.autoscript.platform.system.JniOps
-import com.autoscript.platform.system.NativeImageAnalyzer
+import com.autoscript.platform.system.power.AndroidWakeLockOps
+import com.autoscript.platform.system.images.JniOps
+import com.autoscript.platform.system.images.NativeImageAnalyzer
 import com.autoscript.platform.system.SystemNamespaces
-import com.autoscript.platform.system.PowerManagerNamespaceHandler
+import com.autoscript.platform.system.power.PowerManagerNamespaceHandler
 import com.autoscript.platform.system.SystemSpis
-import com.autoscript.platform.system.WakeLockLedger
+import com.autoscript.platform.system.power.WakeLockLedger
 import com.autoscript.platform.capabilities.a11y.A11yEventRing
 import com.autoscript.platform.capabilities.a11y.InMemoryUiTree
 import com.autoscript.platform.capabilities.a11y.SystemA11yBridge
@@ -144,7 +144,7 @@ object PlatformWiring {
      * 单测可传 null/替身绕过 native —— 同一函数真假可注入，不绑死构造。
      */
     /**
-     * §8.7 唤醒锁账本的生产构造缝（审查步骤 6 起账本类住 `:platform:system`）。
+     * §8.7 唤醒锁账本的生产构造缝（账本类住 `:platform:system`）。
      * 根包 `AppShellApplication` 经此拿账本 —— 它不 import 任何
      * `com.autoscript.platform..`（ArchitectureTest「平台实现只许装配包碰」看住）。
      */

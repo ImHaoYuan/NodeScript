@@ -38,11 +38,21 @@ export const dialogs = {
   },
 }
 
-/** shell 执行结果（对齐 Pro v9 exec 形态）。 */
+/**
+ * shell 执行结果（对齐 Pro v9 exec 形态）。
+ *
+ * `truncated`：宿主侧捕获有上限（**每条流 1 MiB**，2026-10-02 口径，见
+ * `docs/design-decisions.md` 第 21 项）—— 超出即静默截断：`code` 仍是子进程的**真实**
+ * 退出码、`isSuccess` 语义不变（截断是捕获策略，不是命令失败），但 `stdout`/`stderr`
+ * 是截断后的内容（末尾另有 `[autoscript] 输出超过 …已截断` 的说明行给人看），
+ * 本字段为 `true`。**要完整输出就自己分页/落盘**（`head`/`tail`/重定向到文件再读），
+ * 别指望 `cat` 一个大文件。
+ */
 export interface ShellResult {
   readonly code: number
   readonly stdout: string | null
   readonly stderr: string | null
+  readonly truncated: boolean
 }
 
 export const shell = {

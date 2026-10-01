@@ -32,8 +32,11 @@ function installMockExtras() {
     switch (`${ns}.${method}`) {
       case 'dialogs.prompt': return ok(JSON.stringify({ value: '张三', confirmed: true }))
       case 'dialogs.choose': return ok('2')
+      case 'shell.shell': return ok(JSON.stringify({ code: 0, stdout: 'ok\n', stderr: null, truncated: false }))
       case 'shell.exec':
-      case 'shell.shell': return ok(JSON.stringify({ code: 0, stdout: 'ok\n', stderr: null }))
+        // 命令在 payload 里（wire 方法永远是 shell.exec）：`cat big` 这条演"宿主截断了"。
+        if (p && p.cmd === 'cat big') return ok(JSON.stringify({ code: 0, stdout: 'x', stderr: null, truncated: true }))
+        return ok(JSON.stringify({ code: 0, stdout: 'ok\n', stderr: null, truncated: false }))
       case 'device.model': return ok(JSON.stringify('Pixel 8'))
       case 'device.sdkInt': return ok('34')
       case 'app.launch': return ok('true')
@@ -65,11 +68,20 @@ test('dialogs.choose：裸索引直出，取消即 -1（不套 null）', async (
   assert.deepEqual(lastCall().p, { title: '选一个', options: ['a', 'b', 'c'], mode: 'auto' })
 })
 
-test('shell.exec：三字段原样回；stdout 为 null 表示该流没产出（≠ 空串）', async () => {
+test('shell.exec：四字段原样回；stdout 为 null 表示该流没产出（≠ 空串）', async () => {
   installMockExtras()
   const r = await auto.shell.exec('pm list packages')
-  assert.deepEqual(r, { code: 0, stdout: 'ok\n', stderr: null })
+  assert.deepEqual(r, { code: 0, stdout: 'ok\n', stderr: null, truncated: false })
   assert.equal(lastCall().p.cmd, 'pm list packages')
+})
+
+test('shell.exec：truncated 标志原样透出（宿主截断 ≠ 命令失败）', async () => {
+  installMockExtras()
+  // mock 里 `cat big` 这条回 truncated:true —— facade 只透传，不自己重算
+  // （重算要拿 1 MiB 去量字符串，那是宿主侧的账，JS 侧没有第二份上限）。
+  const r = await auto.shell.exec('cat big')
+  assert.equal(r.truncated, true)
+  assert.equal(r.code, 0, '截断是捕获策略，退出码仍是子进程的真实值')
 })
 
 test('shell.shell 是 exec 的别名（同一 wire 方法）', async () => {

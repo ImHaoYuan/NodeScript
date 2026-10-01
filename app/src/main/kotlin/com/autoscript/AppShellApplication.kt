@@ -3,12 +3,14 @@ package com.autoscript
 import android.app.Application
 import android.os.Process
 import android.util.Log
+import com.autoscript.appservice.npm.AssetTreeCliSource
+import com.autoscript.appservice.npm.NpmCliDeployer
 import com.autoscript.domain.host.CapabilityCenterSnapshot
+import com.autoscript.domain.host.ConsoleSnapshot
 import com.autoscript.domain.host.HostSummary
+import com.autoscript.domain.host.ShellSummary
 import com.autoscript.domain.host.TaskCenterSnapshot
 import com.autoscript.domain.host.TaskRegistration
-import com.autoscript.domain.host.ConsoleSnapshot
-import com.autoscript.domain.host.ShellSummary
 import com.autoscript.domain.permission.Capability
 import com.autoscript.domain.scripts.ScriptPaths
 import com.autoscript.engine.nodeprocess.NodeEngineConfig
@@ -25,10 +27,12 @@ import com.autoscript.shell.AndroidPermissionGates
 import com.autoscript.shell.AndroidScreenGate
 import com.autoscript.shell.AppShell
 import com.autoscript.shell.AppShellKit
+import com.autoscript.shell.AssembledShell
 import com.autoscript.shell.AutoScriptForegroundService
 import com.autoscript.shell.BootRecovery
 import com.autoscript.shell.BridgeSocketListener
 import com.autoscript.shell.CapabilityCenterRead
+import com.autoscript.shell.InstallSizeRead
 import com.autoscript.shell.ForegroundHost
 import com.autoscript.shell.ForegroundKeeper
 import com.autoscript.shell.PlatformWiring
@@ -36,9 +40,16 @@ import com.autoscript.shell.RecoverySnapshot
 import com.autoscript.shell.SchedulerAlarmRoute
 import com.autoscript.shell.ScreenGateAndroid
 import com.autoscript.shell.ScreenInteractive
-import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.launch
+import com.autoscript.shell.launchGuaranteed
+import java.io.File
 import java.nio.file.Path
+import java.nio.file.Paths
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 /**
  * 启动装配（docs §4.1 Composition Root，手写 DI，不用 Hilt）。
@@ -56,9 +67,9 @@ import java.nio.file.Path
  * 3. **重建/恢复**：接到广播时 application 已 attach，就地走 2 的路线，幂等由
  *    scheduler 的 runNonce 承担（同一个 runNonce 重复投递不会双跑）。
  *
- * §8.7 的保活与电源**已接线**（2026-09-23）：`AndroidWakeLockOps` 取真 `PARTIAL_WAKE_LOCK`、
- * `WakeLockLedger`（2026-09-30 审查步骤 6 起住 `:platform:system`，经
- * `PlatformWiring.wakeLockLedger` 构造）做 token 引用计数与超时自动释放、[ForegroundKeeper]
+ * §8.7 的保活与电源**已接线**：`AndroidWakeLockOps` 取真 `PARTIAL_WAKE_LOCK`、
+ * `WakeLockLedger`（住 `:platform:system`，经 `PlatformWiring.wakeLockLedger` 构造）
+ * 做 token 引用计数与超时自动释放、[ForegroundKeeper]
  * 管 specialUse FGS 的起停与续期。屏幕门禁的持锁判定取 [ForegroundKeeper.lockHeld]
  * （= 账本 `isHeld`，账本与系统两侧都真）——
  * 于是熄屏 + `SCREEN_ON` 的任务要么真有锁放行、要么**如实拒绝**，没有第三条路
@@ -78,12 +89,28 @@ class AppShellApplication : Application(), HostSummary {
     @Volatile
     private var shell: AppShell? = null
 
-    /** 自装配产物的持久句柄（关壳时要成对释放；见 [AppShellKit.AssembledShell]）。 */
+    /** 自装配产物的持久句柄（关壳时要成对释放；见 [AssembledShell]）。 */
     @Volatile
-    private var assembled: AppShellKit.AssembledShell? = null
+    private var assembled: AssembledShell? = null
 
     /** 闹钟回投缝（[AlarmDispatch]）：装配前记账、装配后投递。 */
     private val alarmDispatch = AlarmDispatch()
+
+    /**
+     * 本类自己的协程域（进程级后台活：自装配 / 开机恢复 / 闹钟回投）。
+     *
+     * 为什么不是 `GlobalScope`：它挂在进程级 Job 上，**没有「谁负责停」** ——
+     * 装配或恢复跑到一半被要求收口时，只能干等一个谁也取消不了的协程。
+     * 这里用 [SupervisorJob]（一个后台活抛错不牵连其余）+ [Dispatchers.IO]
+     * （三件都是文件 IO：读 replay 日志、建目录、写意图日志），
+     * 在 [onTerminate] 里 cancel —— 与 `AppShellKit.ShellScope` 同一条纪律
+     * （壳的看门狗轮转住壳的域，进程的后台活住本类的域），只是生命周期长一档。
+     *
+     * 诚实边界：真机 `onTerminate` 不会被调用（见其 KDoc），所以这条 cancel
+     * 也只在测试/模拟器进程里真正生效；它买到的是「有着落」而不是「保证被调」。
+     * 需要**回执**的后台活走 [launchGuaranteed]（域已取消时协程体不会跑）。
+     */
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO + CoroutineName("app-shell"))
 
     /** 开机恢复（§8.5）：同壳幂等 + 失败记账 + 快照供能力中心读（见 [recoverySnapshot]）。 */
     private val bootRecovery = BootRecovery()
@@ -129,8 +156,7 @@ class AppShellApplication : Application(), HostSummary {
         // 而门禁在装配期就被交给 dispatcher —— 装完再起会让"装配完成到保活生效"之间
         // 出现一个窗口，期间 SCREEN_ON 任务被如实拒绝（不是错，但没必要让用户撞上）。
         foregroundKeeper()
-        @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
-        GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+        appScope.launch {
             installWithFiles(filesDir.toPath(), cacheDir.toPath())
         }
     }
@@ -180,7 +206,9 @@ class AppShellApplication : Application(), HostSummary {
             // §19 Kotlin spawn 生产装配：jniLibs 交付位的宿主（命名随打包管线，缺位预检点名 ——
             // 这一行就是接线点）。socket 名 = 桥监听**绑定成功才注入**（离线降级见上）；
             // addon 仍 null = 不预载（脚本照跑，桥调用点如实 ERR_ENGINE_STOPPED，不悬挂）。
-            val nativeDir = Path.of(applicationInfo.nativeLibraryDir)
+            // `Paths.get` 而不是 `Path.of`：后者在 Android 上 since=34（`api-versions.xml` 实查），
+            // minSdk 26 下 lint 的 NewApi 会红 —— 全仓 main 源已统一回 `Paths.get`（since=26）。
+            val nativeDir = Paths.get(applicationInfo.nativeLibraryDir)
             val built = AppShellKit.assemble(
                 filesDir = filesDir,
                 cacheDir = cacheDir,
@@ -234,6 +262,18 @@ class AppShellApplication : Application(), HostSummary {
                 } catch (_: Exception) {
                     null
                 },
+                // vendored npm CLI 素材（§10.2 调用链首段）：源 = `assets/npm/**`，
+                // 键形状 `npm/<rel>`（随包任务 prepareNpmCliAssets 产出）。本类只递
+                // Android 侧的资产读口，**落位与执行体注入都在 AppShellKit**（源在不在、
+                // 锚齐没齐、有没有 Node 宿主，一处判完；诊断原文见 built.npmCliFailure）。
+                npmCliSource = AssetTreeCliSource(
+                    root = "npm",
+                    listDir = { dir -> appContext.assets.list(dir) },
+                    openFile = { path -> appContext.assets.open(path) },
+                ),
+                // npm 执行体的 Node 宿主 = 与脚本引擎同一个 noden（§19 交付位）：
+                // 设备上它就是 nativeLibraryDir/libnoden.so，ProcessBuilder 直接 exec。
+                npmNodeBin = nativeDir.resolve("libnoden.so").toString(),
                 // 能力面生产装配（§12.2）：shell 装配包的 PlatformWiring 拿
                 // SystemSpis + CapabilityNamespaces 拼成注入束 —— 本类（根包）只调它，
                 // 不 import 任何 com.autoscript.platform..（ArchitectureTest 看住）。
@@ -261,6 +301,15 @@ class AppShellApplication : Application(), HostSummary {
             bridge?.start(built.shell)
             install(built.shell)
             assembled = built
+            // npm 接线照实记账（§10.2）：就位与未就位都留一行 —— 未接线时真机上
+            // `auto.npm.install` 回 ERR_NOT_IMPLEMENTED，这行日志是排查的第一现场。
+            val npmFail = built.npmCliFailure
+            if (npmFail != null) {
+                Log.w(TAG, "npm 执行体未接线：$npmFail")
+            } else {
+                val fresh = (built.npmCli as? NpmCliDeployer.Outcome.Ready)?.deployedFresh
+                Log.i(TAG, "npm CLI 就位（filesDir/npm，本次${if (fresh == true) "新部署" else "幂等命中"}）")
+            }
             built.shell
         } catch (t: Throwable) {
             Log.e(TAG, "壳自装配失败：保持未就绪（闹钟走漏投记账，不伪造投递）", t)
@@ -295,8 +344,7 @@ class AppShellApplication : Application(), HostSummary {
      * 开机日志是排查"重启后任务没跑"的唯一现场，宁可在 logcat 里多一行。
      */
     private fun recover(shell: AppShell) {
-        @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
-        kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+        appScope.launch {
             val snapshot = try {
                 bootRecovery.recoverOnce(shell)
             } catch (t: Throwable) {
@@ -412,6 +460,12 @@ class AppShellApplication : Application(), HostSummary {
             facade = permissionCenter(),
             // 降级任务账（§8.6「可能偏差」）：键排序只为让 UI 上的顺序稳定，不改账本语义。
             degradedAlarmTaskIds = degradedAlarmTasks().keys.sorted(),
+            // §15 的 E1 处置（2026-10-02 拍板「接受超支并在能力中心明示」）：量已装 APK 与
+            // native 库目录，不抄文档里的 ≈92MB —— 那是未压缩三件套，与用户装的不是同一个数。
+            installSize = InstallSizeRead.measure(
+                apkFile = File(applicationInfo.sourceDir),
+                nativeLibDir = File(applicationInfo.nativeLibraryDir),
+            ),
         )
 
     /**
@@ -430,7 +484,7 @@ class AppShellApplication : Application(), HostSummary {
      * 文案里点名"壳未装配"（与首屏的 `ShellSummary.shellReady` 是同一条事实的两种说法：
      * 首屏答"装配到哪一步了"，这里答"所以任务读不到"）。
      *
-     * 读的是 [AppShellKit.AssembledShell.taskCenter]（壳自己持有的两个寄存器），
+     * 读的是 [AssembledShell.taskCenter]（壳自己持有的两个寄存器），
      * 不让 UI 另开一份 `FileTaskStore`/`FileRunArchive`（第二个实例 = 写侧两份视图）。
      * 恢复账取 [recoverySnapshot]（[BootRecovery] 的账）：它答的是"重启后那些遗留任务
      * 怎么样了"，与任务列表是两件事，分列在快照里。
@@ -447,7 +501,7 @@ class AppShellApplication : Application(), HostSummary {
      * **壳没装好就抛**（与 [taskCenter] 同一条纪律）：返回一份空快照长得像"暂无日志"，
      * 而事实是"根本没读到" —— 用户会以为脚本安静地什么都没输出。
      *
-     * 读的是 [AppShellKit.AssembledShell.consoleView]（壳持有的收集器与在途表），
+     * 读的是 [AssembledShell.consoleView]（壳持有的收集器与在途表），
      * 不让 UI 另开收集器（第二个收集器收不到桥上的行）。
      */
     override suspend fun console(sinceSeq: Long, maxLines: Int): ConsoleSnapshot {
@@ -481,7 +535,7 @@ class AppShellApplication : Application(), HostSummary {
 
     /**
      * 立即执行（[HostSummary] 的生产实现，§8.6 操作面「立即执行」，`USER_CLICK`）。
-     * 壳没装好就抛；任务不存在/调度已收口由 [AppShellKit.AssembledShell.runTaskNow]
+     * 壳没装好就抛；任务不存在/调度已收口由 [AssembledShell.runTaskNow]
      * 现查后抛（`onTrigger` 对两者静默 return，不查会把 no-op 呈现成"已触发"）。
      */
     override suspend fun runTaskNow(taskId: String) {
@@ -493,7 +547,7 @@ class AppShellApplication : Application(), HostSummary {
     /**
      * 停止一次在途执行（[HostSummary] 的生产实现，§8.2 池四步 quiesce）。
      * 壳没装好就抛（同 [runTaskNow]）；已结算/从未存在回 false（在途表无此 run，
-     * 不是失败）；真停走回 true。读的是 [AppShellKit.AssembledShell.stopRun]
+     * 不是失败）；真停走回 true。读的是 [AssembledShell.stopRun]
      * （壳持有的在途表），不另开第二个 `RuntimeController`。
      */
     override suspend fun stopRun(runId: Long): Boolean {
@@ -532,14 +586,14 @@ class AppShellApplication : Application(), HostSummary {
             return
         }
         // fire 是挂起函数：在广播的 goAsync 窗口内起协程，保证 onTrigger 走完（意图日志落行）。
-        kotlinx.coroutines.GlobalScope.launch {
+        // 回执必须**恰好一次**（PendingResult.finish 双调 = 崩，漏调 = 窗口挂到超时），
+        // 而域收口时协程体可能根本没跑起来 —— 所以走 launchGuaranteed 而不是裸 launch。
+        appScope.launchGuaranteed(done) {
             try {
                 val delivered = alarmDispatch.fire(taskId)
                 if (!delivered) Log.w(TAG, "闹钟回投无路线：taskId=$taskId（已计入漏投）")
             } catch (t: Throwable) {
                 Log.e(TAG, "闹钟回投失败：taskId=$taskId", t)
-            } finally {
-                done()
             }
         }
     }
@@ -556,6 +610,7 @@ class AppShellApplication : Application(), HostSummary {
         keepAlive?.stop()
         keepAlive = null
         ForegroundHost.keeper = null
+        appScope.cancel()     // 停本类的后台活；已取消的域里 launchGuaranteed 仍会回执一次
         super.onTerminate()
     }
 

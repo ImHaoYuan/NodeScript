@@ -45,7 +45,7 @@ class EngineWatchdog(
      */
     private val driftKillThreshold: Int = DEFAULT_DRIFT_KILL_THRESHOLD,
     /**
-     * 启动宽限：执行开始后多久之内**允许没有心跳**（§8.4 首跳时延；2026-09-29 加）。
+     * 启动宽限：执行开始后多久之内**允许没有心跳**（§8.4 首跳时延）。
      *
      * 为什么必须有：心跳由**引擎进程**在 JS 引导里打（main.cpp 的 kBootstrap `setInterval`
      * …,500ms），而进程要 spawn → dlopen libnode → 建 isolate → 跑引导脚本才有第一跳。
@@ -102,7 +102,7 @@ class EngineWatchdog(
      * - [noHeartbeat]：心跳来源未接线（[heartbeatMillis] 回 null）；
      * - [procUnreadable]：`/proc` 读不到（异 UID / 进程已退出）。
      *
-     * **`noHeartbeat` 不只是记账，它是决策**（2026-09-29 改口径，见 [killNoHeartbeat]）：
+     * **`noHeartbeat` 不只是记账，它是决策**（见 [killNoHeartbeat]）：
      * 该 run 本轮**不判死**，但会经 [RuntimeController.killRun] 落一次
      * [com.autoscript.domain.engine.KillCause.WATCHDOG_HEARTBEAT] 硬杀 ——
      * 否则"从不打点"等于永久免检，§8.4 最要害的一路被静默关掉。宽限窗口见 [killNoHeartbeat]。
@@ -380,7 +380,7 @@ class EngineWatchdog(
         const val DEFAULT_DRIFT_KILL_THRESHOLD: Int = 3
 
         /**
-         * 启动宽限缺省值：5s（2026-09-29）。
+         * 启动宽限缺省值：5s。
          *
          * 取值依据：心跳首跳由引擎进程的 JS 引导给出（500ms 周期），而首跳前要走完
          * spawn → dlopen libnode（70MB 映射，真机冷启实测 158ms）→ 建 isolate → 跑引导。

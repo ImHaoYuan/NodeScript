@@ -13,7 +13,7 @@ import java.nio.charset.StandardCharsets
  * [LockSigner]）。npmmirror 没有 ECDSA 签名端点，验签这条路走不通；设计给出的
  * 替代是**同一 spec 取两个独立镜像的声明，一致才接受**：两个运营主体不同的镜像
  * 同时被投毒，比投毒一个难得多。**第二意见必须是另一个运营主体**（出厂首选官方
- * §18 第 7 项 2026-09-26 拍板，于是镜像来做第二意见；调用方把首选改成镜像时反过来）——
+ * §18 第 7 项拍板，于是镜像来做第二意见；调用方把首选改成镜像时反过来）——
  * 要的是"两家"，不是"官方那一家"，恒等自比会让交叉校验空转。
  *
  * 校验对象 = packument 的 `dist.integrity`（tarball 的 sha512），即 npm 自己据以
@@ -26,7 +26,7 @@ import java.nio.charset.StandardCharsets
  * 非 https 来源，一律 [Verdict.Unverifiable] 由调用方显式告知，绝不折成「通过」。
  */
 class NpmRegistryVerifier(
-    /** 首选注册表（出厂**官方**，§18 第 7 项 2026-09-26 拍板；项目 `.npmrc` 会覆盖，§10.2）。 */
+    /** 首选注册表（出厂**官方**，§18 第 7 项拍板；项目 `.npmrc` 会覆盖，§10.2）。 */
     private val primary: String = OFFICIAL,
     /**
      * 第二意见：**与本次首选运营主体不同**（这是交叉校验成立的前提，不是口味）。

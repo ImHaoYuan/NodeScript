@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit
  *
  * 对应 docs §10.2 调用链末段「顶层脚本执行 node <filesDir>/npm/bin/npm-cli.js」的
  * **主机形态**；Android 形态（EnginePool slotTag='npm' 会话进程内 dlopen libnode 执行
- * 同一 npm-cli.js）复用同一接口（[InstallCoordinator.HeavyOpExecutor]），两形态只是
+ * 同一 npm-cli.js）复用同一接口（[HeavyOpExecutor]），两形态只是
  * 执行宿主不同：工作目录约定一致——
  *
  * **work-prefix 模型**（npm 语义要求 prefix = 项目根，不能是 node_modules 本身）：
@@ -34,15 +34,15 @@ class HostNodeExecutor(
     private val nodeBin: String = "node",
     private val env: Map<String, String> = emptyMap(),
     // 与 NpmRegistryVerifier 的首选同源（交叉校验要比的就是实际安装用的那一家）：
-    // 出厂官方，§18 第 7 项 2026-09-26 拍板。
+    // 出厂官方，§18 第 7 项拍板。
     private val registry: String = NpmRegistryVerifier.OFFICIAL,
-) : InstallCoordinator.HeavyOpExecutor {
+) : HeavyOpExecutor {
 
     init {
         require(Files.isRegularFile(npmCliJs)) { "npm-cli.js 不存在: $npmCliJs" }
     }
 
-    override suspend fun execute(op: InstallCoordinator.HeavyOp, sink: InstallCoordinator.ProgressSink): String =
+    override suspend fun execute(op: HeavyOp, sink: ProgressSink): String =
         withContext(Dispatchers.IO) {
             sink.emit(
                 com.autoscript.domain.npm.InstallEvent.Progress(
@@ -75,7 +75,7 @@ class HostNodeExecutor(
         }
 
     /** 播种工作目录：项目 package.json（必须存在）+ 现有 lockfile（有则带上，保住已装依赖闭包）。 */
-    private fun prepareWorkDir(op: InstallCoordinator.HeavyOp, workDir: Path) {
+    private fun prepareWorkDir(op: HeavyOp, workDir: Path) {
         val pkgJson = op.projectRoot.resolve("package.json")
         require(Files.isRegularFile(pkgJson)) {
             "项目 ${op.projectId} 缺 package.json（$pkgJson），无法执行 npm ${op.args.first()}"
@@ -89,7 +89,7 @@ class HostNodeExecutor(
         }
     }
 
-    private fun runNpm(op: InstallCoordinator.HeavyOp, workDir: Path): String {
+    private fun runNpm(op: HeavyOp, workDir: Path): String {
         val cmd = buildList {
             add(nodeBin)
             add(npmCliJs.toAbsolutePath().toString())
@@ -122,7 +122,7 @@ class HostNodeExecutor(
      * 写回项目根——manifest 链持久化在项目根（npm install <pkg> 会把新依赖写进 package.json，
      * 不写回则下次安装因 package.json 缺旧依赖而把已装包 prune 掉）。
      */
-    private fun harvest(op: InstallCoordinator.HeavyOp, workDir: Path) {
+    private fun harvest(op: HeavyOp, workDir: Path) {
         val nm = workDir.resolve("node_modules")
         if (Files.isDirectory(nm)) {
             Files.createDirectories(op.stageDir)

@@ -18,7 +18,7 @@ import java.nio.file.Path
 import java.time.ZoneId
 
 /**
- * 任务中心读口的**装配侧**验证（[AppShellKit.AssembledShell.taskCenter]）——
+ * 任务中心读口的**装配侧**验证（[AssembledShell.taskCenter]）——
  * 也就是 `AppShellApplication.taskCenter()` 在真机上会走的那条路。
  *
  * 单元级的映射规则在 [TaskCenterReadTest]；这里钉的是只有装配层才定的三件事：
@@ -41,7 +41,7 @@ class AppShellTaskCenterTest {
         override suspend fun cancelTrigger(handle: TriggerHandle) = handle.cancel()
     }
 
-    private fun kit(): AppShellKit.AssembledShell = AppShellKit.assemble(
+    private fun kit(): AssembledShell = AppShellKit.assemble(
         filesDir = files,
         cacheDir = cache,
         schedulerProvider = RecordingProvider(),

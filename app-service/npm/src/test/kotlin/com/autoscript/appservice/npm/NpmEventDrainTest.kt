@@ -35,8 +35,8 @@ class NpmEventDrainTest {
     private val layout get() = NpmProjectLayout(ScriptPaths.projectsRoot(dir))
 
     /** 重操作假体：只回摘要，不碰网络/磁盘（安装编排照走真路径）。 */
-    private class OkExecutor : InstallCoordinator.HeavyOpExecutor {
-        override suspend fun execute(op: InstallCoordinator.HeavyOp, sink: InstallCoordinator.ProgressSink): String = "ok"
+    private class OkExecutor : HeavyOpExecutor {
+        override suspend fun execute(op: HeavyOp, sink: ProgressSink): String = "ok"
     }
 
     private fun coordinator(): InstallCoordinator = InstallCoordinator(
@@ -62,7 +62,7 @@ class NpmEventDrainTest {
 
     @Test
     fun `空增量以游标为准（first 等于 sinceSeq，不以空数组终结）`() {
-        val ring = InstallCoordinator.SeqRing<String>(capacity = 4)
+        val ring = SeqRing<String>(capacity = 4)
         val empty = ring.drain("main", 0L, 8)
         assertEquals(0L, empty.first, "没有事件时 first=since，调用方以游标前进")
         assertEquals(0L, empty.second)
@@ -75,7 +75,7 @@ class NpmEventDrainTest {
 
     @Test
     fun `环有界丢最旧，seq 空洞可见（first 大于 sinceSeq+1 就是丢过）`() {
-        val ring = InstallCoordinator.SeqRing<String>(capacity = 3)
+        val ring = SeqRing<String>(capacity = 3)
         repeat(5) { ring.push("main", "e$it") }   // seq 1..5，环里只剩 3..5
         val got = ring.drain("main", 0L, 8)
         assertEquals(3L, got.first, "最旧两条已被挤掉，空洞要看得见（静默断流才是要禁的）")
@@ -85,7 +85,7 @@ class NpmEventDrainTest {
 
     @Test
     fun `按项目过滤，batch 截断后从 last 续取`() {
-        val ring = InstallCoordinator.SeqRing<String>(capacity = 16)
+        val ring = SeqRing<String>(capacity = 16)
         ring.push("main", "m1")
         ring.push("other", "x1")
         ring.push("main", "m2")

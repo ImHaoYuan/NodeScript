@@ -1,0 +1,69 @@
+package com.autoscript.platform.system.shell
+
+import com.autoscript.domain.bridge.RpcNamespaceHandler
+import com.autoscript.domain.bridge.BridgeResponse
+import com.autoscript.domain.bridge.BridgeRequest
+import com.autoscript.domain.bridge.decodeObject
+import com.autoscript.domain.bridge.enumOrNull
+import com.autoscript.domain.bridge.optLong
+import com.autoscript.domain.bridge.requiredStr
+import com.autoscript.domain.bridge.generated.WireMethods
+import com.autoscript.domain.core.ErrorCode
+import com.autoscript.domain.json.DomainJson
+
+/**
+ * `shell` 命名空间的桥处理器（`exec`/`shell` 两方法；JS `extras.ts` 的 `shell()` 只是 `exec()` 的别名）
+ *
+ * **来历**：原 `SystemNamespaces.kt` 的「四内」之一 —— 2026-10-01 D3「子包按命名空间
+ * 对齐」把四个内联 handler 拆到各自命名空间的子包（与 capabilities 的
+ * `a11y/A11yNamespaceHandler` 同形：handler 与它服务的 SPI/实现同包），
+ * `SystemNamespaces.kt` 只留十一工厂束。语义逐字未改。
+ *
+ * **能力门禁不在这里**（§9.5）：门禁归 `:app-service:permission-center` 的
+ * `PermissionFacade`（本模块 archUnit 黑名单含 `com.autoscript.appservice..`），
+ * 装配层先判后取；本类只负责「能力已保证之后」的参数校验与分类错误。
+ */
+
+// ── shell（§9.6）────────────────────────────────────────────────────
+
+/** 默认 shell 超时：`child_process` 缺失的副作用由宿主侧兑现（§10 零 spawn），实现不得无限等。 */
+const val DEFAULT_SHELL_TIMEOUT_MILLIS: Long = 30_000
+
+class ShellNamespaceHandler(
+    private val executor: ShellExecutor,
+    private val defaultTimeoutMillis: Long = DEFAULT_SHELL_TIMEOUT_MILLIS,
+) : RpcNamespaceHandler() {
+
+    /** 申报方法表（wire-schema 对账挂点）：单源指向生成物 [WireMethods.BY_NS]，不手抄。 */
+    override fun methods(): Set<String> = WireMethods.BY_NS.getValue("shell")
+
+    override suspend fun dispatch(request: BridgeRequest): BridgeResponse = when (request.method) {
+        "exec", "shell" -> exec(request)
+        else -> err(request, ErrorCode.ERR_NOT_IMPLEMENTED, "未知 shell 方法: ${request.method}")
+    }
+
+    private suspend fun exec(request: BridgeRequest): BridgeResponse {
+        val fields = request.decodeObject()
+        val cmd = request.requiredStr(fields, "cmd")
+        val mode = request.enumOrNull(fields, "mode", ShellMode.DEFAULT) { ShellMode.valueOf(it.uppercase()) }
+        val timeout = request.optLong(fields, "timeout") ?: defaultTimeoutMillis
+        if (timeout <= 0) {
+            return err(request, ErrorCode.ERR_INVALID_PARAM, "timeout 必须 > 0，实际 $timeout")
+        }
+        return run {
+            val r = executor.exec(cmd, mode, timeout)
+            // 四字段与 `extras.ts` 的 `ShellResult` 逐字对齐；`truncated` 是 2026-10-02 新增的
+            // 纯增量字段（实现侧超 [ShellCaptureLimit.MAX_CAPTURE_BYTES] 才为 true，
+            // 见 `docs/design-decisions.md` 第 21 项）—— JS 侧读不到它时按缺省 false 处理。
+            ok(request, DomainJson.encode(
+                    mapOf(
+                        "code" to r.code.toLong(),
+                        "stdout" to r.stdout,
+                        "stderr" to r.stderr,
+                        "truncated" to r.truncated,
+                    ),
+                ),
+            )
+        }
+    }
+}

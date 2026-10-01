@@ -30,7 +30,7 @@ class AppShellBridgeAddonTest {
         override suspend fun cancelTrigger(handle: TriggerHandle) = handle.cancel()
     }
 
-    private fun kit(bridgeAddon: ByteArray?): AppShellKit.AssembledShell =
+    private fun kit(bridgeAddon: ByteArray?): AssembledShell =
         AppShellKit.assemble(
             filesDir = files,
             cacheDir = cache,

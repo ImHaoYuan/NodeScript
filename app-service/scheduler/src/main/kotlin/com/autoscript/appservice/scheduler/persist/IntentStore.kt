@@ -9,9 +9,16 @@ import java.nio.file.Path
 /**
  * 意图日志原子存储操作（docs §8.5「append-only + 崩溃持久」的最小接缝）。
  *
- * 本接口是「意图日志语义」与「存储引擎」之间的唯一边界：
- * - JVM 本机/单测 → [JournalFileStore]（jsonl 追加 + fsync + 启动 replay）；
- * - Android 生产 → :app 装配层注入 SQLiteDatabase 实现（同一 SQL 语义，WAL + FULL sync）。
+ * 本接口是「意图日志语义」与「存储引擎」之间的唯一边界。
+ *
+ * **今天只有一个实现：[JournalFileStore]**（jsonl 追加 + fsync + 启动 replay），
+ * 且它是**全平台的生产实现**（含 Android）—— `AppShellKit` 装的就是它。
+ * §8.5 写的「SQLite + WAL」是**目标形态，尚未落地**，这里不再假称已有：
+ * [IntentStore] 住在 `:app-service:scheduler`（纯 JVM、零 `import android.`），
+ * 而依赖铁律是 `:platform:*` → `:domain`（不反向），SQLite 实现要么把本接口搬到
+ * `:domain`（跨模块契约变更，需协调者裁），要么让本模块引入 Android 依赖
+ * （代价是这层丢掉纯 JVM 可测）。两条都不是顺手能做的，故先如实标注。
+ * 该分歧记在 `docs/design-status.md` 的未落地清单里。
  *
  * 两条实现都必须满足：
  * - **崩溃持久**：insert/seal 返回前数据已落盘（fsync 或 SQLite synchronous=FULL）；

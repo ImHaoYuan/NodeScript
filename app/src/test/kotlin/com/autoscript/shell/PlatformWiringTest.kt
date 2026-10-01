@@ -23,23 +23,23 @@ import com.autoscript.domain.engine.KillCause
 import com.autoscript.domain.engine.ScriptEngine
 import com.autoscript.domain.engine.StopResult
 import com.autoscript.domain.storage.InMemoryDataStore
-import com.autoscript.platform.system.SystemSettings
-import com.autoscript.platform.system.ZipArchiver
-import com.autoscript.platform.system.AppLauncher
-import com.autoscript.platform.system.Clipboard
-import com.autoscript.platform.system.DeviceInfoProvider
-import com.autoscript.platform.system.DeviceProfile
+import com.autoscript.platform.system.settings.SystemSettings
+import com.autoscript.platform.system.zip.ZipArchiver
+import com.autoscript.platform.system.app.AppLauncher
+import com.autoscript.platform.system.clipboard.Clipboard
+import com.autoscript.platform.system.device.DeviceInfoProvider
+import com.autoscript.platform.system.device.DeviceProfile
 import com.autoscript.domain.system.DialogHost
-import com.autoscript.platform.system.FloatingWindowHost
-import com.autoscript.platform.system.FloatingWindowSpec
-import com.autoscript.platform.system.NotificationPoster
-import com.autoscript.platform.system.NotificationSpec
-import com.autoscript.platform.system.SensorDelay
-import com.autoscript.platform.system.SensorEventBatch
-import com.autoscript.platform.system.SensorSource
-import com.autoscript.platform.system.ShellExecutor
-import com.autoscript.platform.system.ShellMode
-import com.autoscript.platform.system.ShellResult
+import com.autoscript.platform.system.floatingWindow.FloatingWindowHost
+import com.autoscript.platform.system.floatingWindow.FloatingWindowSpec
+import com.autoscript.platform.system.notification.NotificationPoster
+import com.autoscript.platform.system.notification.NotificationSpec
+import com.autoscript.platform.system.sensors.SensorDelay
+import com.autoscript.platform.system.sensors.SensorEventBatch
+import com.autoscript.platform.system.sensors.SensorSource
+import com.autoscript.platform.system.shell.ShellExecutor
+import com.autoscript.platform.system.shell.ShellMode
+import com.autoscript.platform.system.shell.ShellResult
 import com.autoscript.platform.system.SystemSpis
 import java.nio.file.Path
 import kotlinx.coroutines.runBlocking
@@ -360,7 +360,7 @@ class PlatformWiringTest {
             // notification：canPost 探针 + post 真落到假 SPI
             assertEquals("true", okPayload(dispatch(s, "notification", "canPost", null)))
             assertEquals("true", okPayload(dispatch(s, "notification", "post", """{"id":7,"text":"跑完了"}""")))
-            // 落局部：SystemSpis 来自 :domain（跨模块 public 属性不给 smart cast；jvm-test 同模块会掩掉）。
+            // 落局部：SystemSpis 来自 :domain（跨模块的 public 属性不给 smart cast）。
             val notifier = spis.notification as FakeNotification
             assertEquals(1, notifier.posted.size)
             assertEquals("跑完了", notifier.posted[0].text)

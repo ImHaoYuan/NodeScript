@@ -29,6 +29,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.Paths
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
@@ -63,16 +64,11 @@ class InstallCoordinator(
         Files.getFileStore(it).usableSpace
     },
     now: () -> Long = { System.currentTimeMillis() },
-    config: Config = Config(),
+    config: InstallConfig = InstallConfig(),
     /** 真 cacheDir（`<data>/cache/npm-cache`，§10.2；Android 装配层注入）。 */
     npmCacheDir: Path? = null,
 ) : PackageManagerFacade {
 
-    data class Config(
-        val minFreeBytes: Long = 500L * 1024 * 1024,       // §10.2 磁盘 free≥500MB 预检
-        val projectQuotaBytes: Long = 512L * 1024 * 1024,  // 项目 node_modules 配额（100% 拦）
-        val quotaWarnRatio: Double = 0.8,                  // 80% 黄
-    )
 
     // 探针/时钟/配额不走 [NpmServices]：它们不是「外部协作者」而是本类行为参数，
     // 收进 services 会让「换一份 layout 就顺手换掉时钟」变得合法——那是两回事。
@@ -115,106 +111,26 @@ class InstallCoordinator(
         "prepare", "preprepare", "preparePack",
     )
 
-    /** 重操作执行体接缝：拉起安装会话跑 vendored npm CLI（§10.2 调用链末段）。 */
-    fun interface HeavyOpExecutor {
-        /**
-         * 在已分配的事务上下文里执行重操作；args 为 npm CLI 参数（install/ci/…）。
-         * 实现方负责进度事件（经 [ProgressSink]）。
-         *
-         * **TTL 契约（铁律 3）**：协调器已对本次调用套 [op.timeoutMillis]（withTimeoutOrNull），
-         * 超时即取消并回 err 路径收尾（journal fail + 残骸清扫 + 锁释放）。故实现方必须
-         * 合作式响应取消（阻塞 IO 拆成可中断段、子进程随取消销毁）——不响应取消的执行体
-         * 会在超时后变成孤儿：项目锁虽已释放，但它仍可能与新会话争抢同一 stageDir。
-         */
-        suspend fun execute(op: HeavyOp, sink: ProgressSink): String   // 返回摘要（人类可读）
-
-        /** 默认：无引擎可用 → 如实 ERR_NOT_IMPLEMENTED。 */
-        object Unavailable : HeavyOpExecutor {
-            override suspend fun execute(op: HeavyOp, sink: ProgressSink): String {
-                throw AutojsException(
-                    ErrorCode.ERR_NOT_IMPLEMENTED,
-                    "安装会话引擎未接入：重操作 ${op.args.joinToString(" ")} 未执行（编排已完成：journal=${op.nonce}）",
-                )
-            }
-        }
-    }
-
-    /** 一次重操作的完整上下文（编排层 → 执行体）。 */
-    data class HeavyOp(
-        val nonce: String,
-        val projectId: String,
-        val args: List<String>,
-        val projectRoot: java.nio.file.Path,
-        val stageDir: java.nio.file.Path,
-        val timeoutMillis: Long,
-    )
-
-    /** 进度事件回传缝（执行体 → 协调器事件流）。 */
-    fun interface ProgressSink {
-        suspend fun emit(event: InstallEvent)
-    }
-
-    /**
-     * T1 lifecycle 脚本执行体接缝（§10.3 T1「spawn 桥 → `:main` 沿 EnginePool 同路径拉临时
-     * 引擎执行」的执行侧契约）。
-     *
-     * 为什么不复用 [HeavyOpExecutor]：那条通道编排的是「事务」——stageDir + journal +
-     * 原子落位，为的是 npm CLI 会重写 `node_modules`。lifecycle 脚本不做 reify，
-     * 走那条链会为一个不改依赖树的操作凭空造暂存目录与 commit 记录，
-     * `unfinished()` 里多出没有产物的残骸。两条通道共用 TTL/取消/事件面，差异只在落位。
-     *
-     * [ScriptOp.npmArgs] 交出的是 npm CLI 口径的参数（`run <name> -- <args>` /
-     * `exec <args> -- <bin>`）—— 真执行体把它交给 vendored npm 或直接按 shim 拦截后的
-     * 语义展开，两条路都在宿主侧，故此处不替实现方决定。
-     *
-     * **TTL 契约**同 [HeavyOpExecutor]：协调器已套 [ScriptOp.timeoutMillis] 的
-     * withTimeoutOrNull，实现方必须合作式响应取消（子进程随取消销毁，见 §10.3 T1 的
-     * TERM→超时→SIGKILL 回收顺序），否则超时后会成为争抢同一项目锁的孤儿。
-     */
-    fun interface ScriptOpExecutor {
-        suspend fun execute(op: ScriptOp, sink: ProgressSink): String   // 返回摘要（人类可读）
-
-        /** 默认：spawn 桥未接入 → 如实 ERR_NOT_IMPLEMENTED（门禁已过也不假装跑过）。 */
-        object Unavailable : ScriptOpExecutor {
-            override suspend fun execute(op: ScriptOp, sink: ProgressSink): String {
-                throw AutojsException(
-                    ErrorCode.ERR_NOT_IMPLEMENTED,
-                    "T1 spawn 桥未接入：已获批的 ${op.what}（${op.action.name}）未执行。" +
-                        "放行门禁与审批账本已就位，缺的是 child_process shim → 临时引擎这一段（§10.3 T1）",
-                )
-            }
-        }
-    }
-
-    /**
-     * 一次已放行 lifecycle 执行的上下文。
-     *
-     * [what] 是脚本名或 bin 名（审计与错误信息的抓手）；[npmArgs] 是 npm CLI 口径参数；
-     * [versionHash] 带上是为了让执行体可复述「我跑的是哪一份」——审计条目只记摘要不够，
-     * 用户问「我批的那份脚本现在还在不在」时要有据可查。
-     */
-    data class ScriptOp(
-        val handleId: String,
-        val projectId: String,
-        val action: ApprovalAction,
-        /** 审批主体 = 归属包名（run 侧是项目自身包名，exec 侧是提供该 bin 的包名）。 */
-        val pkg: String,
-        /** 脚本名或 bin 名。 */
-        val what: String,
-        val args: List<String>,
-        val projectRoot: java.nio.file.Path,
-        val npmArgs: List<String>,
-        val versionHash: String,
-        val timeoutMillis: Long,
-    ) {
-        /** 审批键的主体段（`"<pkg>|<what>"`）—— 账本键与审计条目同款，不再各拼各的。 */
-        val subject: String get() = "$pkg|$what"
-    }
-
     // —— 运行态（全局互斥 + per-project 锁 + 事件流 + 句柄账） ——
 
     private val globalSession = Mutex()
-    private val projectLocks = ConcurrentHashMap<String, Mutex>()
+
+    /**
+     * per-project 串行锁，**用完即逐出**（曾经是只增不减的 `ConcurrentHashMap<String, Mutex>`）。
+     *
+     * 两件事在这里一起修：
+     * - 逐出：map 随 projectId 单调增长，长跑应用里等于一份不回收的小泄漏。计数归零才摘，
+     *   「有人在等/在持」时摘掉会让后来者拿到新 Mutex，per-project 串行当场失效；
+     * - 原子入表：原 `getOrPut` 在 ConcurrentHashMap 上**不是**原子操作 —— 两个并发安装
+     *   可能各造一个 Mutex 各持一把，两个 npm 会话同写一个项目目录。改用 `compute`：
+     *   取/造与计数自增在同一把 key 锁内完成。
+     */
+    private val projectLocks = ConcurrentHashMap<String, ProjectLock>()
+
+    private class ProjectLock {
+        val mutex = Mutex()
+        val users = java.util.concurrent.atomic.AtomicInteger(0)
+    }
     private val events = MutableSharedFlow<InstallEvent>(extraBufferCapacity = 256)
     private val approvalFlow = MutableSharedFlow<ApprovalRequest>(extraBufferCapacity = 64)
     // 脚本侧拉取口的宿主缓冲（[progress]/[approvals] 那两条 Flow 无重放、只服务 :main；
@@ -223,6 +139,27 @@ class InstallCoordinator(
     private val approvalRing = SeqRing<ApprovalRequest>(capacity = RING_CAPACITY)
     private val handles = ConcurrentHashMap<String, TrackedOp>()
     private val handleSeq = AtomicLong(0)
+
+    /**
+     * 项目 node_modules 的已测尺寸（键 = projectId），[SIZE_CACHE_TTL_MILLIS] 内直接复用。
+     *
+     * 为什么缓存：配额预检原本**每次安装**都全量 `Files.walk` 一遍 node_modules
+     * （大项目十万级文件、秒级），而它跑在拿全局会话锁**之前** —— 直接顶在
+     * 「点安装 → 有反应」之间；`storage()` 读口同理（能力中心轮询会反复问）。
+     *
+     * 为什么敢缓存：这条配额是**项目的礼貌上限**，不是磁盘满的真防线 —— 真防线是
+     * [freeSpaceProbe]，每次安装都真读文件系统可用空间，不受这里影响。代价是
+     * **最多 [SIZE_CACHE_TTL_MILLIS] 的陈旧**：本进程装完**不失效**（一失效就等于
+     * 每次安装照旧全量遍历，正是要修的东西），脚本自己跑 npm 装的那部分更看不见 ——
+     * 期间可能放行一次把项目顶过配额的安装，表现是 npm 自己报 ENOSPC 或下次预检拦下，
+     * 不会静默写坏数据（尺寸只决定「让不让开始」，不参与任何写路径决策）。
+     *
+     * 条目数 = 见过的项目数（每个一条小记录，随项目数有界，不随安装次数增长）——
+     * 与 [projectLocks] 的逐出不同，这里**不能**用完即摘：摘了就等于每次都重算。
+     */
+    private val sizeCache = ConcurrentHashMap<String, MeasuredSize>()
+
+    private data class MeasuredSize(val bytes: Long, val atMillis: Long)
 
     private data class TrackedOp(
         val handle: InstallHandle,
@@ -352,7 +289,7 @@ class InstallCoordinator(
             "离线 bundle 导入未接线（NpmOfflineBundleImporter 未注入）：无法把 $uri 合入 npm 缓存",
         )
         val root = layout.projectRoot(projectId)   // projectId 合法性先过（防路径逃逸）
-        val src = Path.of(uri)
+        val src = Paths.get(uri)
         if (!Files.isRegularFile(src)) {
             throw AutojsException(ErrorCode.ERR_FILE_NOT_FOUND, "离线 bundle 不存在：$uri（SAF 副本是否已落地？）")
         }
@@ -399,10 +336,40 @@ class InstallCoordinator(
                     )
                     staging.sweep(handle.projectId, setOf(it.nonce))
                 }
-                it.done = true
+                it.finish()
                 emit(InstallEvent.Finished(handle.projectId, handle.id, success = false, detail = "已取消"))
             }
         }
+    }
+
+    /**
+     * per-project 串行段的唯一入口：入表 → 计数 → 执行 → 计数归零即逐出（见 [projectLocks]）。
+     */
+    private suspend fun <T> withProjectLock(projectId: String, block: suspend () -> T): T {
+        val lock = projectLocks.compute(projectId) { _, cur ->
+            (cur ?: ProjectLock()).also { it.users.incrementAndGet() }
+        }!!
+        try {
+            return lock.mutex.withLock { block() }
+        } finally {
+            lock.users.decrementAndGet()
+            // 归零才摘；`compute` 里再确认一次，与并发的入表互斥（不肯让「有人刚拿到」被摘走）。
+            projectLocks.compute(projectId) { _, cur ->
+                if (cur === lock && cur.users.get() == 0) null else cur
+            }
+        }
+    }
+
+    /**
+     * 句柄进入终态：置位 + **从 [handles] 摘除**。
+     *
+     * 摘除是必须的：`handles` 原本只增不减，长跑应用里每装一次就留一条 `TrackedOp`。
+     * 语义零改 —— `cancel()` 对已终态句柄本来就只做 no-op（`if (!it.done)` 那层），
+     * 摘掉之后同样什么都不做，只是不再留记录。
+     */
+    private fun TrackedOp.finish() {
+        done = true
+        handles.remove(handle.id)
     }
 
     // ══════════ 轻操作（Kotlin 直读，零 Node 进程） ══════════
@@ -442,12 +409,11 @@ class InstallCoordinator(
         Files.list(layout.projectsRoot).use { s ->
             s.filter { Files.isDirectory(it) }.forEach { proj ->
                 val id = proj.fileName.toString()
-                val nm = layout.nodeModules(id)
                 val pkgs = LockfileReader.readLocked(layout.lockfile(id)).size
                 out[id] = NodeModulesStats(
                     projectId = id,
                     pkgCount = pkgs,
-                    totalBytes = DirSizer.sizeBytes(nm),
+                    totalBytes = nodeModulesBytes(id),
                 )
             }
         }
@@ -582,8 +548,7 @@ class InstallCoordinator(
         )
         val tracked = TrackedOp(handle, "script-${handle.id}", journaled = false)
         handles[handle.id] = tracked
-        val projectLock = projectLocks.getOrPut(projectId) { Mutex() }
-        projectLock.withLock {
+        withProjectLock(projectId) {
             globalSession.withLock {
                 emit(InstallEvent.Progress(projectId, handle.id, InstallEvent.Phase.QUEUED))
                 try {
@@ -600,14 +565,14 @@ class InstallCoordinator(
                     if (tracked.cancelled) {
                         throw AutojsException(ErrorCode.ERR_ENGINE_STOPPED, "脚本执行已取消（执行体已收尾，结果不采纳）")
                     }
-                    tracked.done = true
+                    tracked.finish()
                     history?.record(action.name.lowercase(), projectId, true, summary)
                     emit(InstallEvent.Finished(projectId, handle.id, success = true, detail = summary))
                 } catch (e: Exception) {
                     // cancel() 可能已就地把 done 置位并发过终态（见上面那段竞态说明）。
                     // 一个句柄只能有一个终态事件 —— 两条会让订阅方无从裁决「那次到底成没成」。
                     val firstTerminal = !tracked.done
-                    tracked.done = true
+                    tracked.finish()
                     if (firstTerminal) {
                         history?.record(action.name.lowercase(), projectId, false, e.message)
                         emit(InstallEvent.Finished(projectId, handle.id, success = false, detail = e.message))
@@ -677,6 +642,15 @@ class InstallCoordinator(
         }
     }
 
+    /** 项目 node_modules 尺寸：缓存优先，过期才真遍历（见 [sizeCache]；只服务配额预检与 [storage]）。 */
+    private fun nodeModulesBytes(projectId: String): Long {
+        val at = now()
+        sizeCache[projectId]?.let { if (at - it.atMillis < SIZE_CACHE_TTL_MILLIS) return it.bytes }
+        return DirSizer.sizeBytes(layout.nodeModules(projectId)).also {
+            sizeCache[projectId] = MeasuredSize(it, at)
+        }
+    }
+
     // ══════════ 编排核心 ══════════
 
     /**
@@ -696,7 +670,7 @@ class InstallCoordinator(
                 "磁盘可用 ${free / 1024 / 1024}MB < 预检下限 ${config.minFreeBytes / 1024 / 1024}MB，拒绝安装",
             )
         }
-        val used = DirSizer.sizeBytes(layout.nodeModules(projectId))
+        val used = nodeModulesBytes(projectId)
         if (used >= config.projectQuotaBytes) {
             throw AutojsException(ErrorCode.ERR_DISK_FULL, "项目 node_modules 已达配额 ${config.projectQuotaBytes / 1024 / 1024}MB")
         }
@@ -707,9 +681,8 @@ class InstallCoordinator(
         val tracked = TrackedOp(handle, nonce)
         handles[handle.id] = tracked
 
-        val projectLock = projectLocks.getOrPut(projectId) { Mutex() }
         // 协程内联执行（挂起语义 = 排队；调用方要 fire-and-forget 可自行 launch）
-        projectLock.withLock {
+        withProjectLock(projectId) {
             globalSession.withLock {
                 if (quotaWarned) {
                     emit(
@@ -761,7 +734,7 @@ class InstallCoordinator(
             // 执行体把产物写在 stageDir；落位由 staging.commit 原子 rename
             staging.commit(projectId, nonce)
             journal.commit(nonce, projectId, stageDir.fileName.toString())
-            tracked.done = true
+            tracked.finish()
             // §10.5-1：install 会重写项目 lock（执行体 harvest 写回），签要跟着更新——
             // 用旧签会导致紧随其后的 ci 验签失败。签名失败 = 不谎称成功（回滚太重，
             // 改为中止本次安装：journal 已 commit 但 UI 拿到的是失败事件，用户可重试）。
@@ -780,7 +753,7 @@ class InstallCoordinator(
         } catch (e: Exception) {
             journal.fail(nonce, projectId, stageDir.fileName.toString(), e.message)
             staging.sweep(projectId, setOf(nonce))
-            tracked.done = true
+            tracked.finish()
             history?.record(opName(args), projectId, false, e.message)
             emit(InstallEvent.Finished(projectId, handle.id, success = false, detail = e.message))
             throw e
@@ -860,43 +833,6 @@ class InstallCoordinator(
         events.emit(e)
     }
 
-    /**
-     * 有界 seq 环（`A11yEventRing` 同纪律）：seq 单调递增、超界丢最旧、空洞可见。
-     *
-     * - `drain` 按 [projectId] 过滤（脚本只看自己项目的事件）、`batch` 截断（未取完的下一批从
-     *   `lastSeq+1` 续）；空增量回 `(sinceSeq, sinceSeq)` —— 调用方以游标为准，不以空数组终结；
-     * - 丢最旧不告警而是**留空洞**：`first > sinceSeq + 1` 就是「中间丢过」，与 a11y 同口径
-     *   （进度数据面本就可丢包，§7.3；静默断流才是要禁的）。
-     */
-    internal class SeqRing<T>(private val capacity: Int) {
-        private val guard = Any()
-        private val entries = ArrayList<Entry<T>>()
-        private var head = 0L
-
-        internal class Entry<T>(val seq: Long, val projectId: String, val value: T)
-
-        /** 任意线程投递；锁内分配序号并追加（超界丢最旧）。 */
-        fun push(projectId: String, value: T) {
-            synchronized(guard) {
-                entries.add(Entry(++head, projectId, value))
-                while (entries.size > capacity) entries.removeAt(0)
-            }
-        }
-
-        /** 返回 (本批首序号, 本批末序号, 命中的 (seq, value))。 */
-        fun drain(projectId: String, sinceSeq: Long, batch: Int): Triple<Long, Long, List<Pair<Long, T>>> {
-            require(batch > 0) { "batch 必须 > 0" }
-            val picked = synchronized(guard) {
-                entries.asSequence()
-                    .filter { it.seq > sinceSeq && it.projectId == projectId }
-                    .take(batch)
-                    .map { it.seq to it.value }
-                    .toList()
-            }
-            if (picked.isEmpty()) return Triple(sinceSeq, sinceSeq, emptyList())
-            return Triple(picked.first().first, picked.last().first, picked)
-        }
-    }
 
     companion object {
         /** 事件环容量（与 `A11yEventRing.MAX_EVENTS` 同值同纪律）。 */
@@ -910,5 +846,14 @@ class InstallCoordinator(
          * ERR_TIMEOUT 并由执行体走 TERM→SIGKILL 回收。
          */
         const val SCRIPT_TIMEOUT_MILLIS = 60_000L
+
+        /**
+         * node_modules 尺寸缓存 TTL（见 [sizeCache]）。
+         *
+         * 60s 的取舍：短到「刚装完立刻再装」也顶多多走一两趟遍历、长到能吃掉
+         * 连续安装/轮询查询里的绝大多数遍历。它同时是「外部（脚本自跑 npm）改动
+         * 最多被看不见多久」的上界。
+         */
+        const val SIZE_CACHE_TTL_MILLIS = 60_000L
     }
 }

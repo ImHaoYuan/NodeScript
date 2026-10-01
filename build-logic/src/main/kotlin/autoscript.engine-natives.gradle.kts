@@ -2,6 +2,8 @@
 // 机器路径全清 —— /root、/tmp 类缺省一律不入构建脚本）：
 //   · prepareBridgeDistAssets（§12.4 facade dist → assets/bridge-dist/）
 //   · prepareEngineNativeLibs（§19 引擎三件 + libopencv 选填 + addon 随包）
+//   · prepareNpmCliAssets（§10.2 vendored npm CLI → assets/npm/，选填）
+//   · prepareNoticesAssets（第三方许可声明 → assets/，见下段）
 // 「三件齐/半套红/全无警」与选填件「缺位只 warn」语义逐字保留；ANDROID_NDK_HOME
 // 无缺省且只在三件齐分支必填（没 NDK 的机器走「全无 → 警告」照常 assemble）。
 import java.io.File
@@ -176,8 +178,147 @@ val prepareEngineNativeLibs = tasks.register("prepareEngineNativeLibs") {
     }
 }
 
+// ── vendored npm CLI 素材随包（§10.2 调用链首段）──────────────────────────────
+// `files/npm/` 的素材来自 `assets/npm/**`，而素材本身**不在 git**（14MB 级，且是
+// node-runtime-build 的产物：`fetch-and-build.sh` §9 从 Node 源码树 deps/npm 收敛，
+// CI 走 node-slice artifact 出库）。因此与引擎三件套**同一条选填纪律**：
+//   · 有货 → 递归拷进 generated/npmCliAssets/npm/（**解引用符号链接**：assets 装不了）；
+//   · 有货但缺锚（bin/npm-cli.js、bin/npx-cli.js）→ **红**：半瘫 CLI 比没交付更糟
+//     （设备上 npm-cli.js 在、require 的依赖树不在，报错面离病因极远）；
+//   · 无货 → 警告 + 空产出：装配照过（本机没跑过 Node 构建不挡 assemble），
+//     设备侧 `NpmCliDeployer.deploy` 拿不到锚即如实失败 → 装配层不注入 executor →
+//     桥对 npm.* 回 ERR_NOT_IMPLEMENTED（**不是**"npm 已可用"）。
+// 点条目（以 . 开头）一律不拷：AssetManager 对点条目的可见性在 ROM 间不一致，
+// 拷进 assets 只会制造"源里有、设备上没有"的静默差。产出脚本已保证素材零点条目，
+// 这条过滤只兜手工 export NPM_CLI_ROOT 指向现成 npm 树的实验路径。
+val npmCliAssetsDir = layout.buildDirectory.dir("generated/npmCliAssets/npm")
+
+val prepareNpmCliAssets = tasks.register("prepareNpmCliAssets") {
+    // 候选序（先命中先用）：显式 env → node-runtime-build 出口（同 LIBNODE/LIBOPENCV 纪律，
+    // 机器路径不入脚本）。本机复现配方：export NPM_CLI_ROOT=/path/to/npm。
+    val candidates = listOfNotNull(
+        System.getenv("NPM_CLI_ROOT")?.let { File(it) },
+        rootProject.layout.projectDirectory.dir("node-runtime-build/out/npm").asFile,
+    )
+    outputs.dir(npmCliAssetsDir)
+    // 来源不在 git：每次装配现查现拷（否则刚解包的 artifact 会被"outputs 已存在"跳过）
+    outputs.upToDateWhen { false }
+    doLast {
+        val out = npmCliAssetsDir.get().asFile
+        out.deleteRecursively()
+        out.mkdirs()
+        val src = candidates.firstOrNull { it.isDirectory }
+        if (src == null) {
+            logger.warn(
+                "[npm-cli] 素材未交付（候选位 = node-runtime-build/out/npm 或 export " +
+                    "NPM_CLI_ROOT=…）：APK 无 vendored npm CLI，设备侧 npm.* 如实 " +
+                    "ERR_NOT_IMPLEMENTED —— 跑 node-runtime-build/scripts/fetch-and-build.sh " +
+                    "或下载 node-slice artifact 解包到 node-runtime-build/out/。",
+            )
+            return@doLast
+        }
+        var files = 0
+        var bytes = 0L
+        var skippedDot = 0
+        src.walkTopDown()
+            .filter { it.isFile }
+            .filter { f ->
+                // 相对路径的任一段以 . 开头即跳过（同产出脚本的剪裁口径）
+                val dotted = f.relativeTo(src).path.split(File.separatorChar).any { it.startsWith(".") }
+                if (dotted) skippedDot++
+                !dotted
+            }
+            .forEach { f ->
+                val dest = File(out, f.relativeTo(src).path)
+                dest.parentFile.mkdirs()
+                f.copyTo(dest, overwrite = true)
+                files++
+                bytes += f.length()
+            }
+        if (skippedDot > 0) {
+            logger.warn("[npm-cli] 跳过 $skippedDot 个点条目（AssetManager 可见性 ROM 间不一致；source=$src）")
+        }
+        // 锚文件：与 NpmCliDeployer.ANCHORS 同名单（部署侧还会再验一次，这里红在装配期）
+        listOf("bin/npm-cli.js", "bin/npx-cli.js").forEach { anchor ->
+            require(File(out, anchor).isFile) {
+                "npm CLI 素材缺锚文件 $anchor（源 = $src）—— 半瘫 CLI 不随包：素材树要么是" +
+                    "未剪裁完的半成品，要么 NPM_CLI_ROOT 指错了目录"
+            }
+        }
+        logger.lifecycle("[npm-cli] 素材随包：$files 个文件 / ${bytes / 1024 / 1024}MiB → assets/npm/（source=$src）")
+    }
+}
+
+// ── 第三方许可声明随包（backlog D8）─────────────────────────────────────────
+// 为什么声明文件也要进 APK：仓里有一份 `THIRD_PARTY_NOTICES.md` 只解决「审计者看得到」，
+// 而随 APK 分发的二进制（Node / OpenCV / libc++ …）其许可条款**必须随分发一起可达**——
+// 只在仓库里放一份、装到用户手机上就没有，等于没声明。落位 `assets/third-party/`，与
+// 能力中心的「关于/许可」页将来取用是同一个键。
+//
+// 与前三件的纪律差别（刻意不同）：本件**在 git 里**（生成物已入库，评审面可见），所以
+// 缺件是**仓库破损**而不是「本机没构建」——按 bridgeDist 的口径红，不按选填件的口径只 warn。
+// 同步面（改 VERSIONS.env 必须重跑生成器）由 CI 的 `gen-notices.mjs && git diff` 门管。
+val noticesAssetsDir = layout.buildDirectory.dir("generated/noticesAssets/third-party")
+
+val prepareNoticesAssets = tasks.register("prepareNoticesAssets") {
+    val src = rootProject.layout.projectDirectory.file("THIRD_PARTY_NOTICES.md")
+    val licensesDir = rootProject.layout.projectDirectory.dir("node-runtime-build/licenses")
+    inputs.file(src)
+    inputs.dir(licensesDir)
+    outputs.dir(noticesAssetsDir)
+    doLast {
+        val out = noticesAssetsDir.get().asFile
+        out.deleteRecursively()
+        out.mkdirs()
+        if (!src.asFile.isFile) {
+            throw GradleException(
+                "THIRD_PARTY_NOTICES.md 缺位（${src.asFile}）：随包二进制（Node / OpenCV / " +
+                    "libc++ 等）的许可声明是分发义务，不是可选项 —— 跑 " +
+                    "`node node-runtime-build/licenses/gen-notices.mjs` 生成",
+            )
+        }
+        src.asFile.copyTo(File(out, "THIRD_PARTY_NOTICES.md"), overwrite = true)
+        // 逐字原文一并随包：清单只说「见原文」，原文不在包内等于让用户去网上找。
+        // 文件名与生成器 licenses/ 下的名字一致（清单里的链接指向同名件）。
+        var copied = 0
+        // 放行判据 = 生成器 COMPONENTS 表里的原文文件（`licenses/` 下的七件；libjpeg-turbo
+        // 是**子目录**，因为它自己的 LICENSE.md 里有一条指向 README.ijg 的相对链接 ——
+        // 拍平到一层会让那条链接断，与脚本 KDoc 同一口径）。**不是**「目录里所有文件」：
+        // 同目录的 gen-notices.mjs 是生成器本体，随包没有意义。漏一份原文 = 清单里那个
+        // 链接指向不存在。
+        val licenseFiles = listOf(
+            "node-LICENSE", "opencv-LICENSE", "kleidicv-LICENSE", "libpng-LICENSE", "zlib-LICENSE",
+        )
+        licenseFiles.forEach { name ->
+            val f = licensesDir.asFile.resolve(name)
+            require(f.isFile) { "node-runtime-build/licenses/$name 缺位（清单指向的原文缺失）" }
+            f.copyTo(File(out, name), overwrite = true)
+            copied++
+        }
+        // libjpeg-turbo 两份**保持上游的相对布局**（LICENSE.md ↔ README.ijg 互指）
+        val jpegDir = licensesDir.asFile.resolve("libjpeg-turbo")
+        listOf("LICENSE.md", "README.ijg").forEach { name ->
+            val f = jpegDir.resolve(name)
+            require(f.isFile) { "node-runtime-build/licenses/libjpeg-turbo/$name 缺位（双许可原文不完整）" }
+            val dest = File(out, "libjpeg-turbo/$name")
+            dest.parentFile.mkdirs()
+            f.copyTo(dest, overwrite = true)
+            copied++
+        }
+        require(copied > 0) {
+            "node-runtime-build/licenses/ 无许可原文可随包（$licensesDir）—— 清单指向的原文缺失"
+        }
+        logger.lifecycle(
+            "[notices] 许可声明随包：THIRD_PARTY_NOTICES.md + $copied 份逐字原文 → " +
+                "assets/third-party/",
+        )
+    }
+}
+
 // 资产合并前必须先生成（AGP 的 preBuild 每变体都有；matching 覆盖配置期尚未注册的情形）。
 tasks.matching { it.name == "preBuild" }.configureEach {
     dependsOn(prepareBridgeDistAssets)
     dependsOn(prepareEngineNativeLibs)
+    dependsOn(prepareNpmCliAssets)
+    dependsOn(prepareNoticesAssets)
 }

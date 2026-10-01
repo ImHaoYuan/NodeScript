@@ -15,6 +15,11 @@ android {
         applicationId = "com.autoscript"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
+        // 版本号是**占位**：本仓不发行正式版（§18 第 3 项「不发行」），没有发版流程 ——
+        // 所以刻意**不引第二个版本来源**（gradle.properties / 版本目录），那只会变成一处
+        // 与这里漂移的事实来源（本仓对"同一事实写两遍"的代价有惨痛先例，见 ModuleGraphTest
+        // 的派生计数注释）。真要发版时：两个数一起改成有单一来源的形态，versionCode 必须
+        // 单调递增，并同步 §13/§14 的交付轨。
         versionCode = 1
         versionName = "0.1.0"
     }
@@ -35,6 +40,14 @@ android {
             // `bridge-addon/<file>`（Application 侧 `assets.open("bridge-addon/…")` 认的
             // 就是这个键）—— 与 bridge-dist 同一条"指成子目录会拍平"的教训。
             assets.srcDir(layout.buildDirectory.dir("generated/engineAddonAssets"))
+            // vendored npm CLI 素材随包（§10.2 调用链首段）：srcDir 取**父目录**，资产键 =
+            // `npm/<rel>`（启动期 AssetTreeCliSource("npm", …) 认的就是这个键）——
+            // 与 bridge-dist 同一条"指成子目录会拍平"的教训。
+            assets.srcDir(layout.buildDirectory.dir("generated/npmCliAssets"))
+            // 第三方许可声明随包（backlog D8）：srcDir 取**父目录**，资产键 =
+            // `third-party/<file>`（`THIRD_PARTY_NOTICES.md` + `licenses/` 的七份逐字原文；
+            // 随分发可达是许可义务，仓里那份只解决审计面）—— 同样「指成子目录会拍平」。
+            assets.srcDir(layout.buildDirectory.dir("generated/noticesAssets"))
             // 引擎二进制随包（§19）：srcDir 根下按 ABI 分目录（`arm64-v8a/libnoden.so`），
             // prepareEngineNativeLibs 拷进 generated/engineNativeLibs/arm64-v8a/。
             jniLibs.srcDir(layout.buildDirectory.dir("generated/engineNativeLibs"))

@@ -4,7 +4,7 @@ import com.autoscript.domain.json.DomainJson
 import java.io.IOException
 
 /**
- * jsonl 行级解析/转义（persist 包内共享）—— 审查步骤 3 合一后的薄件。
+ * jsonl 行级解析/转义（persist 包内共享）—— codec 合一后的薄件。
  *
  * 服务的是"冻结行格式"：键为字符串，值为字符串/整数/null/字符串数组四种。
  * codec 走 `:domain` [DomainJson]（仓内唯一 codec），本文件只留两件 persist 专属的事：
@@ -17,7 +17,7 @@ import java.io.IOException
  * 单测与生产同一份解析，格式漂移在编译期可见而非运行时爆炸。persist 层零第三方依赖
  * （只有 :domain + JDK）的口径不破。
  *
- * 兼容边（步骤 3 记入 design-status）：老 quote 不转义控制字符，含裸控制符的存量行会被
+ * 兼容边：老 quote 不转义控制字符，含裸控制符的存量行会被
  * DomainJson 拒（"未转义控制字符"）—— 落在 IOException 保型内，表现仍是"行损坏"响亮失败。
  */
 internal object JsonLine {

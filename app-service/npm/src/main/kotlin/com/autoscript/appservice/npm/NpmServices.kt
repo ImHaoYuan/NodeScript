@@ -13,7 +13,7 @@ package com.autoscript.appservice.npm
  * - **探针/时钟/配置**（freeSpaceProbe/now/config/npmCacheDir）不收：它们不是协作者
  *   而是协调器自己的行为参数。收进来会让「换一份 layout 顺手换掉时钟」变得合法——
  *   那是两件不相干的事，分开才不会被顺手绑走。
- * - **executor**（[InstallCoordinator.HeavyOpExecutor]）不收：它是每次装配都可能不同的
+ * - **executor**（[HeavyOpExecutor]）不收：它是每次装配都可能不同的
  *   执行体（真引擎/测试假造/E2E 真 npm），与「持久协作者」生命周期不同。
  * - **Kotlin data class 而不 fun interface**：协作者之间无行为关联，收成接口就是硬造抽象。
  *

@@ -3,6 +3,7 @@ package com.autoscript.appservice.runtime
 import com.autoscript.domain.engine.EngineStatus
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.Paths
 
 /**
  * 引擎进程的 `/proc` 采样器（docs §8.4「已就绪的判据、待接线的眼睛」的眼睛部分）。
@@ -175,10 +176,10 @@ class ProcessMonitor(
 }
 
 /** /proc/<pid>/stat 的默认读法：文件级函数，供构造默认值引用（构造期还不可用实例成员）。 */
-private fun statFile(pid: Int): String? = readFile(Path.of("/proc/$pid/stat"))
+private fun statFile(pid: Int): String? = readFile(Paths.get("/proc/$pid/stat"))
 
 /** /proc/<pid>/status 的默认读法。 */
-private fun statusFile(pid: Int): String? = readFile(Path.of("/proc/$pid/status"))
+private fun statusFile(pid: Int): String? = readFile(Paths.get("/proc/$pid/status"))
 
 /** 读 /proc 文本：不存在/不可读/读失败统一回 null（调用方按「不可度量」处理）。 */
 private fun readFile(path: Path): String? = try {

@@ -1,9 +1,9 @@
 package com.autoscript.domain.json
 
 /**
- * 仓内唯一的 JSON 值族编解码（原 `A11yBridgeJson`，2026-09-30 由审查步骤 4 移入 `:domain`、
- * 步骤 3 合一后其余四个手写 codec 全部迁到本类型上 —— 选它不选 kotlinx.serialization 的
- * 论证见 `docs/design-decisions.md`）。
+ * 仓内唯一的 JSON 值族编解码（原 `A11yBridgeJson`，移入 `:domain` 后其余四个手写
+ * codec 全部迁到本类型上 —— 选它不选 kotlinx.serialization 的论证见
+ * `docs/design-decisions.md`）。
  *
  * 只做 JSON 值级往返（string/number/bool/null/object/array），不支持注释、不做数字精度保证
  * （Long 按十进制原文透传）；非法输入抛 IllegalArgumentException，由 `RpcNamespaceHandler`
@@ -40,7 +40,7 @@ object DomainJson {
 
     fun encode(v: Any?): String = buildString { appendValue(v) }
 
-    // ── 字段读取（步骤 3 合入：原 NpmBridgeJson/WmJson 的 reqStr 一族）──────────────
+    // ── 字段读取（原 NpmBridgeJson/WmJson 的 reqStr 一族）────────────────────────────
     // 与 `bridge.Decode` 的 `BridgeRequest` 扩展同口径（那套挂 request 只为 decodeObject
     // 调用面顺手；没有 request 可挂的 persist/handler 内部函数走这里）。缺键/类型错一律
     // 抛 IAE —— 由 `RpcNamespaceHandler` 统一折 ERR_INVALID_PARAM。

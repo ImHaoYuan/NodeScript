@@ -17,8 +17,16 @@ bridge/js/dist/
 
 # node-runtime-build 构建产物（大体积二进制）
 node-runtime-build/work/
+node-runtime-build/out/          # libnode.so / node / npm 素材（14MB 级）
 node-runtime-build/out-opencv/
 
 # misc
 .DS_Store
 .kotlin/
+
+# 本机私人配置（机器路径等；CLAUDE.md 指过来的那份）
+CLAUDE.local.md
+
+# 密钥库（SECURITY.md 密钥管理：绝不提交）
+*.jks
+*.keystore

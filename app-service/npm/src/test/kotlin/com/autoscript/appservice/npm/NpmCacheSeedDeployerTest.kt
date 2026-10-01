@@ -6,6 +6,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import java.nio.file.Files
@@ -148,10 +149,7 @@ class NpmCacheSeedDeployerTest {
 
     // ═══ 离线首装金标准（§10.12：仅凭种子 npm ci --offline）══
 
-    private val npmCli: Path? = sequenceOf(
-        "/usr/lib/node_modules/npm/bin/npm-cli.js",
-        "/usr/local/lib/node_modules/npm/bin/npm-cli.js",
-    ).map { Path.of(it) }.firstOrNull { Files.isRegularFile(it) }
+    private val npmCli: Path? = HostNpm.cliJs
 
     /**
      * 取一个本机 npm cache 里真实存在的 gzip tarball。
@@ -162,7 +160,10 @@ class NpmCacheSeedDeployerTest {
      * 用它的 sha512 当 lock 里的 integrity（内容寻址：文件名无关，只认摘要）。
      */
     private fun realTarball(): ByteArray? {
-        val roots = sequenceOf(dir.resolve("real-cache"), Path.of("/root/.npm/_cacache/content-v2"))
+        // 本机 npm 的 cacache 从 user.home 拼（不写死机器路径：同一个病灶见 C2 ——
+        // `~/.npm` 在哪台机器上都不是常量，HOME 不是 /root 时同样能命中）。
+        val hostCacache = Path.of(System.getProperty("user.home"), ".npm/_cacache/content-v2")
+        val roots = sequenceOf(dir.resolve("real-cache"), hostCacache)
         for (root in roots) {
             if (!Files.isDirectory(root)) continue
             // 懒扫：walk 惰性 + findFirst 命中即停，每文件只读头两字节判魔数，
@@ -211,8 +212,13 @@ class NpmCacheSeedDeployerTest {
 
     @Test
     fun `金标准：仅凭种子 cache 离线 ci 装出依赖（lock 按 integrity 引用种子）`() = runBlocking {
-        val bytes = realTarball() ?: return@runBlocking   // 无本机 tarball：跳过（不造数据）
-        if (npmCli == null) return@runBlocking
+        // 环境不齐 → **如实中止**（assumeTrue），不是 `return@runBlocking` 的静默通过：
+        // 后者在 CI 上等于"金标准没跑过但一片绿"，正是 B1 记的病灶。本类在
+        // TestGuard.ENV_GATED 登记（跳过是其契约）；nightly 另由 check-e2e-ran.sh 证明真跑。
+        val raw = realTarball()
+        assumeTrue(raw != null, "本机无真实 npm tarball（~/.npm/_cacache），跳过（不造数据）")
+        assumeTrue(npmCli != null, "宿主机无 npm-cli.js，跳过离线首装金标准")
+        val bytes = raw!!   // assumeTrue 无 Kotlin contract，解包显式写
         val integ = digestBase64(bytes, "SHA-512")
 
         val src = Files.createDirectories(dir.resolve("seed-real"))

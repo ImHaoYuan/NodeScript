@@ -1,5 +1,6 @@
 package com.autoscript.appservice.npm
 
+import javax.crypto.spec.SecretKeySpec
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -19,7 +20,7 @@ class LockSignerTest {
     @TempDir
     lateinit var dir: Path
 
-    private val key = LockSigner.KeyProvider { "test-app-key-32bytes-aaaaaaaaaaaa".toByteArray() }
+    private val key = LockSigner.KeyProvider { SecretKeySpec("test-app-key-32bytes-aaaaaaaaaaaa".toByteArray(), "HmacSHA256") }
     private val lock get() = dir.resolve("package-lock.json")
 
     private fun writeLock(text: String = """{"lockfileVersion":3,"packages":{"node_modules/lodash":{"version":"4.17.21"}}}""") {
@@ -63,11 +64,58 @@ class LockSignerTest {
     fun `密钥切换（重装或恢复出厂）则旧签失效`() {
         writeLock()
         LockSigner(dir.resolve(".autojs"), key).sign("p1", lock)
-        val other = LockSigner(dir.resolve(".autojs"), LockSigner.KeyProvider { "other-key".toByteArray() })
+        val other = LockSigner(dir.resolve(".autojs"), LockSigner.KeyProvider { SecretKeySpec("other-key".toByteArray(), "HmacSHA256") })
         assertThrows(AutojsException::class.java) { other.verifyOrThrow("p1", lock) }
         // 重新签即可恢复（显式动作，不静默）
         other.sign("p1", lock)
         other.verifyOrThrow("p1", lock)
+    }
+
+    // ── 落盘格式严格性 + 原子落位（2026-10-01，backlog A4）─────────────
+    // 病灶：KDoc 写「前缀不识一律拒」，实现却是 removePrefix("v1") —— 裸 hex 照样接受，
+    // 于是「版本前缀」这个换算法的兼容开关等于不存在。
+
+    @Test
+    fun `裸 hex（丢了版本前缀）被拒 —— 即便它就是正确的 HMAC`() {
+        writeLock()
+        val s = LockSigner(dir.resolve(".autojs"), key)
+        s.sign("p1", lock)
+        val sig = dir.resolve(".autojs/lock.sig")
+        val hex = String(Files.readAllBytes(sig)).trim().removePrefix("v1").trim()
+        Files.write(sig, hex.toByteArray())   // 内容一字不差，就是没有版本标签
+        val e = assertThrows(AutojsException::class.java) { s.verifyOrThrow("p1", lock) }
+        assertEquals(
+            ErrorCode.ERR_PERMISSION_DENIED.code, e.error.code,
+            "前缀是将来换 ECDSA 的兼容开关，宽松解析等于把它废掉",
+        )
+    }
+
+    @Test
+    fun `未知前缀、大写 hex、半截签名一律拒`() {
+        writeLock()
+        val s = LockSigner(dir.resolve(".autojs"), key)
+        s.sign("p1", lock)
+        val sig = dir.resolve(".autojs/lock.sig")
+        val hex = String(Files.readAllBytes(sig)).trim().removePrefix("v1").trim()
+        val bad = listOf("v2 $hex", "v1 ${hex.uppercase()}", "v1 ${hex.dropLast(1)}", "v1", "")
+        for (text in bad) {
+            Files.write(sig, text.toByteArray())
+            val e = assertThrows(AutojsException::class.java) { s.verifyOrThrow("p1", lock) }
+            assertEquals(ErrorCode.ERR_PERMISSION_DENIED.code, e.error.code, "写法「$text」必须被拒")
+        }
+    }
+
+    @Test
+    fun `sign 原子落位：不留临时残渣，旧签被整体替换`() {
+        writeLock()
+        val autojs = dir.resolve(".autojs")
+        val s = LockSigner(autojs, key)
+        s.sign("p1", lock)
+        writeLock("""{"lockfileVersion":3,"packages":{"node_modules/lodash":{"version":"4.17.22"}}}""")
+        s.sign("p1", lock)   // 换内容再签一次：覆盖路径与首次同一条
+        s.verifyOrThrow("p1", lock)
+        val listing = Files.list(autojs).use { st -> st.map { it.fileName.toString() }.toList() }
+        assertEquals(listOf("lock.sig"), listing.sorted(), "临时文件必须被 rename 掉，不留 lock.sig.tmp")
     }
 
     @Test

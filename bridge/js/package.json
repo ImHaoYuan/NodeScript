@@ -2,7 +2,7 @@
   "name": "@autoscript/bridge-js",
   "version": "0.1.0",
   "private": true,
-  "description": "AutoScript TS facade SDK（docs §12.4）：@autojs/* 门面、RuntimeChannel、bootstrap loader、输出 d.ts。非 Gradle 模块，仅 npm 依赖（禁 Gradle 反向依赖）。",
+  "description": "AutoScript TS facade SDK（docs §12.4）：auto.* 门面、RuntimeChannel、bootstrap loader、输出 d.ts。非 Gradle 模块，仅 npm 依赖（禁 Gradle 反向依赖）。",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "npm run build && node --test",

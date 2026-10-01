@@ -1,8 +1,8 @@
 package com.autoscript.domain.core
 
 /**
- * 保活续期窄缝（docs §8.7）—— 2026-09-30 审查步骤 6 随电源 handler 迁 `:platform:system`
- * 引入：handler 构造期要挂一次 FGS 补拉，但 `ForegroundKeeper`（真身）住 `:app`，
+ * 保活续期窄缝（docs §8.7）—— 电源 handler 迁 `:platform:system` 时引入：
+ * handler 构造期要挂一次 FGS 补拉，但 `ForegroundKeeper`（真身）住 `:app`，
  * 平台模块不得反向见 :app（§6 依赖方向）。于是只抽它**已有的**那一个动作成缝：
  * [renew] 的签名与 `ForegroundKeeper.renew` 逐字吻合，`:app` 侧直接实现本接口，
  * 装配层把同一实例喂进 handler（脚本锁与框架锁仍是**同一本账**，见

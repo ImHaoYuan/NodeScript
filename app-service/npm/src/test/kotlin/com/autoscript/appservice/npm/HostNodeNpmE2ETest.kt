@@ -17,7 +17,7 @@ import java.nio.file.Path
  * HostNodeExecutor 在暂存目录跑真 `npm install --prefer-offline --ignore-scripts`，
  * 产物经 InstallCoordinator 事务链（journal begin/commit + ATOMIC_MOVE 落位）进 node_modules。
  *
- * 运行条件：宿主机存在 node + npm-cli.js（CI ubuntu-latest 自带；无则跳过）。
+ * 运行条件：宿主机存在 node + npm-cli.js（[HostNpm] 现查，不写死发行版布局；无则跳过）。
  * 网络：默认 registry.npmjs.org（§18 第 7 项出厂官方）；离线 CI 可在首次跑通后靠 _cacache 复跑。
  */
 class HostNodeNpmE2ETest {
@@ -26,10 +26,7 @@ class HostNodeNpmE2ETest {
     lateinit var dir: Path
 
     companion object {
-        private val npmCli: Path? = sequenceOf(
-            "/usr/lib/node_modules/npm/bin/npm-cli.js",
-            "/usr/local/lib/node_modules/npm/bin/npm-cli.js",
-        ).map { Path.of(it) }.firstOrNull { Files.isRegularFile(it) }
+        private val npmCli: Path? = HostNpm.cliJs
 
         @JvmStatic
         @BeforeAll

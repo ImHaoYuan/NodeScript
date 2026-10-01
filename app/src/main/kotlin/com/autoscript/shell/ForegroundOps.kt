@@ -11,7 +11,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
-import com.autoscript.platform.system.WakeLockLedger
+import com.autoscript.platform.system.power.WakeLockLedger
 
 /**
  * 前台服务接触面（docs §8.7 保活）：唯一碰 `startForegroundService` /
@@ -170,10 +170,12 @@ class AutoScriptForegroundService : ForegroundServiceBase()
  * 拉起/停止服务）与服务侧（[forService]：`Service` 实例，用于进出前台）。两者**无状态**
  * —— 唯一的共享状态是 [ForegroundHost]，因此两份实例等价于一份，不需要单例。
  *
- * **本类不碰 androidx**（不用 `ContextCompat`/`ServiceCompat`）：`:app` 的源码依赖
- * androidx.core，但本机 `tools/jvm-test.sh` 旁路没有 androidx 坐标 —— 用裸 API +
- * `SDK_INT` 分支可让本机旁路继续编译 `:app`（见 §6 末的旁路说明）。这里本来也只需要
- * `startForegroundService`（API 26+，minSdk 即 26）与 `startForeground` 两个裸调用。
+ * **本类不碰 androidx**（不用 `ContextCompat`/`ServiceCompat`）：这里只需要
+ * `startForegroundService`（API 26+，minSdk 即 26）与 `startForeground` 两个裸调用，
+ * 而 API 34 的类型参数恰恰**要求调用点按 `SDK_INT` 显式给**（见上），`ServiceCompat`
+ * 那层包装反倒挡在中间。裸 API 的副作用才是本类不依赖 androidx.core。
+ * （2026-09-30 前这里写的理由是「本机 `tools/jvm-test.sh` 旁路没有 androidx 坐标」——
+ * 该旁路已删，这条不再成立。）
  */
 class AndroidForegroundOps private constructor(
     private val context: Context,
