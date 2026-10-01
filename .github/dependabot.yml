@@ -21,6 +21,6 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "ci(deps)"
-    labels:
-      - "dependencies"
-      - "ci"
+    # 不写 labels：本仓一个都没建（`gh label list` 只有 GitHub 默认那十个），
+    # 而 Dependabot 对不存在的 label 的处理不是「建一个」——配置里有无效 label 时
+    # 更新器会直接不干活（静默失效，正是本仓最不想要的失败形态）。用 GitHub 默认标签。
