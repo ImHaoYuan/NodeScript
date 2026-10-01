@@ -5,8 +5,10 @@ import com.autoscript.domain.bridge.BridgeResponse
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
+import java.nio.file.Files
 import java.nio.file.Path
 
 /**
@@ -48,5 +50,35 @@ class NpmShellKitTest {
         )
         val err = assertInstanceOf(BridgeResponse.Err::class.java, r)
         assertEquals("ERR_NOT_IMPLEMENTED", err.errorCode)
+    }
+
+    @Test
+    fun `T1 执行面不经桥面：run 与 exec 从脚本不可达，注入的执行体零触发`() = runBlocking {
+        val seen = mutableListOf<String>()
+        val h = NpmShellKit.assembleHandler(
+            filesDir = dir.resolve("files"),
+            cacheDir = dir.resolve("cache"),
+            scriptExecutor = object : InstallCoordinator.ScriptOpExecutor {
+                override suspend fun execute(
+                    op: InstallCoordinator.ScriptOp,
+                    sink: InstallCoordinator.ProgressSink,
+                ): String {
+                    seen += op.what
+                    return "ok"
+                }
+            },
+        )
+        val root = dir.resolve("files/scripts/main")
+        Files.createDirectories(root)
+        Files.write(root.resolve("package.json"), """{"name":"main","version":"0.0.1","scripts":{"build":"tsc"}}""".toByteArray())
+
+        // 人机分离（§10.5-2）：执行类操作不经脚本直调 —— 桥面没有 runScript/exec 这两个方法，
+        // 未知方法即 ERR_NOT_IMPLEMENTED（与 resolveApproval 同一条纪律）。
+        for (m in listOf("runScript", "exec")) {
+            val r = h.handle(BridgeRequest(9, "npm", m, """{"name":"build"}""", 10_000))
+            val err = assertInstanceOf(BridgeResponse.Err::class.java, r, "$m 不得从桥面可达")
+            assertEquals("ERR_NOT_IMPLEMENTED", err.errorCode, "$m 不得从桥面可达")
+        }
+        assertTrue(seen.isEmpty(), "执行体零触发：走桥面不该碰到它（真调用方是 :main 内部的 spawn 桥）")
     }
 }

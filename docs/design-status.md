@@ -39,6 +39,24 @@
 只在那里写一份（本文件不复制，避免两处漂移）。
 
 ## 流水（最新在上）
+### 2026-10-01 —— npm P1 T1 放行门禁的**存盘移植**（`node-slice` 两提交 → `feat/npm-t1-lifecycle`）
+- **背景**：`dcc548b`（T1 门禁三段式）+ `7fe9246`（取消路径分流）2026-09-29 写在本地 `node-slice` 分支、**从未推送**；
+  次日 `eae38fc`（审查步骤 5）把 npm 从 `:app-service:packager` 拆成 `:app-service:npm`，两条提交的路径与包名全部落到旧位置。
+  本次是**移植**（非重写、非新拍口径）：逻辑逐字保留，只做四处适配。
+- **适配四处**：① 路径 `app-service/packager/src/main/kotlin/com/autoscript/appservice/packager/npm/…` → `app-service/npm/src/main/kotlin/com/autoscript/appservice/npm/…`（`git mv` 等价）；
+  ② 包名 `…appservice.packager.npm` → `…appservice.npm`（`NpmScriptResolver` 的 `package` 行、测试里的 import）；
+  ③ `NpmBridgeJson` → `DomainJson`（步骤 3a `f585c97` 已把前者并入后者，`Value.Obj.fields`/`decodeObject`/`Value.S` 三处同名）；
+  ④ `NpmShellKit` 的 `probe` 形参名 → 上游改名后的 `freeSpaceProbe`（`defaultFreeSpaceProbe` 缺省值调用），并去掉随 npm 壳一起删掉的 `.mount()`。
+- **文档同批搬家**：`dcc548b` 当年写进 `framework-design.md` 的 T1 落地追记（步骤 8 拆分后该文件只剩索引）逐段搬进 `docs/design/10-npm.md` §10.3，
+  并把「`:app-service:packager`」改成「`:app-service:npm`；拆模块前属 `:app-service:packager`」；§10.7 的 `runScript`/`exec` 行同批更新
+  （`12-js-api.md` 契约面当时已随步骤 8 同步，无需再动）。`13-roadmap-budget.md` §14 的 npm P1 行 + `10-npm.md` §10.11 的 P1 行补门禁面已落、缺 spawn 桥的现状。
+- **口径未动**：本次没有新的决策点 —— 放行门禁的判据（宿主重算哈希 → ledger APPROVED → 纯 JS bin 白名单 → 自请入队）与 §18 第 7 项 2026-09-26 拍板逐字一致，故 `design-decisions.md` 只补一条「实现进度」注记，不进决策表。
+- **证据**：`:app-service:npm:test` **167 例 0 败 0 skip**（不带 `-PskipNpmE2E` 的本机全量跑，`InstallCoordinatorTest` 58 例含两条取消竞态用例、`NpmShellKitTest` 3 例含「注入的执行体零触发」；
+  CI 同源门带 `-PskipNpmE2E` 时排除 `HostNodeNpmE2ETest`/`NpmCacheSeedDeployerTest` 两个真 npm 进程用例）；
+  **13 模块 CI 同源门同批绿**（`-PskipNpmE2E`，与本条 npm 分开跑的两次）：域 70 / 桥 51 / 运行时 109 / 调度 111 / 脚本库 41 / 权限 11 / 打包 74 / npm 157 / 能力 104 / 系统 177 / 引擎 18 / UI 50 / App 195 = **1168 例 0 败 0 skip**。
+  ⚠ 本仓 `build/test-results/` 下同时留着 `test` 与 `testDebugUnitTest` 两套目录（AGP 变体 + 历史跑），**逐目录相加会把同一次跑数两遍** —— 数例只认**本期 Gradle 任务实际执行的那个目录**。
+- **仍未落**：spawn 桥本体（child_process shim / stdio 假管道 / pgrp 杀树 / `detached` 拒绝 / node-shim PIE + PATH 注入）—— 见 §10.3 T1 落地追记的「仍未落」段。
+
 ### 2026-10-01 —— §8.5/§8.6 收口：无人 await 的 run 自带期限（`feat/fastpath-16x`）
 - **治的病**：§8.6 自己记的诚实边界 —— 桥 `engines.exec` 拿句柄即返回、没人 await 终结，
   而看门狗三路判据全看进程表现（心跳/CPU/RSS）：**心跳正常、CPU 空闲、RSS 很低的长跑脚本三路都判健康，谁也收不住它**。

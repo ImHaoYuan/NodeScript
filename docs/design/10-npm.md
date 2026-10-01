@@ -52,6 +52,42 @@
 - 从 app 数据区任意 exec 二进制（W^X）→ 拒绝（原生 bin 走「代码签名 exec」独立通道，见 §10.11 P3）；
 - `npm exec` 非 node 二进制 → 仅走既有 `auto.shell`(root/adb) 能力且 Node 高信任才可（沙箱已裁，不存在另一档"一律拒绝"的引擎）。
 
+**T1 宿主侧门禁面已落（2026-09-29，`:app-service:npm`；拆模块前属 `:app-service:packager`）**：`PackageManagerFacade.runScript`/`exec`
+不再是「一律 `ERR_PERMISSION_DENIED`」的拒收桩，改成真实的三段式 —— **解析 → 门禁 → 执行接缝**：
+
+1. **解析（`NpmScriptResolver`，`:main` Kotlin 直读，零 Node 进程）**：从盘上 manifest 重算
+   `(pkg, versionHash)`。两个哈希口径都与 `pkg@version` 绑定，故「改脚本 / 升版本 = 另一份授权」
+   自动生效（§10.5-2「版本升级必须重新审批」的同一条纪律）。scripts 哈希吃**键排序后的规范化文本**
+   （只换键序不该让用户重批），身份与正文**带长度**再拼（`("ab","c")` 与 `("a","bc")` 不得同哈希）。
+   bin 侧另过**纯 JS 白名单**（`.js`/`.cjs`/`.mjs`）：非 JS 目标 `ERR_NOT_SUPPORTED` 并指向
+   「wasm 优先、纯 JS 兜底」（本节「明确不可行」那节）；同名 bin 多包声明 → 拒绝并点名
+   （npm 靠安装顺序消歧，宿主重算不出稳定答案，猜一个就是让审批哈希对不上真正的执行目标）；
+   路径逃出包目录 → 拒。简写 `bin` 的隐含命令名按 npm 口径取**包名**（scope 剥掉），不是文件名 ——
+   `{"name":"my-server","bin":"./server.js"}` 装出来的命令叫 `my-server`。
+2. **门禁（`InstallCoordinator.runScriptOps`）**：键 = `projectId + "<pkg>|<脚本名|bin名>" + versionHash + action`，
+   必须命中 ledger 的 APPROVED 票。**未获批时不是干巴巴报错**：请求自请入队（走 approvals 流 +
+   脚本侧 `drainApprovals` 拉取口），用户在能力中心审批卡上当场决定 —— 这正是 §18 第 7 项
+   「不做出厂卡口、安装时让用户自己选」的交互形态（§18 第 7 项的「口径在此定死，实现排 P1」
+   按本条落地，未重新拍）。键的哈希段**只能**由门禁自己重算，脚本既不知道也不该有资格编。
+3. **执行（`ScriptOpExecutor` 接缝）**：`Unavailable` 是缺省 → 有审批票也如实 `ERR_NOT_IMPLEMENTED`，
+   并点名缺的是「child_process shim → 临时引擎」这一段。**刻意不复用 `HeavyOpExecutor`**：
+   那条通道编排的是事务（stageDir + journal + 原子落位），为的是 npm CLI 会重写 `node_modules`；
+   lifecycle 脚本不做 reify，走那条链会为一个不改依赖树的操作凭空造暂存目录与 commit 记录，
+   `unfinished()` 里多出没有产物的残骸。两条通道共用 TTL（脚本侧 `SCRIPT_TIMEOUT_MILLIS` = 60s，§7 铁律 3）/
+   取消 / 事件面，差异只在落位。参数交出的是 npm 口径（`run <name> -- <args>` / `exec <args> -- <bin>`，
+   分隔符**在参数之前** —— 少了它 `--watch` 会被 npm 自己吃掉，等于静默丢用户显式给的参数）。
+4. **取消路径按「有没有事务」分流（2026-09-29 补）**：`TrackedOp.journaled` 为 false 的（T1 全属此类）
+   取消时**不写** `journal.fail`、不 sweep —— T1 没有事务，写进去就是在 §10.4 的事务状态机里塞一条
+   「从未 begin 却已 fail」的记录，而 journal 正是残骸清扫的判据源，无源之记会让自愈去扫不存在的残骸。
+   同一补丁还收了口子的另一半：取消与执行体收尾是**竞态**，`cancel()` 先到时已发过
+   `Finished(success=false,「已取消」)`，执行体随后收尾会再发一条终态 —— 同一句柄两个 `Finished`，
+   订阅方无从裁决那次到底成没成。执行侧收尾复查 `cancelled`，已取消则**不采纳**结果；
+   catch 分支只在还没发过终态时补发。
+
+**仍未落**：spawn 桥本体（`--require` 注入的 child_process shim、stdio 假管道、pgrp 杀树、
+`detached` 拒绝、node-shim PIE 与 PATH 注入）—— 上面第 3 段是它的**接缝**，不是它的实现。
+
+
 ### 10.4 事务化安装与崩溃自愈（整改自批判 android-runtime F1）
 
 > 批判指出：安装是原地、非原子写 node_modules，而 Android 上进程死亡是常态；半解包 + 坏符号链接会让后续 ci/install 在坏树上反复 EINTEGRITY。
@@ -100,7 +136,7 @@ interface PackageManager {
   suspend fun audit(projectId, offline): AuditReport           // 在线 audit(+签名) / 离线 OSV
   suspend fun offlineGap(projectId): List<MissingPkg>          // lock 闭包 − 缓存 的缺失清单(名+尺寸)
   suspend fun approveScript(pkg:, versionHash:, action)        // 仅提交人工确认队列
-  suspend fun runScript(projectId, name, args) / exec(bin, args, env)   // P1 仅待人工确认项，纯 JS bin 白名单
+  suspend fun runScript(projectId, name, args) / exec(bin, args, env)   // P1 T1：宿主重算内容哈希 → ledger 命中才放行，纯 JS bin 白名单（已落 2026-09-29，见 §10.3 T1 落地追记）
   suspend fun importOfflineBundle(uri) / importTarball(path)   // 验签→校验→入缓存→ci
   suspend fun config(projectId?, key, value)                   // .npmrc 层；registry 变更经 :main 卡可配列表+审计
   fun progress(projectId): Flow<InstallEvent>              // :main 订阅用（Flow 无重放）

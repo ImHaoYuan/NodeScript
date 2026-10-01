@@ -34,6 +34,9 @@ import java.nio.file.Path
  * 可空即未接线（与 [NpmServices] 同一诚实口径）：
  * - [executor] 缺省 [InstallCoordinator.HeavyOpExecutor.Unavailable] —— 编排照走，
  *   重操作如实 `ERR_NOT_IMPLEMENTED`（真引擎/真 npm CLI 到了再换）；
+ * - [scriptExecutor] 缺省 [InstallCoordinator.ScriptOpExecutor.Unavailable] —— T1 lifecycle
+ *   门禁照走（解析/哈希/审批自请入队都在协调器内，纯 Kotlin 不依赖执行体），但**已获批也跑不起来**
+ *   如实 `ERR_NOT_IMPLEMENTED`（spawn 桥本体未接，§10.3 T1 下半段）；
  * - [lockKey] 缺省 null → 不带 lockSigner：ci 不验签直接走（不假装验过）；
  * - [registryVerifier] 缺省接真 [NpmRegistryVerifier]（纯 JVM + Http 源；只在 install 被调时
  *   发请求，装配本身零网络）。测试要静默跳过校验时显式传 null。
@@ -44,6 +47,8 @@ object NpmShellKit {
         filesDir: Path,
         cacheDir: Path,
         executor: InstallCoordinator.HeavyOpExecutor = InstallCoordinator.HeavyOpExecutor.Unavailable,
+        /** T1 lifecycle 执行体（spawn 桥接上后注入；缺省即"门禁过但跑不起来"）。 */
+        scriptExecutor: InstallCoordinator.ScriptOpExecutor = InstallCoordinator.ScriptOpExecutor.Unavailable,
         registryVerifier: NpmRegistryVerifier? = NpmRegistryVerifier(),
         lockKey: LockSigner.KeyProvider? = null,
         snapshots: Boolean = true,
@@ -70,7 +75,12 @@ object NpmShellKit {
             registryVerifier = registryVerifier,
         )
         return NpmBridgeHandler(
-            InstallCoordinator(services = services, executor = executor, freeSpaceProbe = freeSpaceProbe),
+            InstallCoordinator(
+                services = services,
+                executor = executor,
+                scriptExecutor = scriptExecutor,
+                freeSpaceProbe = freeSpaceProbe,
+            ),
         )
     }
 
