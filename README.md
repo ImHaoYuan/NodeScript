@@ -24,7 +24,7 @@
 | [`SECURITY.md`](SECURITY.md) | 安全策略：支持范围、怎么报告、密钥怎么管 |
 | [`CLAUDE.md`](CLAUDE.md) | 面向 AI 协作者的仓库导览与协作纪律 |
 | `app` / `app-service` / `bridge` / `domain` / `engine` / `platform` / `ui` | Gradle 模块（模块表见 `settings.gradle.kts`；依赖方向铁律见 [`docs/design/06-modules.md`](docs/design/06-modules.md)） |
-| `bridge/js` | npm 包：TS facade SDK（`@autoscript/*`，非 Gradle 模块） |
+| `bridge/js` | npm 包 `@autoscript/bridge-js`（TS facade SDK；`private`，不发布；非 Gradle 模块） |
 | `node-runtime-build` | CI 构建管线：Node 24 源码与 OpenCV 交叉编译 recipe（产物不入 git） |
 
 ## 前置条件
@@ -75,8 +75,11 @@ npm --prefix bridge/js run build
 ./gradlew :domain:test
 ./gradlew :ui:testDebugUnitTest
 
-# facade（TS）单测 + wire 生成物同步门
+# facade（TS）单测（内部先跑 tsc build）
 npm --prefix bridge/js ci && npm --prefix bridge/js test
+
+# wire 生成物同步门：schema 改了必须重生成两份产物，漂移即红（CI js-tests job 同款）
+npm --prefix bridge/js run gen:wire && git diff --exit-code
 
 # 文档链接门：全部 *.md 的相对链接必须存在（CI 的 docs-check job 同一条命令，秒级）
 bash .github/scripts/check-doc-links.sh
