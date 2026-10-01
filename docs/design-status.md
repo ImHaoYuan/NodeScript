@@ -42,6 +42,56 @@
 
 ## 流水（最新在上）
 
+### 2026-10-01 —— 批 6：**D3/D5 platform 子包对齐 + D7 大文件拆分**（分支 `hellish-shrimp`）
+
+批 6 记的是「结构不齐」：同一个平台的两层（`:platform:system` / `:platform:capabilities`）长出
+两套组织方式，外加六个文件各自膨胀到没人愿意读完。结构性改动拆成三个提交，
+`c0e4c57`（D5）→ `430d908`（D3 + JNI 同批改）→ 本提交（D7）。
+
+- **D5（`c0e4c57`）测试树逐包镜像 main**：`:platform:capabilities` 的 main 早分了
+  `a11y/ screen/ dialogs/ device/`，测试却平铺一层（16 文件）。按被服务对象归位后，
+  `HandlerRequests.kt`（两个工厂）按调用方拆两份落各自子包、顺手删掉搬家后变成自引用的
+  26 行 import；**`device/` 故意没有测试包**（那里是 Android 接触面本体，本机 JVM 跑不了，
+  语义面由 `a11y/`/`dialogs/` 经假 SPI 覆盖）—— 这条约定写进 `platform/capabilities/README.md`
+  免得下次被当成漏项补空目录。验证：104 例 / skipped=0（= 搬家前同一批用例）。
+- **D3（`430d908`）`:platform:system` 一命名空间一子包**：36 个 main `.kt`（4121 行）全部
+  平铺在 `com.autoscript.platform.system` 一层 → 拆成 `shell/ device/ app/ floatingWindow/
+  datastore/ zip/ settings/ notification/ clipboard/ sensors/ images/ power/`，每个子包里
+  **契约 + ops 缝 + Android 实现 + handler 四件同住**（与 capabilities 的
+  `a11y/A11yNamespaceHandler` 同构）；根包只剩 `SystemNamespaces.kt`（十一工厂束，无逻辑）
+  与 `SystemSpis.kt`（`Context` → 十件实现）。顺手拆掉两个「一份装多面」：`SystemHostContracts.kt`
+  → 四份 `*Contracts.kt`，`SystemNamespaces.kt` 的「四内」handler → 各自子包的
+  `*NamespaceHandler.kt`（该文件 269 → 166 行）。55 个文件是纯 `git mv` + `package` 行、
+  新增 10 个是原文切片（`git diff -M` 逐对核过）；**:platform:system 180 例 /
+  :platform:capabilities 104 例全绿、skipped=0，与搬家前 `@Test` 计数逐个对齐**。
+- **D3 撞出来的一条隐藏 ABI（差点漏掉）**：全仓没有一处 `RegisterNatives`/`JNI_OnLoad`，
+  十个图像 JNI 入口全靠**缺省名字改编** `Java_<包>_<声明类>_<方法>` 解析 ——
+  **包名段就是 ABI**。`JniOps` 随本批进 `images/` 后符号必须是
+  `Java_com_autoscript_platform_system_images_JniOps_*`（旧 `..._system_JniOps_*`），
+  漏改的后果是**编译绿、单测绿、真机 `loadOrNull()` 回 null**（症状 = images 整条缝
+  `ERR_NOT_IMPLEMENTED`，与当初 `NativeImageAnalyzer_` 错位是同一类事故、同一道门抓的）。
+  四处事实源同批改齐：`images_jni.cc` 十符号、`node-runtime-build/scripts/check-opencv-alignment.sh`
+  前缀、`bridge/js` 的 `jni-names.test.cjs`（KT_PATH/包名/期望符号三断言）与
+  `pull-wire.test.cjs`（sensors handler 路径 —— 第二处 D3  casualty，当场红）。
+- **D7 大文件拆分（本提交，6 个目标做了 5 个）**：一刀切在**「同一批状态 + 同一批不变量」**
+  上，不按行数硬切 ——
+  - `InstallCoordinator.kt` 997 → **859**（+`InstallSeams.kt` 122 +`SeqRing.kt` 47）：
+    安装器接缝（`InstallConfig`/`HeavyOpExecutor`/`ScriptOpExecutor`/`ProgressSink`）与
+    序列环各自独立成件，协调器只剩状态机；
+  - `NativeImageAnalyzer.kt` 567 → **407**（+`JniOps.kt` 166，随 D3 同批）；
+  - `imgnative.cpp` 1440 → **688**（+`imgnative_match.cpp` 538 +`imgnative_feature.cpp` 296
+    +`imgnative_internal.h` 74）：帧表留主 TU，match 族与 ORB 特征族各一 TU。**这里有条
+    C++ 的坑**：「帧表单一实例」原是靠匿名 namespace 免费拿到的，拆 TU 后**每个 TU 各得
+    一份**，于是共享面必须显式化 —— `imgnative_internal.h` 给出 `frame_mutex()`/`find_locked`/
+    `contains_locked`/`frame_is_normalized`/`resolve_region` 与 `drop_prep_caches`，
+    `imgnative_release` 在同一失效点连派生缓存一起丢。host 语义门禁拆前拆后**逐例同值**：
+    9 套 **422 检查**全绿（26/36/21/124/28/46/45/45/51），四个 TU 的 NDK `-fsyntax-only` 干净；
+  - `AppShellKit.kt` 537 → **328**（+`AssembledShell.kt` 240）：壳对象与装配配方分家。
+  - **没做的两个如实记账**：`AppShellApplication.kt`（633）与 `Scheduler.kt`（522）
+    留在原地 —— 前者是 Android 生命周期本体、后者（两个 DTO + 一个 470 行类）**找不到
+    干净接缝**，硬切只会造出「两个文件共享一堆可变状态」的假拆分。这两条退回
+    [`backlog.md`](backlog.md) D7 行，不当作已完成。
+
 ### 2026-10-01 —— 批 5：**B1 CI 覆盖收口**（Android Lint / APK 构建进 PR 门；真 npm E2E 进 nightly + 验尸门；分支 `hellish-shrimp`）
 
 B1 记的是「CI 跳过最危险的路径」：`-PskipNpmE2E` 恒开 → 三条真 npm 路径在 CI **永不执行**，

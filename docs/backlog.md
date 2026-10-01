@@ -47,10 +47,8 @@
 | # | 事项 | 核实 | 成本 |
 |---|---|---|---|
 | **D1** | `:app-service:permission-center` main 只有 **91 行**（独立模块偏重）：并回现有模块，或明确"等它长" | ✅ 2026-10-01 | S |
-| **D3** | `:platform:system` 4041 行 / ~45 文件**扁平单包**，而 `:platform:capabilities` 已用子包 → 对齐成 `clipboard/` `sensors/` `notification/` `images/` …（改包名要同步 ArchUnit 包模式 + `ModuleGraphTest` 允许集） | ✅ 2026-10-01 | M |
-| **D5** | 测试包不镜像 main（`platform/capabilities` 测试是扁平的） | 待核实 | S |
 | **D6** | 命名不一致：仓 `NodeScript` / 产品 `AutoScript` / npm 包 `@autoscript/bridge-js` 而描述写 `@autojs/*` / 目录 `.autojs` / 签名前缀 `autojs-lock-v1`。**顺带确认发布用的 npm scope 是自己拥有的** | ✅ 2026-10-01（命名面） | S–M |
-| **D7** | 大文件：`InstallCoordinator.kt` **996 行**、`AppShellApplication.kt` 606、`Scheduler.kt` 521、`NativeImageAnalyzer.kt` 567、`AppShellKit.kt` 442、`imgnative.cpp` 88KB 单文件（host 测试已按算子族分，可按同一刀口拆） | ✅ 2026-10-01 | M |
+| **D7** | 大文件**余量**：`AppShellApplication.kt` **633 行**（Android 生命周期本体）、`Scheduler.kt` **522 行**（两个 DTO + 一个 470 行类，**无干净接缝**）—— 另有四个 2026-10-01 批 6 已拆（`InstallCoordinator` 997→859+`InstallSeams`/`SeqRing`、`NativeImageAnalyzer` 567→407+`JniOps`、`AppShellKit` 537→328+`AssembledShell`、`imgnative.cpp` 1440→688+match/feature TU+`imgnative_internal.h`），流水见 [`design-status.md`](design-status.md) | 待核实（余下两个是否有值得付的刀口） | S–M |
 | **D8** | 无第三方许可声明（`LICENSE` 只有 MIT，但随包带了 Node / OpenCV / libc++）→ 从 `node-runtime-build/VERSIONS.env` 生成 `THIRD_PARTY_NOTICES` | 待核实（未逐项核对打包内容） | S |
 
 ## E. 需要拍板（产品面，不是工程顺手能做）
@@ -71,5 +69,5 @@
 3. ~~**批 3（S）**：C1/C5（人类 README + CONTRIBUTING）+ C4（只剩维护者开通上报入口）~~ —— **2026-10-01 完成**，流水见 [`design-status.md`](design-status.md)。C4 当时因「只剩维护者动作」留在池里 —— **该动作 2026-10-01 已由维护者完成**（GitHub 私密上报入口开通，`private-vulnerability-reporting` 复核为 `enabled:true`），仓库侧四处照实写法同批改掉，C4 随之出池。
 4. ~~**批 4（M）**：A1/A1c~~ —— **2026-10-01 全部完成**，流水见 [`design-status.md`](design-status.md)：A1c 接缝形状 `secretKey(): SecretKey` + 实现落 `:app` 装配层；A1 四个子缺口按依赖序全补（素材出库 → 随包任务 → `AssetTreeCliSource` → 启动期落位 + 注入 `HostNodeExecutor`），素材来源拍板「Node 源码树 `deps/npm`」（口径追加在 [`design-decisions.md`](design-decisions.md#已推翻--已改口径)）。**收口时露出一个新口子**：素材版本 npm 11.19.0 ≠ §10 脊梁的 npm 12.x —— 登记为 **A6**，要不要升是独立的产品判断。
 5. ~~**批 5（M）**：B1（CI 覆盖：nightly + assembleDebug + lint）~~ —— **2026-10-01 完成**，流水见 [`design-status.md`](design-status.md)：Android Lint 从 **15 error 修到 0**（`:app` 2：`Path.of`→`Paths.get` ×6、manifest 补 `POST_NOTIFICATIONS`；开成全模块后又抓出 13 处 minSdk 26 上的真崩 —— `Stream#toList` API34 / `URLEncoder(String,Charset)` API33 / a11y 截图的 API30·34 面 / `getMainExecutor` API28，逐条已修）、`ci.yml` 新增 `android-build` job、新 workflow `e2e-nightly.yml`（不带 `-PskipNpmE2E`）+ `check-e2e-ran.sh` 验尸门、`HostNpm` 三来源发现替掉写死的宿主 npm 路径。**收口时露出两个新口子**：CI 的 APK 不含引擎二进制 → **B5**；覆盖率仍为零（要动冻结的根 build 文件）→ **B6**。
-6. **批 6（M）**：D3/D5（platform 子包对齐）、D7（大文件拆分）—— 结构性改动，一次一个 PR。
+6. ~~**批 6（M）**：D3/D5（platform 子包对齐）、D7（大文件拆分）~~ —— **2026-10-01 完成**，流水见 [`design-status.md`](design-status.md)：D5 测试树逐包镜像 main；D3 `:platform:system` 36 个 main `.kt` 拆成十二个子包（根包只剩 `SystemNamespaces`/`SystemSpis`），**同批必修的 JNI 符号面**——十入口靠缺省名字改编，包名段就是 ABI，`JniOps` 随迁 `images/` 后四处事实源同批改齐（漏改=编译绿/单测绿/真机整缝 `ERR_NOT_IMPLEMENTED`）；D7 六个目标拆了五个（`imgnative.cpp` 那刀把匿名 namespace 的帧表单实例问题显式化成 `imgnative_internal.h`，host 门禁拆前拆后逐例同值 422 检查）。**收口时如实留两件没拆**（`AppShellApplication.kt` 633 / `Scheduler.kt` 522，后者无干净接缝），退回 D7 行。
 7. **批 7（L/产品）**：E1/E2/E3 + B3 —— 需要人拍板后再排。
