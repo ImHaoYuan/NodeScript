@@ -42,6 +42,22 @@
 
 ## 流水（最新在上）
 
+### 2026-10-01 —— C4 收口（维护者已开通 GitHub 私密上报；分支 `hellish-shrimp`）
+
+- **开关翻面**：`gh api repos/Ventus-Pluviam/NodeScript/private-vulnerability-reporting` 由 `{"enabled":false}`
+  变为 **`{"enabled":true}`** —— 维护者在仓库设置里开通了 GitHub 私密漏洞上报（批 3 留下的那件维护者动作）。
+- **四处照实写法同批改掉**（渠道从「没有」变成「有」，凡写着「没有渠道」的地方不改就是文档撒谎）：
+  - `SECURITY.md` 报告一节 → 入口链接（`…/security/advisories/new`）+「不要公开 issue」+「**没有响应时限承诺**」，
+    并把 `.github/ISSUE_TEMPLATE/` 指给非安全类问题；
+  - `SECURITY.md` 已知限制第 3 条：「上报流程缺失」→「**没有响应时限承诺**」（渠道有了，缺的是时限）；
+  - `docs/design/11-security.md` §11.3 第 7 条：同义改写（契约侧的残余风险登记，原条目「上报流程缺失」同日改写）——
+    `SECURITY.md` 末尾那句「以上每一条在 §11.3 都有对应登记」因此仍然成立；
+  - `CONTRIBUTING.md` 安全问题一节 + `.github/ISSUE_TEMPLATE/config.yml`（`contact_links` 直指上报入口）
+    与 `bug_report.md` 顶注。
+- **为什么 `design-decisions.md` 不加行**：这次没有任何口径被拍板或推翻 —— 开关是维护者点的，仓库侧只是把**事实**跟上。
+  口径变更才进决策记录；状态变化进本文件的流水。
+- 门：13 任务 ./gradlew 全绿 + 文档链接门（本次改动全在文档 / 模板面，无代码）。
+
 ### 2026-10-01 —— 待办池**批 3**（C1 / C5；C4 复核；分支 `hellish-shrimp`）
 
 - **C1 人类 README**：`README.md` 从 744 B 扩到 116 行 —— 补齐外审点名的四件事（**前置 / 构建 / 测试 / 运行**）与仓库地图，并把「以完整权限、无进程隔离运行脚本」这条安全前提提到正文最前。三条口径：

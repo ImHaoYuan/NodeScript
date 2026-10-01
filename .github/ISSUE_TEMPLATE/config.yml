@@ -1,8 +1,11 @@
 blank_issues_enabled: true
 contact_links:
-  - name: 安全问题的报告方式（不要开公开 issue）
+  - name: 私密报告安全问题（不要开公开 issue）
+    url: https://github.com/Ventus-Pluviam/NodeScript/security/advisories/new
+    about: GitHub 私密漏洞上报，只有维护者可见（2026-10-01 开通）
+  - name: 安全策略与支持范围（SECURITY.md）
     url: https://github.com/Ventus-Pluviam/NodeScript/blob/main/SECURITY.md
-    about: 支持范围、私密上报渠道的现状与替代做法
+    about: 支持哪些版本、密钥怎么管、已知缺口
   - name: 先读设计文档再提 issue
     url: https://github.com/Ventus-Pluviam/NodeScript/blob/main/docs/framework-design.md
     about: 契约的单一事实来源（薄索引，按 § 号进分卷）

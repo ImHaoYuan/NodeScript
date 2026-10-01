@@ -92,5 +92,5 @@ bash .github/scripts/check-doc-links.sh   # 文档相对链接门
 
 ## 安全问题
 
-**不要开公开 issue。** 私密上报渠道与支持范围的现状见 [`SECURITY.md`](SECURITY.md)
-（当前该渠道尚未开通，那里写了替代做法）。
+**不要开公开 issue。** 走私密渠道：[Security → Report a vulnerability](https://github.com/Ventus-Pluviam/NodeScript/security/advisories/new)
+（GitHub 私密漏洞上报，2026-10-01 开通，只有维护者可见）；支持范围、密钥管理、已知缺口见 [`SECURITY.md`](SECURITY.md)。

@@ -50,7 +50,7 @@
 4. **MediaProjection 高清会话未落**：授权 UI + FGS 那一档还没接，P0 由同一 a11y 帧源连续截图承接（§9.2）。这不是安全缺口，是能力边界，列此只为避免被当成「高清会话已有门禁」。
 5. **16KB 页机未测**：真机红测只有 16KB 模拟器镜像或 Pixel 8+ 能给，SELinux enforcing 上下文与 targetSdk 提取策略同样待真机（design-status「仍未验」块）。
 6. **审批卡呈现层未排期**：审批账本与桥面拉取口已通（`drainApprovals` → `NpmBridgeHandler` → JS `pumpApprovals`），但能力中心的审批卡不在当前排期内，期间审批只能靠脚本侧拉取。
-7. **上报流程缺失**：本仓当前没有对外的安全问题上报渠道，见根 [`SECURITY.md`](../../SECURITY.md)。
+7. **无上报时限承诺**：私密上报渠道已于 2026-10-01 开通（GitHub Security → Report a vulnerability，见根 [`SECURITY.md`](../../SECURITY.md)）—— 缺的从此不是渠道，而是**响应 / 修复时限**：单人维护的开发期项目不作承诺。（原条目「上报流程缺失」同日改写。）
 8. **npm 生产装配未接线（2026-10-01 核实）**：`AppShellKit` 调 `NpmShellKit.assembleHandler(filesDir, cacheDir)` 走全缺省 —— `executor = HeavyOpExecutor.Unavailable`（真机安装如实回 `ERR_NOT_IMPLEMENTED`，`HostNodeExecutor` 在 `app/src/main` 零引用）、`lockKey = null`（T2 的签/验与快照导出都不发生）、`scriptExecutor = Unavailable`（T1 门禁过了也跑不起来）。即：**设计上写着「已接线」的那几道 npm 防线，当前在生产路径上都不生效**；这是接线缺口，不是设计缺口。
 
 ### 11.4 非目标

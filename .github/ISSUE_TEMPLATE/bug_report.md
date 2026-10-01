@@ -5,7 +5,8 @@ title: "[bug] "
 labels: bug
 ---
 
-<!-- 先确认：这不是安全问题。安全问题见 SECURITY.md —— 不要开公开 issue。 -->
+<!-- 先确认：这不是安全问题。安全问题走私密渠道（见 SECURITY.md，不要开公开 issue）：
+     https://github.com/Ventus-Pluviam/NodeScript/security/advisories/new -->
 
 ## 现象
 
