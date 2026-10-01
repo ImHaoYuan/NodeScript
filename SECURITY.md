@@ -23,12 +23,14 @@
 
 ## 报告安全问题
 
-**TODO：待补真实上报渠道。** 下述两处占位需由仓库维护者替换后再对外发布：
+**本仓当前没有生效的私密上报渠道**（这是现状陈述，不是占位符）：
 
-- 私密 issue：https://github.com/Ventus-Pluviam/NodeScript/issues （**TODO：改为私密安全公告入口**）
-- 邮箱：`TODO@example.invalid` （**TODO：替换为真实安全联系邮箱**）
+- GitHub 的私密漏洞上报（仓库 **Security → Report a vulnerability**）尚未在本仓启用；
+- 也没有安全联系邮箱 —— 早先这里写的 `TODO@example.invalid` 是占位地址，容易被当成真地址，已删。
 
-在渠道补齐前，不要把漏洞细节发进公开 issue。修复落地后，维护者会在此更新本节。
+**在渠道建立之前：不要把漏洞细节发进公开 issue，也不要发到任何公开渠道。**
+需要报告时，先开一个**不含细节**的 issue（只说"要报告一个安全问题"），维护者会回你私密渠道。
+仓库侧待办（开通 GitHub 私密上报入口）记在 [`docs/backlog.md`](docs/backlog.md) 的 C4。
 
 报告时请附：受影响模块（Gradle 模块名即可，如 `:app-service:npm`）、复现步骤、你观察到的行为与期望行为。
 若涉及 npm 供应链（§11.2 的 T1–T3、T8），请一并说明你用的 registry 与 lock 状态。
@@ -37,13 +39,16 @@
 
 | 密钥 | 用途 | 存放 | 丢失的后果 |
 |---|---|---|---|
-| 应用 HMAC 密钥 | 签 `files/.autojs/lock.sig`，钉「这份 lock 是本机认可的」 | 生产走 **Android Keystore**（经 `LockSigner.KeyProvider` 接缝注入） | **显式的「安全降级」失败**：`verifyOrThrow` 抛 `ERR_PERMISSION_DENIED`，拒绝按该 lock 重建 —— 不静默放行，也不「没签就跳过」 |
+| 应用 HMAC 密钥 | 签 `files/.autojs/lock.sig`，钉「这份 lock 是本机认可的」（§10.5-1） | **当前未接线**：接缝 `LockSigner.KeyProvider` 是全仓唯一入口，但**没有任何实现**，生产装配（`NpmShellKit.assembleHandler`）的 `lockKey` 缺省 `null` → **既不签也不验**。设计口径的存放处是 Android Keystore（**目标形态，非现状**） | 未接线期间不适用。接上之后的口径：密钥丢失 = **显式的「安全降级」失败**（`verifyOrThrow` 抛 `ERR_PERMISSION_DENIED`），不静默放行，也不「没签就跳过」 |
 | APK 发布密钥 | 打包链签名 | 随打包整轨移入后续版本（§13），当前不入 P0 | 不适用（整轨未启用） |
 
 要点：
 
 - **`lock.sig` 是本地信任锚，不是第三方可验证的来源证明**。它只能证明「这份 lock 是本机签过的」，
   不构成跨设备、跨用户的可审计来源链（§11.3 第 3 条）。
+- **除密钥这一件，npm 那几道防线当前在生产路径上同样没生效**：`NpmShellKit.assembleHandler` 的 `executor`
+  与 `scriptExecutor` 也走缺省 —— 真机安装如实回 `ERR_NOT_IMPLEMENTED`，快照不导出。整组缺口登记在
+  [`docs/design/11-security.md`](docs/design/11-security.md) §11.3 第 8 条；**设计上有、当前没接**，别把它读成「已有防线」。
 - 口令只经环境变量传给 `apksigner`（`AUTOSCRIPT_KS_PASS`/`AUTOSCRIPT_KEY_PASS`），**不进参数表、不进日志**。
 - 密钥库文件（`*.jks`/`*.keystore`）已列入 `.gitignore`，**不要提交进仓库**。若密钥已误提交，
   视为已泄漏：立即作废该密钥并重新生成，历史清除另需工具处理（git 历史不会因后续提交自动变干净）。
@@ -53,9 +58,10 @@
 1. **无进程隔离**：见上方「一句话现状」。
 2. **npm 安装脚本（T0）一个都没真跑过**：全程 `--ignore-scripts`，回执 `scripts-skipped`；
    「让用户选择跑」的那条路（spawn 桥，P1）尚未落地，因此当前**安装脚本永不执行**。
-3. **上报流程缺失**：见上节 TODO。
+3. **上报流程缺失**：见上节 —— 本仓没有生效的私密上报渠道。
 4. **真机红测缺口**：16KB 页机、SELinux enforcing、targetSdk 提取策略均未在真机验证
    （§11.3 第 5 条）。这意味着「装在 16KB 页设备上会怎样」目前没有实测答案。
 5. **MediaProjection 高清会话未落**：P0 由同一无障碍帧源连续截图承接（§9.2）。
+6. **npm 生产装配未接线**：签名/快照/执行体三者都走缺省（见 §11.3 第 8 条）—— 真机安装与 lock 验签当前**都不可用**。
 
 以上每一条在 `docs/design/11-security.md` §11.3 都有对应登记。两处若有出入，以设计文档为准。

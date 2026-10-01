@@ -27,6 +27,7 @@
 | §10.5 | 生物特征二次确认 | 未落（`BiometricPrompt` 全仓零引用） |
 | §8.5/§8.6 | 引擎侧 `waitCompletion` 超时不发起（无人 await 的 run 没人收尾） | **已覆盖（2026-10-01）**：`TimeoutEnforcer{WATCHDOG}` + 看门狗期限线（`KillCause.TIMEOUT`）—— 残余边界见 §8.6（期限只覆盖声明了期限的 run + 轮转须在跑） |
 | §8.5 | 意图日志的 **SQLite 实现**（契约写的是「append-only（SQLite，启动即回放）」） | **未落，且分歧已如实标注**：今天全平台生产（含 Android）跑的都是 `JournalFileStore`（jsonl 追加 + fsync + 流式回放，`AppShellKit` 装的就是它）。卡点是接口住 `:app-service:scheduler`（纯 JVM、零 `import android.`），而依赖铁律 `:platform:*` → `:domain` 不反向 —— SQLite 实现要么把 `IntentStore` 搬到 `:domain`（跨模块契约变更，待裁），要么给该模块加 Android 依赖（丢掉纯 JVM 可测）。另：日志**只追加、从不清理**，体积随 run 数线性增长（每次 run 恒定两条行，已无冗余可压），**保留期策略**（老终态行 / 老 nonce 能否丢）会动到 §8.5 的幂等锚点，同样待裁；`JournalFileStore` 的类注释与 `IntentStore` 接口注释已按此改写 |
+| §11.2 T2 / §10.2 | **npm 生产装配接线**（`lockKey` / `executor` / `scriptExecutor`） | **未落（2026-10-01 核实）**：`AppShellKit` 调 `NpmShellKit.assembleHandler(filesDir, cacheDir)` 走全缺省 —— 真机安装如实回 `ERR_NOT_IMPLEMENTED`、`lock.sig` **既不签也不验**、快照不导出；全仓无 `KeyProvider` 实现。契约侧已如实标注（§11.2 T2「接线现状」+ §11.3 第 8 条 + `SECURITY.md` 密钥表），接线决策待办在 [`backlog.md`](backlog.md) A1/A1c |
 | §15 | APK ≤ 40MB | **已超支**（实测 ≈81MB，见 [`design-decisions.md`](design-decisions.md#已推翻--已改口径)） |
 | — | 真机红测：exec/dlopen + 桥全链 | **已做**（2026-09-29，见下「流水」；非 root、Android 13/arm64、生产布局） |
 | — | 真机红测：16KB 页机 / SELinux enforcing / `nativeLibraryDir` 提取路径 / targetSdk36 exec 策略 | 未做（设备 PAGE_SIZE=4096，这几项该机**原理上测不到**） |
@@ -40,6 +41,34 @@
 只在那里写一份（本文件不复制，避免两处漂移）。
 
 ## 流水（最新在上）
+
+### 2026-10-01 —— 待办池**批 1**（A2 / A3 / A1b / A4；分支 `hellish-shrimp`）
+- **A2 `AndroidShellExecutor` 超时真修**（`platform/system`）：病灶是「超时抛错后 `coroutineScope` 要等两条
+  `readBytes()` 子协程结束才传播异常，而 `destroyForcibly()` 在那个作用域**外**的 `finally` 里」——
+  阻塞读**不响应取消**，子进程把管道写端交给孙进程（`su -c …` / `sh -c "… &"`）时杀掉直接子进程也换不来
+  EOF，于是「设 1s 超时、实际卡 100s 且没杀」。**修法**：读流改跑在**可弃的守护线程**（新 `PipeReader`，
+  不占 `Dispatchers.IO` 共享池），协程只 await 一个可中断的闩；超时路径**先杀再抛**；成功路径等 EOF
+  设 250ms 有界宽限（正常形态退出即 EOF，宽限只兜「写端被孙进程继承」这一种例外 —— 铁律 3 不允许无限等待）。
+  **真进程实测（临时探针，跑完即删）**：真 `sleep 5` + 300ms 超时，修前 **5005ms**（超时形同虚设）→ 修后
+  **309ms**；`sh -c "echo hi; sleep 5 &"`（孙进程持有管道）修前 **5003ms** → 修后 **502ms**（= 两次宽限）。
+  单测新增 3 条 `HeldStream`（吐完字节后永不 EOF）用例复现该形态，**对旧实现逐条验证过是红的**。
+  **未做且不假装做了**：捕获输出**无上限**（`cat` 大文件可撑爆内存）——加不加 cap、超限报错还是截断是**契约口径**
+  （§9.6 写的是「双流并发读干」），已记在 [`backlog.md`](backlog.md) A2b，等拍板，不夹带进本次修复。
+- **A3 关备份**：`app/src/main/AndroidManifest.xml` 置 `android:allowBackup="false"` —— `files/.autojs/`
+  下的信任锚与审计面（`lock.sig`、审批台账、安装 journal/history、意图日志）不再进 Auto Backup / 换机迁移。
+  契约侧同步登记为新威胁行 **§11.2 T9**（口径记录见 [`design-decisions.md`](design-decisions.md) 第 16 项，
+  依 §11.4「新增防线走决策台账」）。
+- **A1b + C4 安全文档改实话**：`SECURITY.md` 密钥表原写「生产走 Android Keystore」，实际**没有任何
+  `KeyProvider` 实现、生产传 `null`** —— 改成现状（不签不验），并把 `executor`/`scriptExecutor` 同批缺省
+  一并写明；上报渠道一节删掉 `TODO@example.invalid` 这类**看起来像真地址**的占位，直说「本仓当前没有生效的
+  私密上报渠道」。契约侧 §11.2 T2 加「接线现状」、§11.3 第 3/8 条同步改。
+- **A4 `LockSigner` 代码与文档对齐**：KDoc 写「前缀不识一律拒」，实现却是 `removePrefix("v1")` —— 裸 hex
+  （恰好等于正确 HMAC、只是没有版本标签）照样放行，等于把「换 ECDSA 的兼容开关」废掉。改为严格形态
+  `v1 <64 位小写 hex>`（`matchEntire`，其余一律 `ERR_PERMISSION_DENIED`）；`sign` 改**原子落位**
+  （写 `lock.sig.tmp` → `force(true)` → `ATOMIC_MOVE` → 目录 fsync；目录 fsync 失败方向是 fail-closed）。
+  新增 3 条用例，其中「裸 hex 被拒」**对旧实现验证过是红的**（旧实现放行）。
+- **门禁**：CI 同源 13 个测试任务本机全绿（`./gradlew …` 逐字同源；含 `:app:testDebugUnitTest` —— manifest 改动
+  过了 `processDebugManifest` 与打包面）。**未上远端 CI**：本批不改 `ci.yml`。
 
 ### 2026-10-01 —— 第二次外审：建议落进新建的 **[`docs/backlog.md`](backlog.md)**（待办池）
 - **不是台账条目，是收件箱**：本轮外审（优化 / 文档 / 结构三部分约 30 条）**逐条落进 [`docs/backlog.md`](backlog.md)**，

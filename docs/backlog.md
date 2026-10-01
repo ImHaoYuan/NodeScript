@@ -20,11 +20,8 @@
 | # | 事项 | 证据位置 | 核实 | 影响 | 成本 |
 |---|---|---|---|---|---|
 | **A1** | **npm 生产装配没接线**：`executor` 与 `lockKey` 都走缺省 —— 真机上安装返回 `ERR_NOT_IMPLEMENTED`，且 `lock.sig` 不生成、`npm ci` 不验签、快照不导出（§10.5-1 的带外信任锚在生产装配里缺席） | `AppShellKit.kt:403` 调 `NpmShellKit.assembleHandler(filesDir, cacheDir)` 用缺省；`NpmShellKit.kt:49` `executor` 缺省 `HeavyOpExecutor.Unavailable`、`:53` `lockKey` 缺省 `null`；`HostNodeExecutor` 在 `app/src/main` **零引用**（只在 `P0LoopbackTest` / `HostNodeNpmE2ETest` 里注入） | ✅ 2026-10-01 | 头等功能不可用 + 安全文档与代码不符 | M（接线）/ S（只改文档） |
-| **A1b** | 同上，**文档面**：`SECURITY.md:40` 写「生产走 **Android Keystore**（经 `LockSigner.KeyProvider` 接缝注入）」，现状是没有任何 `KeyProvider` 实现、生产传 `null` | `SECURITY.md` 密钥表；全仓无 `KeyProvider` 实现 | ✅ 2026-10-01 | 安全故事讲了代码没做的事 | S |
 | **A1c** | 若真接 Keystore：`LockSigner.KeyProvider.keyBytes(): ByteArray` 这个形状**与不可导出的 Keystore 密钥冲突**，接缝可能要改成 `sign(bytes)/verify(bytes)`（密钥不出 Keystore） | `LockSigner.kt:35` | 待核实（外审推论，未核实 Keystore 细节） | 影响 A1 的接缝设计，先定形状再动手 | S（调研） |
-| **A2** | **`AndroidShellExecutor` 超时形同虚设 + 捕获输出无上限**：超时抛错后 `coroutineScope` 要等两个 `readBytes()` 子协程结束才传播，而阻塞读**不可取消**；`destroyForcibly()` 在那个作用域**外面**的 `finally` 里，于是杀进程迟迟不执行。子进程把管道传给孙进程时（`sh -c "sleep 100"`）= 「超时 1s、实际卡 100s 且没杀」 | `AndroidShellExecutor.kt:64-86`；测试的假流是 `ByteArrayInputStream`（立刻 EOF）→ **测不到这条路** | ✅ 2026-10-01 | 违 §7「超时是实现方义务」，留孤儿 `su`/`sh`；大输出可撑爆内存 | S |
-| **A3** | **备份没关**：`files/.autojs/`（`lock.sig`、审批台账、任务/意图日志）默认可被 Auto Backup 带走 | 全仓 `.xml` 零 `allowBackup` / `dataExtractionRules` / `fullBackupContent` | ✅ 2026-10-01 | 信任锚与状态文件被恢复到别的上下文 | S |
-| **A4** | `LockSigner` 文档与代码不符：KDoc 说「前缀不识一律拒」，实际 `removePrefix("v1")` 对裸 hex 照样接受；`sign` 原地写（非 temp+rename） | `LockSigner.kt:56-70` | ✅ 2026-10-01 | 影响低（仍要过 HMAC），但契约语句与行为不一致 | S |
+| **A2b** | **shell 捕获输出无上限**（2026-10-01 新增）：`PipeReader` 把 stdout/stderr 全量读进内存，`cat` 一个大文件就能把宿主撑爆。加 cap 属**契约口径**（§9.6 写的是「双流并发读干」）：截断=静默有损、超限报错=合法大输出被拒，两条都要先拍板取哪个数、哪种语义 —— 故本次 A2 只修超时/收尸，不夹带 | `AndroidShellExecutor.PipeReader` | ✅ 2026-10-01（病灶属实） | S（定了口径就快） |
 | **A5** | 桥没有 per-engine 身份：同一 uid 的任何进程可达全部命名空间（`SECURITY.md` 已承认是有意为之），无法按脚本/按 run 归因与审计 | 同 uid 门禁 `BridgeSocketListener.kt:117-122` 是 fail-closed；abstract 名可预测 | ✅ 2026-10-01 | 以后想加 per-run 权限会很贵 | M（协议变更，须与 `main.cpp` + JS bootstrap 同批） |
 
 ## B. CI / 工程基建
@@ -43,7 +40,7 @@
 | **C1** | `README.md` 只有 **744 B**，没有前置/构建/测试/运行命令 —— 真正的步骤在面向 agent 的 `CLAUDE.md` 里，人类读者进不来 | `README.md` | ✅ 2026-10-01 | S |
 | **C2** | `CLAUDE.md` 构建节硬编码 `/root/android-sdk`、`/root/develop/claude/tools/jdk-17.0.17+10`、`/root/ndk/android-ndk-r28c` → 换成 `ANDROID_HOME` / `JAVA_HOME` / `ANDROID_NDK_HOME` 约定，私人路径别进跟踪文件 | `CLAUDE.md` 构建 / NDK 节 | ✅ 2026-10-01 | S |
 | **C3** | 失效引用：`ForegroundOps.kt:174`（明写 `tools/jvm-test.sh`）、`AndroidPermissionGatesTest.kt:22`、`PlatformWiringTest.kt:363` 仍拿**已删的**旁路当**现役理由**（docs 里提到它是历史记录，不算漂移）；`CLAUDE.md` 仓库地图有悬空行「`module-stubs` 之外的模块」；`ci.yml:70-71`（assemble 走 Docker）与 `node-slice.yml` 的说法互斥。外审建议：加一个**文档路径/链接检查门**（它就是这样扫出这四条的） | 三处 .kt + `CLAUDE.md:14` + 两个 workflow | ✅ 2026-10-01 | S |
-| **C4** | `SECURITY.md` 仍是占位：`TODO@example.invalid`、「改为私密安全公告入口」；第 40 行 Keystore 表述见 A1b | `SECURITY.md:26-29,40,56` | ✅ 2026-10-01 | S |
+| **C4** | `SECURITY.md` 上报渠道：**仓库侧已改成实话**（2026-10-01，删掉 `TODO@example.invalid` 这类看起来像真地址的占位，直说「本仓当前没有生效的私密上报渠道」）。**只剩维护者动作**：在 GitHub 仓库设置里开通 **Security → Report a vulnerability**（私密漏洞上报），开通后把入口写回该节 | `SECURITY.md` 报告一节 | ✅ 2026-10-01 | 维护者 5 分钟 |
 | **C5** | 无 `CONTRIBUTING.md` / `CHANGELOG` / PR、issue 模板；`versionName` 硬编码 `0.1.0` | `app/build.gradle.kts:19` | ✅ 2026-10-01 | S |
 | **C6** | `design-status.md` 122KB / 737 行、单元格极长，`design-decisions.md` 46KB —— 外审建议拆「当前状态页 + 按日期的日志文件」并加 `docs/README.md` 索引。**注意**：拆分要保住 § 锚点与「只追加」纪律（§号是唯一权威锚） | `docs/design-status.md` | ✅ 2026-10-01 | M |
 | **C7** | JS facade 没有**用户向** API 参考（`12-js-api.md` 是设计文档）→ 可从 `bridge/js` 生成 typedoc | `bridge/js/src` | 待核实（未评估 typedoc 覆盖度） | M |
@@ -76,9 +73,9 @@
 
 ## F. 建议批次（一次一批，每批跑完整 CI 同源门）
 
-1. **批 1（S，可当天做完）**：A2（shell 超时真修 + 真进程测试）、A3（关备份）、A1b/C4（先把 `SECURITY.md` 改成实话）、A4（LockSigner 文档与代码对齐）。
+1. ~~**批 1（S）**：A2 / A3 / A1b / A4~~ —— **2026-10-01 已完成**，流水见 [`design-status.md`](design-status.md)（A2b 是修 A2 时露出的新口子，留在这里）。
 2. **批 2（S）**：B2（CI 卫生）+ C3（失效引用）+ D2（删 sandbox 目录）+ D4（README 归位）。
-3. **批 3（S）**：C1/C5（人类 README + CONTRIBUTING）。
+3. **批 3（S）**：C1/C5（人类 README + CONTRIBUTING）+ C4（只剩维护者开通上报入口）。
 4. **批 4（M，需先拍板）**：A1/A1c —— npm executor 与 lock 签名的**接线决策**（谁提供 `KeyProvider`、接缝形状、密钥生命周期）。
 5. **批 5（M）**：B1（CI 覆盖：nightly + assembleDebug + lint）。
 6. **批 6（M）**：D3/D5（platform 子包对齐）、D7（大文件拆分）—— 结构性改动，一次一个 PR。
