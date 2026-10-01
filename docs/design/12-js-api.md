@@ -21,7 +21,7 @@
 - ~~`auto.ocr`（P1）~~ **不内置（2026-09-26 拍板，见 §9.7）** / `auto.plugins`（P2）/ `auto.workManager`（定时/Intent 任务）
 - `auto.power`（脚本电源：`power_manager` 桥面的 `acquire`/`release`/`status`，§8.7）
 - `auto.npm`（包管理与依赖生态，§10：install/ci/list/audit/offlineGap/importOfflineBundle/requestApprove——审批人机分离；事件面 `onProgress`/`onApproval`/`onWarning`/`onFinished` 四方法，wire 走 `events`/`approvals` 两个拉取口而非推送，§10.7）
-- Node 内建：`fs/path/http/os/process` 等**完整可用**（除 `child_process` 显式报 `ERR_NOT_IMPLEMENTED`）；`@autojs/*` npm 包 SDK（`@autojs/opencv` 对齐 Pro）。
+- Node 内建：`fs/path/http/os/process` 等**完整可用**（除 `child_process` 显式报 `ERR_NOT_IMPLEMENTED`）；facade 侧 SDK（`require('auto')`，见 §12.1/§12.4）。
 
 **接线现状（Kotlin 侧，与 `AppShell.assemble` 对齐；未列出的命名空间在两侧都还没有 handler）**：
 

@@ -63,6 +63,45 @@
     - **落点**：`app/src/main/AndroidManifest.xml`（`:app` 是唯一设 application 级属性的模块，库 manifest 合并面
       不动）；契约行在 §11.2 T9。
 
+2026-10-01 拍板（backlog 批 7 的三项 S 级；非 §18 编号项，原口径不涉）：
+
+17. **`:app-service:permission-center` 维持独立模块，不并回**（backlog D1，91 行的小模块）：
+    外部审查的疑问是「独立模块偏重」，逐条核对依赖图后维持现状 ——
+    - **它是 §9.5 那条例外的物理载体**：契约写「所有模块不得直接查 Settings/ActivityCompat，一律经此门禁」，
+      而 `:platform:*` 的 archUnit 黑名单含 `com.autoscript.appservice..`（所以门禁不能放在平台模块里）。
+      独立模块把这条边界变成**依赖图上的硬边**（`ModuleGraphTest`：`permission-center → :domain` 单点），
+      并回任何 `:app-service:*` 则要把「app-service 内部不许直查系统设置」变成口头约定 —— 用架构手段守的边界
+      不该降级成约定。
+    - **并回的代价大于收益**：它只依赖 `:domain`；并进 runtime/scheduler 任一个都要给那个模块新增一条上游
+      依赖或开子包，而那些模块已经有各自的清晰职责。
+    - **「等它长」已有征兆**：门禁面在长（`Capability` 九项），行为面（reader/launcher 两道缝）也在长。
+    - 记这条是为了让下次再看到「91 行」时不必重查一遍。
+
+18. **命名统一到此为止：`.autojs` 目录与 `autojs-lock-v1` 前缀**保留**（backlog D6 的剩余部分）**：
+    描述面（9 处 `@autojs/*`）已按事实侧改成 `auto` / `bridge_native.node`（`AutoJsPro` 九处保留 —— 那是
+    **对标产品名**）。但存储面两处**不改**，理由是它们不是命名而是**已落盘的格式**：
+    - `files/.autojs/` 是 §10.2 写进契约的存储布局（`lock.sig`/审批账/journal/history 的落位），实现与测试
+      共 30+ 处一致使用；
+    - `autojs-lock-v1|` 是 **lock 签名前缀**（§10.5-1 带外信任锚的输入串）。改它 = 旧设备上已签的
+      `lock.sig` **全部验不过**，而失败形态是「明明签过的 lock 被判未签」—— 对一个安全锚来说是往危险方向退。
+    - 要改的话须带兼容策略（新前缀 + 旧前缀验签回退，或一次性重签），属契约变更，须先拍板。
+    - **发布用的 npm scope 归属未核**（`bridge/js` 标 `"private": true`、不发布 registry）—— 需维护者确认。
+
+19. **第三方许可声明 = 生成物，且随 APK 分发**（backlog D8；`README.md` 许可节同批改写）：
+    - **为什么生成**：版本事实来源是 `node-runtime-build/VERSIONS.env`（Node/NDK/OpenCV/KleidiCV/npm 全部
+      钉在那里），手写声明必然在某次版本变更后与事实脱节，而**许可声明脱节在分发时是法律问题**。
+      `node-runtime-build/licenses/gen-notices.mjs` 从 VERSIONS.env 渲染 `THIRD_PARTY_NOTICES.md`，
+      CI 有一道 `gen-notices.mjs && git diff --exit-code` 门（照抄 js-tests 的 `gen:wire` 形状）。
+    - **原文与清单分开**：逐字许可原文入 `node-runtime-build/licenses/`（Node 1586 行 / OpenCV /
+      KleidiCV / libjpeg-turbo 双许可含 IJG 原文 / libpng / zlib），生成器**只渲染清单面**——
+      转述上游许可即失真，改原文即伪造。
+    - **随 APK 分发**：仓里一份只解决审计面；装到用户手机上的二进制，其许可条款必须**随分发可达**，
+      故 `prepareNoticesAssets`（`autoscript.engine-natives` 约定插件）把它与七份原文拷进
+      `assets/third-party/`。**判据与前三件不同**：本件在 git 里（生成物已入库），缺件是**仓库破损**而不是
+      「本机没构建」——按 `bridgeDist` 口径红，不按选填件口径只 warn。
+    - **NDK/libc++ 一行如实写「见 NDK 随附 NOTICE（未随包）」**：工具链 NOTICE 体积大且随 NDK 分发，
+      声明它而不复制，比复制一份可能过期的副本诚实。
+
 2026-09-30 拍板（外部审查整改步骤 7；非 §18 编号项，原口径不涉）：
 
 13. **`images` 匹配链路提速方案**（2026-09-30 评审拍板；A2–A4 实测 ❌ 后的出路裁决）：

@@ -4,7 +4,7 @@ import com.autoscript.domain.bridge.HandleRef
 
 /**
  * 图像分析契约（docs §9.2；JS 对偶 `auto.images`，
- * 对标 AutoJsPro v9 `images.matchTemplate/findImage` + `@autojs/opencv`）。
+ * 对标 AutoJsPro v9 的 `images.matchTemplate/findImage`，计算核走 OpenCV）。
  *
  * 为什么住 `:domain`：与 [FrameSource] / `com.autoscript.platform.system.sensors.SensorSource`
  * 同一套理由 —— 真实现要碰 native 管线（`libopencv.so`，OpenCV 4.x）与

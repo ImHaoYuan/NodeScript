@@ -31,7 +31,7 @@
 - `:platform:capabilities` — **无障碍三面**：a11y 树/手势、screen 截图帧源、dialogs 对话框编排（`capabilities/{a11y,screen,dialogs,device}/` 子包；2026-09-30 步骤 6 系统面迁出，§9.1–9.4）
 - `:platform:system` — **系统面 handler + SPI 实现 + 能力专用契约**：`SystemNamespaces` 十一件（shell/device/app/floatingWindow/datastore/zip/settings/notification/clipboard/sensors/images）+ 电源面 `PowerManagerNamespaceHandler`/`WakeLockLedger`（§8.7）+ `SystemSpis.of` 实现入口 + 五契约（步骤 6a 自 :domain 迁入；`DialogHost` 留 :domain，§9.6/§12.2）
 - `:ui` — Compose UI 呈现层：启动 Activity（launcher）、首屏/任务中心/控制台/能力中心界面；状态经 `:domain` 的 `HostSummary` 读口现取，禁依赖 `:app`（§6）
-- `bridge/js/` — **npm 包**（TS facade SDK `@autojs/*`，非 Gradle 模块、非 npm workspaces——空 `workspaces` 字段已删，§12.4）
+- `bridge/js/` — **npm 包**（TS facade SDK，脚本侧导入名 `auto`，非 Gradle 模块、非 npm workspaces——空 `workspaces` 字段已删，§12.4）
 - `node-runtime-build/` — **CI 构建管线**（Node 24 源码 recipe + 16KB 对齐门禁，非 Gradle 模块，§3）
 
 ## 依赖方向铁律（Gradle/archUnit 强制，见 §4.1）

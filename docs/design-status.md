@@ -42,6 +42,47 @@
 
 ## 流水（最新在上）
 
+### 2026-10-01 —— 批 7（三项 S 级）：D8 许可声明 / D6 命名面 / D1 模块归属（分支 `hellish-shrimp`）
+
+批 7 原标注「L/产品、需拍板」。这一轮只做**不需拍板就能动手的 S 级**，把待拍板的部分原样留在池里。
+
+**D8 第三方许可声明（backlog 出池）**
+
+- `THIRD_PARTY_NOTICES.md`（**生成物**，仓库根）由 `node-runtime-build/licenses/gen-notices.mjs`
+  从 `VERSIONS.env` 渲染 —— 版本事实来源是那一份，**手写声明必然与事实脱节，而许可声明脱节在分发时
+  是法律问题**。CI `js-tests` job 新增一道 `gen-notices.mjs && git diff --exit-code`（照抄上面
+  `gen:wire` 门的形状，同 job 同 Node 24 环境）。
+- 七份**逐字**许可原文入 `node-runtime-build/licenses/`：Node 1586 行（MIT，npm 段为
+  Artistic License 2.0）、OpenCV 4.14.0（Apache-2.0）、KleidiCV 26.03（Apache-2.0）、
+  libjpeg-turbo（**双许可**，IJG 原文 `README.ijg` 一起入库）、libpng（v2）、zlib。
+  生成器只渲染**清单面**（哪几个组件/什么版本/哪条交付轨/许可叫什么/原文在哪）——
+  转述即失真、改原文即伪造。
+- **随 APK 分发**：`prepareNoticesAssets`（`autoscript.engine-natives` 约定插件）把清单 + 七份
+  原文拷进 `assets/third-party/`；实测 APK 内 8 个条目齐在。**判据与前三件刻意不同**：
+  本件在 git 里，缺件是仓库破损（红），不是「本机没构建」（warn）。
+- 核版本时踩到一个真坑并纠正：本机手边那份 Node 源码树是 **npm 6.14.8**（node 12.x 时代），
+  其 LICENSE 只有 1586 行；按 `VERSIONS.env` 的 `v24.21.0` 从 nodejs/node 对应 tag 取才是
+  **2946 行**那份。**装错版本的许可原文和没写一样糟** —— 已入库的是 2946 行那份。
+
+**D6 命名面（部分完成）**
+
+- 描述面 9 处 `@autojs/*` 按事实侧改掉：`06-modules`（npm 包 → 导入名 `auto`）、
+  `07-bridge` ×3（→ 真实交付物名 `bridge_native.node`）、`09-capabilities`（→ OpenCV）、
+  `12-js-api`（→ `require('auto')`）、`CLAUDE.md`、`bridge/js/package.json` description、
+  `ImageAnalyzer.kt` KDoc。`AutoJsPro` 九处**保留** —— 那是**对标产品名**，不是自己的名字。
+- **`.autojs` 目录与 `autojs-lock-v1` 前缀不改**（记入 design-decisions 第 18 项）：前者是 §10.2
+  写进契约的存储布局，后者是 **lock 签名前缀** —— 改它 = 旧设备已签的 `lock.sig` 全验不过，
+  失败形态是「明明签过的 lock 被判未签」，对安全锚是往危险方向退。**发布 npm scope 归属仍待维护者确认**。
+
+**D1 `:app-service:permission-center` 维持独立（决策记录，不动代码）**
+
+91 行的小模块经依赖图逐条核对后维持现状：它是 §9.5「所有模块不得直查 Settings，一律经此门禁」
+那条边界的物理载体 —— `:platform:*` 的 archUnit 黑名单含 `com.autoscript.appservice..`，独立模块
+把边界变成依赖图上的硬边（`ModuleGraphTest` 单点），并回则要降级成口头约定。记入 design-decisions 第 17 项。
+
+门：13 个 JVM 测试任务 + `lintDebug` + `assembleDebug` + `bridge/js` npm test + 文档链接门（127 条）+ 本机
+`gen-notices.mjs --check`（APK 内 `assets/third-party/` 8 条目实测齐在）。
+
 ### 2026-10-01 —— 批 6：**D3/D5 platform 子包对齐 + D7 大文件拆分**（分支 `hellish-shrimp`）
 
 批 6 记的是「结构不齐」：同一个平台的两层（`:platform:system` / `:platform:capabilities`）长出

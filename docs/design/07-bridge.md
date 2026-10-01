@@ -9,7 +9,7 @@ api 包 (Promise/EventEmitter 封装)          ← TS facade，业务语义
 RuntimeBridge (单例)                        ← requestId 生成/关联、TTL、错误折叠
    │  调用: bridge.invoke('a11y.find', {...}, {ttl: 200})
    ▼
-[N-API addon @autojs/bridge-native]         ← 每 message 一个 job
+[N-API addon bridge_native.node]           ← 每 message 一个 job
    dispatcher 单注册表（module → napi_function）
    TSF per context (napi_threadsafe_function, nonblocking)
    ▼  跨线程投递（不持锁）
@@ -461,7 +461,7 @@ spawn/打包），JS 目录独缺，脚本 `ERROR_CODES.includes('ERR_IO')` 为 
 | `_ZN4node5StartEiPPc`（`node::Start(int, char**)`） | libnode.so | :nodeN 单进程单 isolate 入口（§5.1 一进程一 Start） |
 | `_ZN4node4StopEPNS_11EnvironmentENS_9StopFlags5Flags` | libnode.so | quiesce 第④步后收尾（§5 推论 A：kill 必须归还槽位，Stop 即"正常死"的路径） |
 | `napi_create_threadsafe_function` / `napi_call_threadsafe_function` | libnode.so | TSF 双队列的创建/投递（§7.3，见下） |
-| `napi_module_register` / `napi_module_register_by_symbol` | libnode.so | addon 模块注册（`@autojs/bridge-native` 即一个 N-API 模块） |
+| `napi_module_register` / `napi_module_register_by_symbol` | libnode.so | addon 模块注册（`bridge_native.node` 即一个 N-API 模块，见 `engine/node-process/scripts/build-native.sh`） |
 | 20562 个动态 T 符号（含 `napi_create_external_arraybuffer` 系） | libnode.so | §7.4 大二进制 0 拷贝（`allocateDirect` → external arraybuffer）的符号依据 |
 
 `NAPI_VERSION=10`（§67 选型表冻结）：addon 编译期 `-DNAPI_VERSION=10`，
@@ -513,7 +513,7 @@ spawn/打包），JS 目录独缺，脚本 `ERROR_CODES.includes('ERR_IO')` 为 
    "libnode 可被候选位替换"（见 `engine/node-process/scripts/build-native.sh` 的装载闭包断言）；
 3. `dlsym _ZN4node5StartEiPPc` → `node::Start` 单 isolate/context，argv =
    `node -e BOOTSTRAP -- <script> [args…]`（无 addon 则直接跑 script）：BOOTSTRAP 预载
-   `@autojs/bridge-native` addon → `setSocketFd`（首次注入即拉起读线程）→ 读
+   `bridge_native.node` addon → `setSocketFd`（首次注入即拉起读线程）→ 读
    `AUTOSCRIPT_RUN_ID` 起 500ms `engines.heartbeat` 自动打点（`setInterval().unref()`
    不吊命事件循环；reqId `-seq` 负数命名空间；打点失败 try/catch 吞掉不炸脚本 ——
    失联由看门 `noHeartbeat` 判，不是让心跳反过来杀脚本）→ require 真脚本

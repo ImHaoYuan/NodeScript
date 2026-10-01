@@ -23,7 +23,7 @@
   BACKWARD）。ArchUnit 量化分层：`android..` 只许服务三件（`AutoScriptAccessibilityService`/`ServiceBridge`/`ServiceNode`），语义层碰 android 即红；capabilities 本机测试因此连 android.jar 的桩面都不碰—
   —测试全走假桥）。事件环 `A11yEventRing`（有界 512、`nodeHandle` 恒 null 不伪造句柄、type 用 `windowStateChanged`/`windowContentChanged`/`viewScrolled` 诚实名）。
 
-### 9.2 截图与图像管线（`media_projection` / `image` / `@autojs/opencv`）
+### 9.2 截图与图像管线（`media_projection` / `image` / OpenCV）
 ```
 FrameSource (SPI)
   ├─ AccessibilityScreenshotSource  API34 takeScreenshotOfWindow · 333ms 节流 · 默认
