@@ -250,6 +250,7 @@
    - **默认 registry = 官方 `registry.npmjs.org`**——不分发、不面向陌生用户（第 3 项），镜像加速不是开箱前提；用户要快自己 `setRegistry` 切 npmmirror。`HostNodeExecutor`（实际装包用的那家）与 `NpmRegistryVerifier`（交叉校验的首选）**两处缺省同批改**，§10.2/§10.4 的"默认 npmmirror"同批改。**第二意见的规则同时改写**：交叉校验要的是**两个运营主体**，不是"官方那一家"——首选官方时镜像做第二意见，首选任意别家时官方做第二意见（`secondary` 缺省跟着 `primary` 走），否则会出现 primary 与 secondary 同站、自己跟自己比也算通过。
    - **lifecycle 脚本不做出厂卡口，安装时让用户自己选**——既不是 global-deny 也不是白名单：装包时按包如实告知 `hasInstallScript`（**禁止静默**，§10.12 那条保留），跑不跑由这次安装的使用者当场决定；`requestApprove`/审批接口保留为这条选择的落点。
    - **实现落差（明写，不当已办）**：现网 T0 是 `--ignore-scripts` 全程 + npm12 `allowScripts=none`，lifecycle 脚本**一个都没跑过**，安装回执显式发 `scripts-skipped`（禁止静默那条就是为这个静默面立的）。"用户选择跑"要先有 spawn 桥（`child_process` 真执行），那是 §14 的 **P1 项**——**口径在此定死，实现排 P1**，P1 落地时按本条写交互，不重新拍。
+   - **门禁侧已落（2026-09-29，存盘于本地 `node-slice`；2026-10-01 移植进 main，见 `design-status.md` 流水）**：`runScript`/`exec` 走「宿主从盘上 manifest 重算 `(pkg, versionHash)` → ledger 命中 APPROVED 才放行 → 纯 JS bin 白名单」，**未获批时把请求自请入队**（approvals 流 + `drainApprovals` 拉取口）让用户在审批卡上当场选，而不是干巴巴拒回或由脚本自批 —— 这就是「安装时让用户自己选」的交互落点。执行体是 `ScriptOpExecutor` 接缝（不复用 `HeavyOpExecutor`：lifecycle 不做 reify）。**安装侧 `hasInstallScript` 的当场告知与选择仍缺**（那要先有 spawn 桥才兑现得了"跑了"），见 [`design/10-npm.md`](design/10-npm.md) §10.3 的 T1 落地追记与「仍未落」段。本条**口径未变**，只是实现进度推进。
 
 2026-09-25 拍板。编号与 §18 原编号一致（第 8、9 项），原文整段保留：
 

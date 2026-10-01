@@ -49,6 +49,11 @@ class InstallCoordinator(
     private val services: NpmServices,
     private val executor: HeavyOpExecutor = HeavyOpExecutor.Unavailable,
     /**
+     * T1 lifecycle 脚本执行体（§10.3 T1 下半段：spawn 桥 → 临时引擎）。
+     * 缺省 [ScriptOpExecutor.Unavailable] = 装配缺口 → 有审批票也如实 ERR_NOT_IMPLEMENTED。
+     */
+    private val scriptExecutor: ScriptOpExecutor = ScriptOpExecutor.Unavailable,
+    /**
      * 首选注册表解析（缺省读项目 `.npmrc`）。null ≠ 「永远不知道」：
      * 与 [NpmServices.registryOf] 同一约定——未传时用协调器自己的 npmrc 读取，
      * 测试显式关校验/换源时才注入。
@@ -149,6 +154,63 @@ class InstallCoordinator(
         suspend fun emit(event: InstallEvent)
     }
 
+    /**
+     * T1 lifecycle 脚本执行体接缝（§10.3 T1「spawn 桥 → `:main` 沿 EnginePool 同路径拉临时
+     * 引擎执行」的执行侧契约）。
+     *
+     * 为什么不复用 [HeavyOpExecutor]：那条通道编排的是「事务」——stageDir + journal +
+     * 原子落位，为的是 npm CLI 会重写 `node_modules`。lifecycle 脚本不做 reify，
+     * 走那条链会为一个不改依赖树的操作凭空造暂存目录与 commit 记录，
+     * `unfinished()` 里多出没有产物的残骸。两条通道共用 TTL/取消/事件面，差异只在落位。
+     *
+     * [ScriptOp.npmArgs] 交出的是 npm CLI 口径的参数（`run <name> -- <args>` /
+     * `exec <args> -- <bin>`）—— 真执行体把它交给 vendored npm 或直接按 shim 拦截后的
+     * 语义展开，两条路都在宿主侧，故此处不替实现方决定。
+     *
+     * **TTL 契约**同 [HeavyOpExecutor]：协调器已套 [ScriptOp.timeoutMillis] 的
+     * withTimeoutOrNull，实现方必须合作式响应取消（子进程随取消销毁，见 §10.3 T1 的
+     * TERM→超时→SIGKILL 回收顺序），否则超时后会成为争抢同一项目锁的孤儿。
+     */
+    fun interface ScriptOpExecutor {
+        suspend fun execute(op: ScriptOp, sink: ProgressSink): String   // 返回摘要（人类可读）
+
+        /** 默认：spawn 桥未接入 → 如实 ERR_NOT_IMPLEMENTED（门禁已过也不假装跑过）。 */
+        object Unavailable : ScriptOpExecutor {
+            override suspend fun execute(op: ScriptOp, sink: ProgressSink): String {
+                throw AutojsException(
+                    ErrorCode.ERR_NOT_IMPLEMENTED,
+                    "T1 spawn 桥未接入：已获批的 ${op.what}（${op.action.name}）未执行。" +
+                        "放行门禁与审批账本已就位，缺的是 child_process shim → 临时引擎这一段（§10.3 T1）",
+                )
+            }
+        }
+    }
+
+    /**
+     * 一次已放行 lifecycle 执行的上下文。
+     *
+     * [what] 是脚本名或 bin 名（审计与错误信息的抓手）；[npmArgs] 是 npm CLI 口径参数；
+     * [versionHash] 带上是为了让执行体可复述「我跑的是哪一份」——审计条目只记摘要不够，
+     * 用户问「我批的那份脚本现在还在不在」时要有据可查。
+     */
+    data class ScriptOp(
+        val handleId: String,
+        val projectId: String,
+        val action: ApprovalAction,
+        /** 审批主体 = 归属包名（run 侧是项目自身包名，exec 侧是提供该 bin 的包名）。 */
+        val pkg: String,
+        /** 脚本名或 bin 名。 */
+        val what: String,
+        val args: List<String>,
+        val projectRoot: java.nio.file.Path,
+        val npmArgs: List<String>,
+        val versionHash: String,
+        val timeoutMillis: Long,
+    ) {
+        /** 审批键的主体段（`"<pkg>|<what>"`）—— 账本键与审计条目同款，不再各拼各的。 */
+        val subject: String get() = "$pkg|$what"
+    }
+
     // —— 运行态（全局互斥 + per-project 锁 + 事件流 + 句柄账） ——
 
     private val globalSession = Mutex()
@@ -165,6 +227,14 @@ class InstallCoordinator(
     private data class TrackedOp(
         val handle: InstallHandle,
         val nonce: String,
+        /**
+         * 本次操作**有没有** journal 事务（重操作有：begin→commit/fail；T1 lifecycle 没有：
+         * 它不改依赖树，见 [ScriptOpExecutor] 上方那段为什么不能借道事务链）。
+         *
+         * 取消路径按它分流：给没有事务的操作写一条 journal.fail 就是在事务状态机里塞一条
+         * 「从未 begin 却已 fail」的记录（§10.4 的 journal 决定残骸清扫，状态机不容无源之记）。
+         */
+        val journaled: Boolean = true,
         @Volatile var cancelled: Boolean = false,
         @Volatile var done: Boolean = false,
     )
@@ -322,8 +392,13 @@ class InstallCoordinator(
         handles[handle.id]?.let {
             it.cancelled = true
             if (!it.done) {
-                journal.fail(it.nonce, handle.projectId, staging.stagePath(handle.projectId, it.nonce).fileName.toString(), "用户取消")
-                staging.sweep(handle.projectId, setOf(it.nonce))
+                if (it.journaled) {
+                    journal.fail(
+                        it.nonce, handle.projectId,
+                        staging.stagePath(handle.projectId, it.nonce).fileName.toString(), "用户取消",
+                    )
+                    staging.sweep(handle.projectId, setOf(it.nonce))
+                }
                 it.done = true
                 emit(InstallEvent.Finished(handle.projectId, handle.id, success = false, detail = "已取消"))
             }
@@ -397,22 +472,154 @@ class InstallCoordinator(
 
     override suspend fun pendingApprovals(projectId: String): List<ApprovalRequest> = ledger.pending(projectId)
 
-    // ══════════ P1（待 ledger APPROVED 才放行；执行体仍走重操作通道） ══════════
+    // ══════════ P1 T1 lifecycle 脚本（§18 第 7 项口径：安装时让用户自己选） ══════════
+
+    /**
+     * 未获批时的**自请**（§18 第 7 项：装包时让用户自己选，故选择面必须自己浮出来）。
+     *
+     * 键为什么由门禁自己算、而不是复用桥面 [requestApprove] 提交的那份：门禁的判据是
+     * 「**盘上此刻**的那份脚本/bin」，哈希由宿主从 manifest 重算（[NpmScriptResolver]），
+     * 而脚本既不知道这个哈希、也不该有资格编一个（带自选哈希来审批、落账键与盘上现状
+     * 无关，改完脚本照样命中 —— 那正是这一层要防的事）。所以 run/exec 的 APPROVED 票
+     * **只能**由这条自请路径产生，且它与放行判据用的是同一处重算，两边天然对得上。
+     *
+     * 桥面 [requestApprove] 仍在（服务 `INSTALL_SCRIPT`：审的是**依赖包**的安装脚本，
+     * 宿主无从从自己项目的 manifest 算出那个包的内容哈希），两条路投进同一个账本、
+     * 同一条 approvals 流、同一张 UI 审批卡。
+     *
+     * [ApprovalLedger.submit] 对同 `projectId+pkg+versionHash+action` 的 PENDING 请求幂等复用，
+     * 故脚本反复调 runScript 不会刷出一排重复卡片。
+     */
+    private suspend fun requestGateApproval(
+        projectId: String, subject: String, versionHash: String, action: ApprovalAction,
+    ) {
+        val ticket = ledger.submit(projectId, subject, versionHash, action)
+        ledger.pending(projectId).firstOrNull { it.id == ticket.requestId }?.let {
+            approvalRing.push(it.projectId, it)
+            approvalFlow.tryEmit(it)
+        }
+    }
 
     override suspend fun runScript(projectId: String, name: String, args: List<String>): InstallHandle {
-        // P1 门禁：脚本执行必须已有 APPROVED（按 pkg@hash 键；这里 name 即脚本名所属的包级审批）
-        // 当前无脚本内容哈希源 → 一律入队提示审批，不执行（诚实拒绝优于静默放行）。
-        throw AutojsException(
-            ErrorCode.ERR_PERMISSION_DENIED,
-            "npm run $name 需人工审批后放行（§10.5）：请先在能力中心确认 $name 脚本",
+        val root = layout.projectRoot(projectId)   // projectId 合法性先过（防路径逃逸）
+        val s = NpmScriptResolver.projectScripts(root, projectId) ?: throw AutojsException(
+            ErrorCode.ERR_FILE_NOT_FOUND,
+            "项目 $projectId 没有 package.json（$root），无 lifecycle 脚本可跑",
         )
+        if (!s.scripts.containsKey(name)) {
+            // 报出**可操作**的差集：npm 自己的报法是 "Missing script"，这里给同等的量。
+            throw AutojsException(
+                ErrorCode.ERR_NOT_FOUND,
+                "项目 ${s.pkg} 没有名为「$name」的 script（现有：${s.scripts.keys.sorted().joinToString(", ").ifEmpty { "（无）" }}）",
+            )
+        }
+        // npm 的分隔符在**参数之前**（`npm run build -- --watch`）：少了它，脚本名后的
+        // `--watch` 会被 npm 自己吃掉而不是传给脚本，等于静默丢用户显式给的参数。
+        val npmArgs = if (args.isEmpty()) listOf("run", name) else listOf("run", name, "--") + args
+        return runScriptOps(projectId, ApprovalAction.RUN_SCRIPT, name, args, s.pkg, s.versionHash, npmArgs)
     }
 
     override suspend fun exec(projectId: String, bin: String, args: List<String>): InstallHandle {
-        throw AutojsException(
-            ErrorCode.ERR_PERMISSION_DENIED,
-            "npm exec $bin 需人工审批 + 纯 JS bin 白名单（§10.3 T1）后放行",
+        val root = layout.projectRoot(projectId)
+        // 纯 JS 白名单在解析层就拒（ERR_NOT_SUPPORTED），不在这里另写一份判据。
+        val b = NpmScriptResolver.binTarget(root, bin) ?: throw AutojsException(
+            ErrorCode.ERR_NOT_FOUND,
+            "node_modules 里没有声明 bin「$bin」的包（项目 $projectId）",
         )
+        // 同上：`npm exec <args> -- <bin>`，分隔符必须在 bin 名之前，否则 bin 会被当 args 的一员。
+        val npmArgs = if (args.isEmpty()) listOf("exec", "--", bin) else listOf("exec") + args + listOf("--", bin)
+        return runScriptOps(projectId, ApprovalAction.EXEC, bin, args, b.pkg, b.versionHash, npmArgs)
+    }
+
+    /**
+     * T1 的**放行门禁 + 执行**（§10.3 T1）。
+     *
+     * 放行判据：[ApprovalLedger.isApproved] 按 `projectId + "<pkg>|<name>" + versionHash + action`
+     * 命中 APPROVED 票。versionHash 是**盘上此刻**的重算值（[NpmScriptResolver]），
+     * 不是调用方给的 —— 用户批过的是他当时看到的那份脚本，脚本一改哈希就变、票失配、
+     * 重新弹卡。这与「版本升级必须重新审批」是同一条纪律。
+     *
+     * 执行体是 [scriptExecutor] 而不是 [executor]：npm CLI 走重操作通道（事务/staging/落位），
+     * 而 lifecycle 脚本**不改依赖树**（跑一次 postinstall 只做它该做的事）—— 走事务链
+     * 会为一个不改 node_modules 的操作凭空造出 stageDir + commit 记录，journal 里全是
+     * 没有产物的假事务。两条通道共用 TTL/取消/事件，差异只在「产物要不要落位」。
+     *
+     * ⚠ 这一层是**接缝**：[ScriptOpExecutor.Unavailable] 是缺省 → ERR_NOT_IMPLEMENTED。
+     * spawn 桥（child_process shim → 临时引擎，§10.3 T1 下半段）未接之前，
+     * 有审批票也跑不起来 —— 门禁是诚实的，失败点被如实标出来而不是假装跑过。
+     */
+    private suspend fun runScriptOps(
+        projectId: String,
+        action: ApprovalAction,
+        what: String,
+        args: List<String>,
+        pkg: String,
+        versionHash: String,
+        npmArgs: List<String>,
+    ): InstallHandle {
+        val subject = "$pkg|$what"
+        if (!ledger.isApproved(projectId, subject, versionHash, action)) {
+            requestGateApproval(projectId, subject, versionHash, action)
+            history?.record(action.name.lowercase(), projectId, false, "未获批放行: $subject")
+            throw AutojsException(
+                ErrorCode.ERR_PERMISSION_DENIED,
+                (if (action == ApprovalAction.EXEC) "npm exec $what" else "npm run $what") +
+                    " 未获人工批准（§10.5）：请求已入队，请到能力中心的审批卡确认后重试",
+            )
+        }
+        val handle = InstallHandle("inst-${handleSeq.incrementAndGet()}", projectId, now())
+        val op = ScriptOp(
+            handleId = handle.id,
+            projectId = projectId,
+            action = action,
+            pkg = pkg,
+            what = what,
+            args = args,
+            projectRoot = layout.projectRoot(projectId),
+            npmArgs = npmArgs,
+            versionHash = versionHash,
+            timeoutMillis = SCRIPT_TIMEOUT_MILLIS,
+        )
+        val tracked = TrackedOp(handle, "script-${handle.id}", journaled = false)
+        handles[handle.id] = tracked
+        val projectLock = projectLocks.getOrPut(projectId) { Mutex() }
+        projectLock.withLock {
+            globalSession.withLock {
+                emit(InstallEvent.Progress(projectId, handle.id, InstallEvent.Phase.QUEUED))
+                try {
+                    if (tracked.cancelled) throw AutojsException(ErrorCode.ERR_ENGINE_STOPPED, "脚本执行已取消")
+                    val summary = withTimeoutOrNull(op.timeoutMillis) {
+                        scriptExecutor.execute(op) { ev -> events.tryEmit(ev) }
+                    } ?: throw AutojsException(
+                        ErrorCode.ERR_TIMEOUT,
+                        "脚本执行超时（${op.timeoutMillis}ms）：${what}（执行体未在 TTL 内收尾）",
+                    )
+                    // 取消与执行是竞态：cancel() 可能在本执行体挂起期间已发过
+                    // Finished(success=false,「已取消」)。若此处不查，脚本跑完还会再发一条
+                    // Finished(success=true) —— 同一句柄两个终态事件，订阅方无从裁决。
+                    if (tracked.cancelled) {
+                        throw AutojsException(ErrorCode.ERR_ENGINE_STOPPED, "脚本执行已取消（执行体已收尾，结果不采纳）")
+                    }
+                    tracked.done = true
+                    history?.record(action.name.lowercase(), projectId, true, summary)
+                    emit(InstallEvent.Finished(projectId, handle.id, success = true, detail = summary))
+                } catch (e: Exception) {
+                    // cancel() 可能已就地把 done 置位并发过终态（见上面那段竞态说明）。
+                    // 一个句柄只能有一个终态事件 —— 两条会让订阅方无从裁决「那次到底成没成」。
+                    val firstTerminal = !tracked.done
+                    tracked.done = true
+                    if (firstTerminal) {
+                        history?.record(action.name.lowercase(), projectId, false, e.message)
+                        emit(InstallEvent.Finished(projectId, handle.id, success = false, detail = e.message))
+                    } else {
+                        // 终态已发过：只把这次失败入史（审计要看到），不再重复发事件。
+                        history?.record(action.name.lowercase(), projectId, false, "取消后收尾失败: ${e.message}")
+                    }
+                    throw e
+                }
+            }
+        }
+        return handle
     }
 
     // ══════════ 事件流 ══════════
@@ -694,5 +901,14 @@ class InstallCoordinator(
     companion object {
         /** 事件环容量（与 `A11yEventRing.MAX_EVENTS` 同值同纪律）。 */
         const val RING_CAPACITY = 512
+
+        /**
+         * T1 单次脚本执行的 TTL（§7 铁律 3：每次操作必有 TTL）。
+         *
+         * 比安装会话短：脚本不下载依赖，跑的是已物化的代码；给满安装会话的 120s 是浪费，
+         * 而卡死的脚本会占着 per-project 锁让整条 npm 链排队。60s 之后仍未收尾即
+         * ERR_TIMEOUT 并由执行体走 TERM→SIGKILL 回收。
+         */
+        const val SCRIPT_TIMEOUT_MILLIS = 60_000L
     }
 }

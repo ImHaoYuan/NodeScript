@@ -53,7 +53,7 @@
 - datastore SQLite、settings、sensors、notification、app Intent、zip、power_manager（**已落地**，见 §8.7；clipboard 亦已落地 §12.2 第五条独立缝，sensors 亦已落地 §12.2 第六条独立缝，images 桥面与 native 实现均已落地 §12.2 第七条独立缝 —— `libopencv.so`（OpenCV 4.14 静态链接，`node-runtime-build/scripts/build-opencv.sh` + `.github/workflows/image-native.yml`）+ `NativeImageAnalyzer`/`JniOps`（`:platform:system`）+ `PlatformWiring.of` 三件套齐全，so 缺位时桥回 `ERR_NOT_IMPLEMENTED`）。
 - ~~OCR (MLKit 插件基准实现)~~ **不内置（2026-09-26 拍板，见 §9.7）** + `OcrProvider`（只保留接缝）。
 - 插件框架骨架 + 打包合并插件资产。
-- npm P1（§10.11）：spawn 桥 polyfill + **lifecycle 脚本真实执行**（§18 第 7 项口径：不做出厂卡口、安装时让用户自己选，不是"批准后才跑"的审批流）+ npm 终端 + 在线/OSV 离线审计 + node-shim 红测。（原「QuickJS 白名单库独立 vendored」随第 1 项沙箱裁掉。）
+- npm P1（§10.11）：spawn 桥 polyfill + **lifecycle 脚本真实执行**（§18 第 7 项口径：不做出厂卡口、安装时让用户自己选，不是"批准后才跑"的审批流 —— **宿主侧门禁面已落 2026-09-29**：解析/哈希/白名单/自请入队/执行接缝齐了，缺 spawn 桥本体，见 §10.3 T1 落地追记）+ npm 终端 + 在线/OSV 离线审计 + node-shim 红测。（原「QuickJS 白名单库独立 vendored」随第 1 项沙箱裁掉。）
 
 ### P2 — 生态与分发
 - `dialogs` 全形态的 **Android 渲染侧**（overlay 真弹窗 / 通知回调的真投递；`mode` 选择与 BAL 降级判据已在 §9.6 的语义层落地）、`root_automator`/Shizuku 输入、`shell` 全量（`ShellMode.ROOT`/`ADB` 的真执行通道；`DEFAULT` 侧语义已落地）。
