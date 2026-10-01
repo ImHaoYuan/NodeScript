@@ -3,6 +3,8 @@ package com.autoscript
 import android.app.Application
 import android.os.Process
 import android.util.Log
+import com.autoscript.appservice.npm.AssetTreeCliSource
+import com.autoscript.appservice.npm.NpmCliDeployer
 import com.autoscript.domain.host.CapabilityCenterSnapshot
 import com.autoscript.domain.host.HostSummary
 import com.autoscript.domain.host.TaskCenterSnapshot
@@ -254,6 +256,18 @@ class AppShellApplication : Application(), HostSummary {
                 } catch (_: Exception) {
                     null
                 },
+                // vendored npm CLI 素材（§10.2 调用链首段）：源 = `assets/npm/**`，
+                // 键形状 `npm/<rel>`（随包任务 prepareNpmCliAssets 产出）。本类只递
+                // Android 侧的资产读口，**落位与执行体注入都在 AppShellKit**（源在不在、
+                // 锚齐没齐、有没有 Node 宿主，一处判完；诊断原文见 built.npmCliFailure）。
+                npmCliSource = AssetTreeCliSource(
+                    root = "npm",
+                    listDir = { dir -> appContext.assets.list(dir) },
+                    openFile = { path -> appContext.assets.open(path) },
+                ),
+                // npm 执行体的 Node 宿主 = 与脚本引擎同一个 noden（§19 交付位）：
+                // 设备上它就是 nativeLibraryDir/libnoden.so，ProcessBuilder 直接 exec。
+                npmNodeBin = nativeDir.resolve("libnoden.so").toString(),
                 // 能力面生产装配（§12.2）：shell 装配包的 PlatformWiring 拿
                 // SystemSpis + CapabilityNamespaces 拼成注入束 —— 本类（根包）只调它，
                 // 不 import 任何 com.autoscript.platform..（ArchitectureTest 看住）。
@@ -281,6 +295,15 @@ class AppShellApplication : Application(), HostSummary {
             bridge?.start(built.shell)
             install(built.shell)
             assembled = built
+            // npm 接线照实记账（§10.2）：就位与未就位都留一行 —— 未接线时真机上
+            // `auto.npm.install` 回 ERR_NOT_IMPLEMENTED，这行日志是排查的第一现场。
+            val npmFail = built.npmCliFailure
+            if (npmFail != null) {
+                Log.w(TAG, "npm 执行体未接线：$npmFail")
+            } else {
+                val fresh = (built.npmCli as? NpmCliDeployer.Outcome.Ready)?.deployedFresh
+                Log.i(TAG, "npm CLI 就位（filesDir/npm，本次${if (fresh == true) "新部署" else "幂等命中"}）")
+            }
             built.shell
         } catch (t: Throwable) {
             Log.e(TAG, "壳自装配失败：保持未就绪（闹钟走漏投记账，不伪造投递）", t)

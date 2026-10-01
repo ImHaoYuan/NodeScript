@@ -1,5 +1,8 @@
 package com.autoscript.shell
 
+import com.autoscript.appservice.npm.HostNodeExecutor
+import com.autoscript.appservice.npm.InstallCoordinator
+import com.autoscript.appservice.npm.NpmCliDeployer
 import com.autoscript.appservice.npm.NpmShellKit
 import com.autoscript.appservice.runtime.EngineWatchdog
 import com.autoscript.appservice.runtime.ProcessMonitor
@@ -99,6 +102,23 @@ object AppShellKit {
          * 不注入（选填纪律），桥调用点如实 `ERR_ENGINE_STOPPED`。
          */
         val bridgeAddonReport: BridgeAddonDeploy.Report = BridgeAddonDeploy.Report(),
+        /**
+         * 装配期 vendored npm CLI 落位结果（§10.2 调用链首段）。
+         * null = 本次没落（原因见 [npmCliFailure]）；`Ready.deployedFresh = false` = 幂等命中
+         * （素材没换，整目录跳过 —— 开机路径零 IO）。**调用方自带 `npmHandler` 时本配方
+         * 不碰素材，两个字段皆 null** —— 那时它们不表达任何"npm 可用"的意思。
+         */
+        val npmCli: NpmCliDeployer.Outcome? = null,
+        /**
+         * npm 执行体没接线的原因原文（null = 已接线）。**不吞**：能力中心据此如实显示
+         * "npm 未接线"，而不是把 msg 缺失读成一切正常 —— 这与 [deployReport] 那条
+         * "空报告 ≠ 已恢复"是同一条纪律。
+         *
+         * 与 [npmCli] 的组合是有意义的：两者皆 null = 调用方自带 `npmHandler`（本配方
+         * 没参与）；`npmCli` 非 null 而本字段非 null = **CLI 落了但跑不起来**（缺宿主/
+         * 执行体构造失败）—— 这一档最该被看见，它离"能用"只差一个宿主。
+         */
+        val npmCliFailure: String? = null,
     ) : AutoCloseable {
         /** 没补上的脚本（路径 + 原因；能力中心呈现"有脚本没补上"，不吞成一切正常）。 */
         fun deployFailures(): List<ScriptDeployRecovery.Failure> = deployReport.failures
@@ -271,6 +291,16 @@ object AppShellKit {
      * @param a11yHandler / @param screenHandler `:platform:capabilities` 的真实现（经
      *   `CapabilityNamespaces.{a11y,screen}` 转接）；null = 未接线，桥如实 `ERR_NOT_IMPLEMENTED`。
      * @param npmHandler npm 命名空间实现；null = 本配方自建（[NpmShellKit]）。
+     * @param npmCliSource vendored npm CLI 的素材源（§10.2 调用链首段；`assets/npm/` 那棵
+     *   资产树）。null = 无来源（纯 JVM 配方/测试）→ 不部署、不注入执行体，桥对 npm.*
+     *   如实 `ERR_NOT_IMPLEMENTED`。生产由 Application 喂 `AssetTreeCliSource("npm", …)`
+     *   —— 本配方不直连 AssetManager（同 [scriptSources]/[bridgeDist] 纪律）。
+     *   （路径一律写单斜杠形态：Kotlin 块注释**会嵌套**，注释里连写两个星号会被当成新注释
+     *   开头，后面真正的注释结束符就吃不掉它了 —— 本文件踩过一次，别再写。）
+     * @param npmNodeBin npm 执行体的 Node 宿主绝对路径（Android 侧 =
+     *   `nativeLibraryDir/libnoden.so`，与 [engineFactory] 的 hostBinary 同一个文件）。
+     *   null = 没有能跑 CLI 的宿主 → **不注入执行体**（素材照样部署，便于诊断：
+     *   "装了 CLI 却没有 node"比"什么都没接线"更接近病因）。
      * @param datastoreHandler `datastore` 命名空间实现（§9.6，经 `CapabilityNamespaces.datastore` 转接）；
      *   独立缝（不入 [SystemHandlers] 束 —— 存储面无共担门禁）；null = 未接线，桥如实 `ERR_NOT_IMPLEMENTED`。
      * @param zipHandler `zip` 命名空间实现（§9.6，经 `CapabilityNamespaces.zip` 转接）；
@@ -306,6 +336,14 @@ object AppShellKit {
         a11yHandler: NamespaceHandler? = null,
         screenHandler: NamespaceHandler? = null,
         npmHandler: NamespaceHandler? = null,
+        /**
+         * 素材源见 KDoc；**缺省 null 是诚实缺省**：没有素材就不该注入执行体。
+         */
+        npmCliSource: NpmCliDeployer.CliSource? = null,
+        /**
+         * Node 宿主绝对路径（见 KDoc）。null = 不注入执行体（素材照样部署）。
+         */
+        npmNodeBin: String? = null,
         datastoreHandler: NamespaceHandler? = null,
         zipHandler: NamespaceHandler? = null,
         settingsHandler: NamespaceHandler? = null,
@@ -400,7 +438,61 @@ object AppShellKit {
         // [AppShell][com.autoscript.shell.AppShell] 的 `taskStore` 缝拿到它。
         val tasks = FileTaskStore(autojsDir)
 
-        val npm = npmHandler ?: NpmShellKit.assembleHandler(filesDir = filesDir, cacheDir = cacheDir)
+        // vendored npm CLI 落位 + 执行体注入（§10.2 调用链首段/末段）。
+        // 素材随包在 `assets/npm/**`，启动期幂等部署到 `filesDir/npm/`（素材没换 = 整目录
+        // 跳过，开机路径零 IO）。**只有"部署就位 + 有 Node 宿主"两条同时成立才注入
+        // [HostNodeExecutor]**；任一不成立就保持 Unavailable，桥对 npm.* 如实
+        // `ERR_NOT_IMPLEMENTED` —— 装了 CLI 却没有能跑它的 node，"注入"就等于把必失败
+        // 伪装成已接线。失败原因原文进 [AssembledShell.npmCliFailure]，不吞成"一切正常"。
+        //
+        // 异常不外抛：npm 只是能力之一，素材缺失（绝大多数本机构建的 APK 就是这样）不该
+        // 让整个壳装不起来 —— 而 `NpmCliDeployer.deploy` 对"素材缺失/半瘫"是 loud 的
+        // （锚校验一票否决），所以这里必须接住并如实记账，而不是放它掀翻装配。
+        // 调用方自带 handler（测试/替换实现）时**本配方不碰素材**：不部署、不注入，
+        // 两个报告字段保持 null（它们的语义是"本配方自建 npm 时的落位结果"，不是
+        // "npm 一切正常"）。
+        var npmCli: NpmCliDeployer.Outcome? = null
+        var npmCliFailure: String? = null
+        val npm: NamespaceHandler = npmHandler ?: run {
+            val source = npmCliSource
+            val executor: InstallCoordinator.HeavyOpExecutor = if (source == null) {
+                npmCliFailure = "无素材来源（assets/npm 未随包）"
+                InstallCoordinator.HeavyOpExecutor.Unavailable
+            } else {
+                // 落位与执行体分两步记账：npmCli 非 null 就一定是"CLI 真在盘上"，
+                // 不吃"部署成了、执行体没接上"的中间态（那种情况两者都非 null，
+                // 由 npmCliFailure 的原文说清差在哪一步）。
+                val deployed = try {
+                    NpmCliDeployer.deploy(filesDir, source) as NpmCliDeployer.Outcome.Ready
+                } catch (e: Exception) {
+                    null.also { npmCliFailure = "素材部署失败：${e.message}" }
+                }
+                if (deployed == null) {
+                    InstallCoordinator.HeavyOpExecutor.Unavailable
+                } else {
+                    npmCli = deployed
+                    val host = npmNodeBin
+                    if (host == null) {
+                        npmCliFailure = "CLI 已落位（${deployed.cliJs}），但没有 Node 宿主" +
+                            "（nativeLibraryDir/libnoden.so 缺）→ 不注入执行体"
+                        InstallCoordinator.HeavyOpExecutor.Unavailable
+                    } else {
+                        try {
+                            HostNodeExecutor(deployed.cliJs, cacheDir, nodeBin = host)
+                        } catch (e: Exception) {
+                            npmCliFailure = "CLI 已落位（${deployed.cliJs}），但执行体构造失败：" +
+                                "${e.message} → 不注入"
+                            InstallCoordinator.HeavyOpExecutor.Unavailable
+                        }
+                    }
+                }
+            }
+            NpmShellKit.assembleHandler(
+                filesDir = filesDir,
+                cacheDir = cacheDir,
+                executor = executor,
+            )
+        }
 
         val shell = AppShell.assemble(
             engineFactory = engineFactory,
@@ -437,6 +529,9 @@ object AppShellKit {
             shell.startWatchdog(fresh)
             ownedScope = fresh
         }
-        return AssembledShell(shell, log, archive, tasks, npm, ownedScope, deployReport, bridgeDistReport, bridgeAddonReport)
+        return AssembledShell(
+            shell, log, archive, tasks, npm, ownedScope,
+            deployReport, bridgeDistReport, bridgeAddonReport, npmCli, npmCliFailure,
+        )
     }
 }
