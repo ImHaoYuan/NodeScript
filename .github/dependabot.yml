@@ -1,0 +1,26 @@
+# Dependabot —— 只开 github-actions（2026-10-01，backlog B2）。
+#
+# 为什么单开这一个生态：同批把 workflow 里的 actions 从 tag 改钉 commit SHA
+# （tag 可移动，被改指等于在 CI 里跑了别人的代码）。钉 SHA 的代价是**不会自动
+# 跟上安全修复**，所以必须配一个定期提 PR 的更新源 —— 这两件事是一套，缺了
+# 后者，钉 SHA 就从"收紧供应链"变成"冻结供应链"。
+#
+# 为什么**暂不**开 gradle / npm 生态：本仓的版本升级（AGP / Kotlin / Compose /
+# targetSdk 36）是显式推迟的决策，不是遗漏 —— 开了就会持续产出维护者注定要关掉的
+# PR，反而淹掉真正要看的 action 更新。依赖面（漏洞扫描 / SBOM / engines 字段）
+# 是另一条待办（docs/backlog.md 的 B4），到时候一起定，别在这里半个半个地开。
+#
+# 范围之外的注意：本文件只提 PR，不自动合并；`gradle/libs.versions.toml` 与根
+# build.gradle.kts 由协调者冻结，任何版本变更仍需人工过门。
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci(deps)"
+    labels:
+      - "dependencies"
+      - "ci"

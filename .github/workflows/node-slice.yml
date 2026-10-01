@@ -29,6 +29,11 @@ on:
       - '.github/workflows/node-slice.yml'
   workflow_dispatch:
 
+# 最小权限（2026-10-01 卫生补件）：本 workflow 只读仓库内容 —— 产物上传走 artifact 的
+# 运行时令牌，缓存与 checkout 都不需要写权限。默认令牌权限过宽，这里显式收到只读。
+permissions:
+  contents: read
+
 concurrency:
   # 同一分支重复触发时取消上一次（构建半小时级，串行等待没有信息量）。
   group: node-slice-${{ github.ref }}
@@ -45,7 +50,7 @@ jobs:
       # 后续步骤的 $WORK 是空的（会安静地 ls 到空路径然后失败在 artifact 上）。
       WORK_DIR: ${{ github.workspace }}/work
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: 安装编译期依赖（build-essential + curl + unzip + xz + python3 + ccache）
         run: |
@@ -61,7 +66,7 @@ jobs:
       # 合并写法（actions/cache）：命中则用且构建后跳过存，未命中则构建后自动存 ——
       # 同 key 重复 save 会炸步骤，拆分写法的 restore+save 在这里是错的。
       - name: 缓存下载层（NDK zip + Node tarball）
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ github.workspace }}/work/dl
           key: node-dl-${{ hashFiles('node-runtime-build/VERSIONS.env') }}
@@ -74,7 +79,7 @@ jobs:
       # 只占空间不毒构建）。编译器本体升级风险可忽略：交叉编译器来自 pin 死的 r28c
       # zip（不随 runner 镜像滚），host gcc 只编 mksnapshot 等小工具。
       - name: 缓存 ccache（V8 交叉编译单元）
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ github.workspace }}/.ccache
           key: node-ccache-${{ hashFiles('node-runtime-build/VERSIONS.env') }}
@@ -147,7 +152,7 @@ jobs:
           ls -l "$WORK_DIR/out/node" "$WORK_DIR"/out/libnode.so*
 
       - name: 上传 artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: node-slice
           path: |
