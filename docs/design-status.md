@@ -42,6 +42,22 @@
 
 ## 流水（最新在上）
 
+### 2026-10-01 —— backlog **C2** 收口（机器路径出跟踪文件；分支 `hellish-shrimp`）
+
+> 编号提醒：这里的 C2 是**外审待办池的 C2**，与 2026-09-30 那批 A/B/C 编号（C1/C2/C3 = 实测回填项）无关 —— 同名不同批。
+
+- **病灶**：跟踪文件里写死了这台开发机的路径。`CLAUDE.md` 构建节（`/root/android-sdk`、JDK 路径）与 NDK 节
+  （`/root/ndk/android-ndk-r28c`）、契约侧 `docs/design/13-roadmap-budget.md` 一处（`/root/android-sdk`），
+  外加**测试代码里的一处**（`NpmCacheSeedDeployerTest` 的 `Path.of("/root/.npm/_cacache/content-v2")`）——
+  最后一处外审没点名，是本次按同一口径顺带扫出来的：私人路径进跟踪文件是同一个病灶，不分文档还是代码。
+- **改法**：
+  - `CLAUDE.md` 构建节与 NDK 节改成**环境变量约定**（`JAVA_HOME` / `ANDROID_HOME` 或 `local.properties` 的
+    `sdk.dir` / `ANDROID_NDK_HOME`），并写明「别再往跟踪文件里写 `/root/…`」；
+  - **具体值挪到 `CLAUDE.local.md`**（新建，已加进 `.gitignore`）—— 本机 agent 照样能拿到路径，跟踪文件干净；
+  - `13-roadmap-budget.md` 那处去掉路径（句子其余不动）；测试那处改成从 `System.getProperty("user.home")`
+    拼 `~/.npm/_cacache/content-v2`（换台机器同样命中，语义不变：仍是「取本机 npm 缓存里真实存在的 tarball」）。
+- **门**：13 任务 ./gradlew 全绿（含改过的那条 npm 缓存用例）+ 文档链接门。
+
 ### 2026-10-01 —— C4 收口（维护者已开通 GitHub 私密上报；分支 `hellish-shrimp`）
 
 - **开关翻面**：`gh api repos/Ventus-Pluviam/NodeScript/private-vulnerability-reporting` 由 `{"enabled":false}`

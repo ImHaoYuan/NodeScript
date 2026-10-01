@@ -40,7 +40,7 @@
 
 ## 构建
 
-- 本机已配置 Android SDK：`/root/android-sdk`（platform-35 + build-tools 35 + platform-tools；`local.properties` 指 `sdk.dir`，已 gitignore），JDK 17 = `/root/develop/claude/tools/jdk-17.0.17+10`。
+- **前置工具一律走环境变量约定，机器路径不写进本文件**：`JAVA_HOME`（JDK 17）、`ANDROID_HOME`（或仓库根 `local.properties` 的 `sdk.dir=`，已 gitignore；需 platform-35 + build-tools 35 + platform-tools）、`ANDROID_NDK_HOME`（只在编 C++ 时要）。本机（这台开发机）三处都已配好，**具体值见 `CLAUDE.local.md`**（不入库、已 gitignore）—— 别再往跟踪文件里写 `/root/…` 这类路径。
   **CI 同款 `./gradlew …` 命令可本机直跑**（13 个测试任务，2026-09-30 实测全绿）——CI 仍是权威门，但本机已能同源复现。**本机快速门 = 同一条 `./gradlew` 命令**（`tools/jvm-test*` 旁路已删，
   2026-09-30）：约定插件 `autoscript.test-guard` 把「skipped/aborted ≠ 绿」守卫做进 Gradle，本机与 CI 同一口径、无第二口径脚本。
 - **CI 验证门**：`.github/workflows/ci.yml` —— JVM 单测（13 个测试任务，即全部带 `src/test`
@@ -60,11 +60,11 @@
 3. **外科手术式读写**：Grep/Glob 定位，Read 带 offset/limit，Edit 用最小唯一匹配，不整库读代码。
 4. **git 提交**：每个逻辑完成点提交，信息 `type(scope): 摘要` + 结尾 `Co-Authored-By: Claude Code <noreply@anthropic.com>`；不提交无关文件；不 init 仓库（已是仓库）。
 5. **契约先行**：接口/DTO 以 `:domain` 骨架为准；别自行发明跨模块类型。
-## NDK（本机）
+## NDK
 
-- 本机 NDK：`/root/ndk/android-ndk-r28c`（r28c，与 `node-runtime-build/VERSIONS.env`
-  的 `NDK_VERSION` 同源；zip 校验见该管线 §2）。
-- 用法：`export ANDROID_NDK_HOME=/root/ndk/android-ndk-r28c` +
+- 版本口径 = **r28c**（与 `node-runtime-build/VERSIONS.env` 的 `NDK_VERSION` 同源；
+  zip 校验见该管线 §2）。本机的 NDK 根见 `CLAUDE.local.md`（不入库）。
+- 用法：`export ANDROID_NDK_HOME=<你的 NDK 根>` +
   `PATH=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH`，
   直接调 `aarch64-linux-android26-clang(++)`（API 26 = minSdk 冻结值）。
 - 本机只做 **C++ 交叉编译验证**（`bridge/native` 的 addon `.so` 能编出 arm64 ELF）；

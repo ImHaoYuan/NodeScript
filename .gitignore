@@ -23,6 +23,9 @@ node-runtime-build/out-opencv/
 .DS_Store
 .kotlin/
 
+# 本机私人配置（机器路径等；CLAUDE.md 指过来的那份）
+CLAUDE.local.md
+
 # 密钥库（SECURITY.md 密钥管理：绝不提交）
 *.jks
 *.keystore
