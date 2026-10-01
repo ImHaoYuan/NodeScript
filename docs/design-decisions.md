@@ -14,6 +14,23 @@
 
 ## 已拍板（原 §18 全部九项：第 1–7 项 2026-09-26、第 8/9 项 2026-09-25；外加后续新增编号项）
 
+2026-10-01 拍板（§8.5/§8.6 收口：无人 await 的 run 期限线；非 §18 编号项，原口径不涉）：
+
+14. **时限归属判据 = 「发起方等不等」，不是「有没有声明超时」**：
+    §8.6 原先自己记的诚实边界是「引擎侧 `waitCompletion` 超时不发起的场景还没人管（在途 run 没人收尾时 watchdog 是唯一兜底）」——
+    而看门狗三路判据全看**进程表现**（心跳/CPU/RSS）：心跳正常、CPU 空闲、RSS 很低的长跑脚本三路都判健康，**没有任何一路收得住它**。
+    - **判据选型**：加 `PoolAcquireRequest.timeoutEnforcer: TimeoutEnforcer{AWAITER, WATCHDOG}`（缺省 `AWAITER` = 调度链路，行为零改）。
+      为什么不按「`EngineRunRequest.timeoutMillis != null` 就交给看门狗」判：调度链路也声明 `timeoutMillis`（透传给执行体），
+      但它**自己 await 终结并超时强杀**（`ControllerRunDispatcher` → `killRun(REQUESTED)`）—— 声明了却已经有人在执行，看门狗再收一次就是两套到期口径。
+      判据于是落在**谁 await** 上：无人 await 的（桥 `engines.exec`）才把期限线交给看门狗。
+    - **期限线的位置**：`RuntimeController.WatchAnchor.deadlineMillis = startedAt + scriptTimeoutMillis`（纯函数，期限定下不再改），
+      `EngineWatchdog.tick()` 里**先于** pid/心跳那两条「量不到」分支判 —— 期限不依赖任何度量，排在后面会让「宿主不给 pid」或「心跳未接线」的 run 连期限都够不着。
+      落 `KillCause.TIMEOUT`（归 CRASHED：到点强制收账，不是调用方主动停；`Tick.timeoutKilled` 单列，与「病死」「分歧杀」分账）。
+    - **`engines.exec` 的 `timeoutMillis` 由可选改必填**：缺席/`null`/`<= 0` → `ERR_INVALID_PARAM`（`PoolAcquireRequest.init` 里 `require` 同款守卫）。
+      缺省值在这里没有诚实来源 —— 编一个（30s？5min？）等于替脚本静默决定它能跑多久，与 `queueTimeoutMillis` 传 0 视为漏配同一条纪律：**响亮失败**。
+      JS 侧**不预检**（同 payload 发出去、宿主回错），两处校验必然漂移（与空事件名同一条纪律）。
+    - **仍待覆盖**：期限只覆盖声明了期限的 run，且只在看门狗轮转真在跑时有效；池空退避周期内新起的 run 最坏晚一个退避周期才被看到。
+
 2026-09-30 拍板（外部审查整改步骤 7；非 §18 编号项，原口径不涉）：
 
 13. **`images` 匹配链路提速方案**（2026-09-30 评审拍板；A2–A4 实测 ❌ 后的出路裁决）：
@@ -291,6 +308,7 @@
 | `:engine:sandbox` 模块壳保留、settings 模块表按协调者冻结不动 | §6 行 + §18 第 1 项（2026-09-26 拍板附注） | **空壳从 settings 注释摘除**（QuickJS 裁撤口径不变，审查步骤 1）：`include` 注释 + ModuleGraphTest `include` 正则改锚行首（注释行不计）+ 允许集删行 + 模块表 15→14；目录留盘，复活 = 注释回 + 登记 | 2026-09-30 |
 | §12.2「语义层（handler）住 `:platform:capabilities`」+「为什么 handler 不住 `:platform:system`」两层理由 | §12.2「分两层，别混」段（原两句原文见本节末引用块） | **口径反转（审查步骤 6，零新模块方案）**：handler 归位实现模块 —— 系统面十一件住 `:platform:system` 的 `SystemNamespaces.kt`（与 `SystemSpis`/契约同模块，2026-09-30 步骤 6a/6b/6d 分批迁入），`dialogs` 留 `:platform:capabilities`（`DialogHost` 实现按约定在同模块），`workManager` 归 `:app-service:scheduler`、`power_manager` 归 `:platform:system`；原理由 (1) 共担门禁组 → 校验仍单点住在 `SystemNamespaces` 工厂束（同模块一处，不各写一份），(2) 装配层双模块直连 → `PlatformWiring` 本就经 §6 包级例外二同时可见两模块、根包经工厂缝零 platform 类型（`ArchitectureTest` 依赖级门禁验证）；与 `EnginesNamespaceHandler` 住 `:app-service:runtime` 同形态（handler 归位实现模块）。§6 两行、§12.2 表 handler 列与两段散文同批改 | 2026-09-30 |
 
+| `engines.exec` 的 `timeoutMillis` 可选（缺省交给引擎/看门狗自行兜底） | §8.6 原「仍待覆盖」段 + `bridge/js` `EngineRunRequest` | **改必填**：桥路径无人 await 终结，缺席即 `ERR_INVALID_PARAM`；到点由看门狗期限线落 `KillCause.TIMEOUT`（§8.6 期限线，判据 = 发起方等不等） | 2026-10-01 |
 ### 附：§12.2 被反转口径原文照抄（2026-09-30 步骤 6 摘录前的原文）
 
 > - **语义层**（handler）住 `:platform:capabilities` 的 `SystemNamespaces.kt`，纯 JVM 可测（假 SPI 注入即可跑）：参数校验（spec 守卫、必填字段、`timeout > 0`）、枚举字面量解析（`ShellMode`/`DialogMode`，拼错即报错不静默套默认）、默认值（shell 超时 30s）、错误分类**透传**（`AutojsException.error` 原码回桥）、响应形状编码（与 `extras.ts` 逐字对齐）；

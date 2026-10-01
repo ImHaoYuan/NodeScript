@@ -75,6 +75,19 @@ enum class KillCause {
      * 本原因归 CRASHED（见 `EngineStateMachine.onKill`：非 REQUESTED 一律 CRASHED）。
      */
     DRIFT,
+
+    /**
+     * 无人等待的 run 到了声明的墙钟期限（§8.6「谁 await 谁负责时限，没人 await 的必须自带期限」；
+     * 看门狗调度循环的**期限线**落点）。
+     *
+     * 与三路健康判据的区别：那三路看的是**进程表现**（心跳/CPU/RSS），本原因看的是**契约**——
+     * 发起方声明了这次跑多久，到点就得交账。心跳正常、CPU 空闲、RSS 很低的长跑脚本照样到点。
+     * 与 REQUESTED 的区别：REQUESTED 是调用方主动停（归 STOPPED）；本原因是期限到期被强制
+     * 收账，归 CRASHED（`EngineStateMachine.onKill`：非 REQUESTED 一律 CRASHED）。
+     * 与调度链路的区别：调度链路（dispatcher）自己 await 终结并超时强杀，走 REQUESTED；
+     * 本原因只属**无人 await** 的那些 run（bridge `engines.exec`）。
+     */
+    TIMEOUT,
 }
 
 data class CrashInfo(

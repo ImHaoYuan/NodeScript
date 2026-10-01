@@ -13,6 +13,10 @@ import kotlinx.coroutines.launch
 /**
  * 看门狗调度循环（docs §8.4 的最后一块：**周期性**地把三个已就绪的部件接起来）。
  *
+ * 判据面：三路**健康**判据（[WatchdogPolicy]）+ 一条**期限线**（§8.6：没人 await 的 run
+ * 到点收账，见 [RuntimeController.WatchAnchor.deadlineMillis]）—— 期限线不是第四路健康判据，
+ * 它不看进程表现，只看发起方声明的契约；两条并行的账都要记清楚（[Tick.timeoutKilled] 单列）。
+ *
  * 三方分工不变（谁也不越权）：
  * - [ProcessMonitor] 只采样 `/proc`（CPU/RSS）；
  * - [WatchdogPolicy] 只裁决（阈值口径）；
@@ -124,6 +128,11 @@ class EngineWatchdog(
          * 是 [killed] 的子集，单独列出供诊断区分"病死"（三路判定）与"分歧杀"。
          */
         val driftKilled: List<Long> = emptyList(),
+        /**
+         * 本轮因期限到期被杀的 runId（§8.6 期限线，`KillCause.TIMEOUT`）——
+         * 是 [killed] 的子集，单独列出供诊断区分"病死"（三路判据）、"分歧杀"与"到期收账"。
+         */
+        val timeoutKilled: List<Long> = emptyList(),
     )
 
     private val book = LinkedHashMap<Int, RunBook>()
@@ -186,6 +195,11 @@ class EngineWatchdog(
      *   则按 [KillCause.DRIFT] 强杀（§8.3 裁决，见 [driftStreaks]）—— 单轮分歧是真机的
      *   窗口期常态（宿主刚推 STOPPED、池还没 quiesce 完），连续多轮才是真分裂。
      *   裁决只杀分歧的那个 run、不改任一侧状态：杀掉重来，不猜哪一侧对。
+     * - **期限线先判**（§8.6）：[RuntimeController.WatchAnchor.deadlineMillis] 非空且已到点
+     *   → 落 `KillCause.TIMEOUT`。这条与三路健康判据并列且**排在它们之前**：三路看的是
+     *   进程表现（心跳/CPU/RSS），期限看的是发起方的声明 —— 一个心跳正常、CPU 空闲、
+     *   RSS 很低的长跑脚本，三路都判它健康，只有期限线收得住它。归属 [TimeoutEnforcer.AWAITER]
+     *   的 run 期限为空（发起方自己 await 并超时强杀），看门狗不越权。
      * - pid 复用不背旧账：book 以 pid 为键但带 runId，pid 落到另一个 run 头上就整段清零；
      * - 收尾时对已不在途的 pid 调 [ProcessMonitor.forget]（含刚被 kill 的）——"kill 后立刻
      *   收尾"和"下轮才发现不在了"两条路都走这里，免得调用方漏调，看门狗自己保证。
@@ -200,9 +214,19 @@ class EngineWatchdog(
         val forgotten = mutableListOf<Int>()
         val drift = mutableListOf<Long>()
         val driftKilled = mutableListOf<Long>()
+        val timeoutKilled = mutableListOf<Long>()
         val seenAlive = HashSet<Long>()
 
         for (anchor in anchors) {
+            // 期限线（§8.6）：**先于** pid/心跳那两条"量不到"分支判 —— 期限不依赖任何度量，
+            // 它是发起方声明的事实。放在后面会让「宿主不给 pid」或「心跳未接线」的 run
+            // 连期限都够不着，恰好退回"没人收尾"那一类。
+            if (anchor.deadlineMillis != null && clock.nowMillis() >= anchor.deadlineMillis) {
+                controller.killRun(anchor.runId, KillCause.TIMEOUT)   // kill 权威在 controller
+                killed += anchor.runId
+                timeoutKilled += anchor.runId
+                continue
+            }
             val pid = anchor.pid
             if (pid == null) {
                 noPid += anchor.runId
@@ -291,6 +315,7 @@ class EngineWatchdog(
             forgotten = forgotten,
             drift = drift,
             driftKilled = driftKilled,
+            timeoutKilled = timeoutKilled,
         )
     }
 

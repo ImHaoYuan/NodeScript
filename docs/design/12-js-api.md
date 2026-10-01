@@ -32,7 +32,7 @@
 | 命名空间 | JS facade | Kotlin handler | 挂载状态 |
 |---|---|---|---|
 | `console` | `console.ts` | `ConsoleCollector`（`:bridge:java`） | `AppShell.assemble` 已挂；`:ui` 控制台屏读口已接（`HostSummary.console`，§7.3 末） |
-| `engines` | `engines.ts` | `EnginesNamespaceHandler`（`:app-service:runtime`） | 已挂（含 `heartbeat` 打点，§8.4；命名通道 `channel/channelEmit/channelDrain/channelClose` 双侧对齐：Kotlin 侧缓冲 + 游标、`EngineChannel` 按 `sinceSeq` 节流轮询；`status` 只读在途表、结算后 `ERR_NOT_FOUND` 不伪造 `STOPPED`，`exec` 回 `EngineSessionImpl`（`cancel`→`stop` 归口、`onExit`→`status` 轮询：本会话 cancel 后结算报 null、外部结算报 UNKNOWN）） |
+| `engines` | `engines.ts` | `EnginesNamespaceHandler`（`:app-service:runtime`） | 已挂（含 `heartbeat` 打点，§8.4；命名通道 `channel/channelEmit/channelDrain/channelClose` 双侧对齐：Kotlin 侧缓冲 + 游标、`EngineChannel` 按 `sinceSeq` 节流轮询；`status` 只读在途表、结算后 `ERR_NOT_FOUND` 不伪造 `STOPPED`，`exec` 回 `EngineSessionImpl`（`cancel`→`stop` 归口、`onExit`→`status` 轮询：本会话 cancel 后结算报 null、外部结算报 UNKNOWN），**`exec` 的 `timeoutMillis` 必填**（§8.6 期限线：缺席/`null`/`<= 0` → `ERR_INVALID_PARAM`；到点由看门狗落 `KillCause.TIMEOUT` → `onExit` 报 `{cause:'UNKNOWN'}`）） |
 | `a11y` | `a11y.ts` | `A11yNamespaceHandler`（`:platform:capabilities`）+ `CapabilityNamespaces.a11y(tree, actions, input, events)` 装配缝（树/动作/输入/事件四 SPI）+ **Android 真实现** `AndroidUiTree`/`AndroidGestureInput` 经 `SystemA11yBridge`（`A11yServiceHolder` 连接态） | **生产已接**：`PlatformWiring.inject` → `a11yHandler` → `AppShellApplication.installWithFiles`（服务未连 = 桥如实 `ERR_SERVICE_DISABLED`，装配期即可注入不必等 `onServiceConnected`）；内存实现仍是单测缺省；未注入缝保留 → 仍如实 `ERR_NOT_IMPLEMENTED` |
 | `screen` | `images.ts` | `ScreenNamespaceHandler`（`:platform:capabilities`）+ `ScreenshotSource`（333ms 节流/§8.8 策略预检/句柄记账）+ **Android 真实现** `AndroidFrameProducer`（经 `SystemA11yBridge.takeScreenshot`：API34+ 窗口级、API30–33 显示级、API<30 如实 `ERR_NOT_IMPLEMENTED`；失败码分类 SECURE→BLACK_FRAME/限频→INVALID_PARAM/通道失效→SERVICE_DISABLED/内部→ERR_IO） | **生产已接**：`PlatformWiring.screenHandler` → `AppShellApplication.installWithFiles`（与 a11y 同底：服务未连 = `ERR_SERVICE_DISABLED`）；**回包尺寸 = 系统真值**（`ProducedFrame` 随帧走，不再固定 1080×2400）。MediaProjection 高清会话仍待（换 producer 即插） |
 | `images`（decode/matchTemplate/findImage/findColor/toGrayscale/crop/resize/rotate/findFeature/release —— 十方法，2026-09-29 起） | `images.ts` | `ImagesNamespaceHandler.kt`（`:platform:system`，经 `SystemNamespaces.images(analyzer)` 转接；SPI = `:domain` `ImageAnalyzer`+`ImageFrame`/`ImageMatch`，真身 = `:platform:system` 的 `NativeImageAnalyzer`/`JniOps` + `:bridge:image` 的 `libopencv.so`，2026-09-25 已接） | **桥面已可挂**：`assemble` 的 `imagesHandler` **独立缝**（同 datastore/zip/settings/notification/clipboard/sensors —— 图像面无共担门禁：读图是应用私有目录内 IO、匹配是纯计算，`ERR_FILE_NOT_FOUND`/`ERR_STALE_HANDLE` 判据在 SPI；不入 `systemHandlers` 束；未注入则如实 `ERR_NOT_IMPLEMENTED`；`AppShellKit.assemble` 透传同一缝）。**生产侧已喂**（2026-09-25）：`PlatformWiring.of` 构造 `NativeImageAnalyzer.of(JniOps.loadOrNull())` 传 `inject(images = …)` —— so 缺位（未跑 `build-opencv.sh` 的 CI JVM / 无 native 的设备）→ null → 桥对 `images.*` 如实 `ERR_NOT_IMPLEMENTED`（一个看不见像素的内存分析器只能靠自报坐标假装匹配成功，那比没有更坏 —— 这条防线从"不喂"变成"缺件不喂"，语义不变）。两侧钉子：`ImagesNamespaceHandlerTest` + `images.test.cjs` + `NativeImageAnalyzerTest` |
@@ -155,7 +155,10 @@ try {
 const lock = await auto.power.status();          // {held, holders}；分歧时 held=false 而 holders>0，不折叠
 
 // ── engines：多引擎（池仲裁；超载排队，不静默丢弃）
-const other = await auto.engines.exec({ projectId: 'p1', scriptPath: 'worker.js' });
+const other = await auto.engines.exec({
+  projectId: 'p1', scriptPath: 'worker.js',
+  timeoutMillis: 5 * 60_000,        // **必填**（墙钟总时长）：没人 await 终结，期限须由调用方声明
+});                                  // 缺席/非正 → ERR_INVALID_PARAM（宿主守卫，本层不预检）
 const chan = await auto.engines.channel('progress');       // 命名通道**显式打开**（session.channel 恒 null）
 await chan.emit('progress', JSON.stringify({ done: 3 }));  // 载荷是 JSON 字符串，不是对象
 const sub = chan.on('progress', (payload) => console.log('子脚本说', payload), { pollMillis: 500 });
@@ -214,7 +217,7 @@ await auto.console.log('普通日志', { a: 1 });               // log/info/warn
 offQe();
 ```
 
-#### 12.3.2 读这段示例时必须知道的六条（每一条都是踩过的坑）
+#### 12.3.2 读这段示例时必须知道的七条（每一条都是踩过的坑）
 
 1. **错误面要从 `require('auto')` 具名导入，不在 `auto` 根对象上**：
    `const { AutojsError, ERROR_CODES } = require('auto')` 成立，`auto.AutojsError` 是 `undefined`（`index.ts` 的具名导出，不挂在命名空间根上）。判错两条路：`e instanceof AutojsError && e.code === 'ERR_FILE_NOT_FOUND'`，或 `e.is('ERR_FILE_NOT_FOUND')`。
@@ -224,6 +227,7 @@ offQe();
 4. **未命中 / 缺键 / 空结果是答案，不是异常**：`findImage`/`matchTemplate`/`findColor` 未命中回裸 `null`（`findColor` 的 native 侧用 `x = -1` 哨兵，因为 `(0,0)` 是合法首像素）；`findOneOrNull` 回 `null`；`datastore.get` 缺键回 `undefined` 而存的 JSON `null` 回 `null`（两者不折叠）；`settings.getInt`/`clipboard.getText` 缺键回 `null`。**但"扫过 0 像素"（空 region / region 越界）是 `ERR_INVALID_PARAM`** —— 那不是"没有"，是"根本没找"，混成 `null` 会让脚本把空区域当成搜过一遍。**`findFeature` 未命中同款（回 `null`，见 §9.2 末）。
 5. **引擎会话的两个名字都是 v9 的两代形态，别照旧写法**：`engines.exec({projectId, scriptPath})`（不是 `{script}`）；`session.onExit(info => …)` 且 `info` 是 `CrashInfo | null`（不是 `on('exit', code => …)` 的数字码，也没有 `.on` 这个方法）；`session.channel` 恒 `null`，命名通道要 `engines.channel(name)` **显式打开**（隐式建通道会在宿主侧留一条永远没人 drain 的缓冲）。
 6. **npm 的事件订阅名与 §12.2 表格一致，不是 `on('progress')`**：`onProgress`/`onApproval`/`onWarning`/`onFinished` 四个独立方法（各有退订返回值）。`on('progress')`/`on('approval')` 在 facade 上**不存在**（会 `TypeError`），wire 上也没有对应方法（§10.8 的示例同批改）。四条都是**拉取轮询**投递（首订立拉、退订自停）：宿主侧没有推给脚本的通道，谁把 wire 上的 `events`/`approvals` 删了，`pump*` 会响亮抛 `ERR_NOT_IMPLEMENTED` 而不是安静空转。
+7. **`engines.exec` 的 `timeoutMillis` 是必填的墙钟总时长，不是排队上限**（2026-10-01）：桥这条路拿到句柄就返回、**没人 await 终结**，而看门狗三路健康判据（心跳/CPU/RSS）全看进程表现 —— 心跳正常、CPU 空闲的长跑脚本三路都判它健康，谁也收不住它。所以期限必须由调用方声明，宿主对缺席/`null`/`非正` 一律回 `ERR_INVALID_PARAM`（**本层不预检**：两处校验必然漂移，与空事件名同一条纪律）。到点宿主落 `KillCause.TIMEOUT` 强杀，`onExit` 报 `{cause:'UNKNOWN'}`（外部结算同款：结算即离表，不把「查不到」伪造成干净结束）。排队上限是另一个参数 `waitTimeoutMillis`（缺省取请求 TTL），别混。
 
 #### 12.3.3 接口期未落地（示例里故意不写，写了就是撒谎）
 

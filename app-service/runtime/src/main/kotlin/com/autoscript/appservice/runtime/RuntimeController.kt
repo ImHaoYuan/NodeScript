@@ -188,16 +188,34 @@ class RuntimeController(
     fun stats(): PoolStats = pool.stats()
 
     /**
-     * 看门狗锚点：在途 runId → 该次执行的引擎 pid（docs §8.4 调度循环的取数口）。
+     * 看门狗锚点：在途 runId → 该次执行的引擎 pid 与**期限归属**（docs §8.4 调度循环的取数口）。
      *
      * pid 取 [com.autoscript.domain.engine.EngineRunReceipt.pid]，即**这次 run** 的 pid，
      * 而非宿主 [com.autoscript.domain.engine.ScriptEngine.pid] 的"当前值"——同一槽位换过
      * 执行体后两者不同。宿主不给 pid（实现未接线）时如实给 null：调用方按"无法度量"处理。
+     *
+     * [WatchAnchor.deadlineMillis] 同理取**这次请求**声明的那一份（[PoolAcquireRequest.timeoutEnforcer]
+     * 为 [TimeoutEnforcer.WATCHDOG] 时 = `startedAt + scriptTimeoutMillis`）：看门狗据此落
+     * `KillCause.TIMEOUT`。归属为 [TimeoutEnforcer.AWAITER] 时为 null —— 那条路由发起方自己
+     * await 并超时强杀（§8.6 dispatcher），看门狗**不得**越过调用方去替它收账。
      */
     suspend fun watchAnchors(): List<WatchAnchor> = guard.withLock {
         active.values.map {
-            WatchAnchor(it.receipt.runId, it.receipt.pid, startedAt[it.receipt.runId] ?: clock())
+            val started = startedAt[it.receipt.runId] ?: clock()
+            WatchAnchor(it.receipt.runId, it.receipt.pid, started, deadlineOf(it.request, started))
         }
+    }
+
+    /**
+     * 本次执行的期限线（null = 不归看门狗管，见 [watchAnchors]）。
+     *
+     * 纯函数：只由"这次请求的归属声明 + 启动时刻"算出，不读任何易变状态 ——
+     * 期限一旦定下就不再改（中途改期限 = 同一 run 两套到期口径）。
+     */
+    private fun deadlineOf(request: PoolAcquireRequest, startedAtMillis: Long): Long? {
+        if (request.timeoutEnforcer != TimeoutEnforcer.WATCHDOG) return null
+        val declared = request.scriptTimeoutMillis ?: return null   // 构造期已 require，防御性兜底
+        return startedAtMillis + declared
     }
 
     /** 在途 runId 快照（诊断/UI 用）。 */
@@ -323,8 +341,18 @@ class RuntimeController(
      *
      * [startedAtMillis] 是**这次执行**的启动墙钟：看门狗靠它区分「还没到首跳」与
      * 「打过点又断了」（见 [EngineWatchdog] 的启动宽限口径）。
+     *
+     * [deadlineMillis] 是**这次执行的墙钟期限**（= 启动时刻 + 声明超时），只在
+     * [PoolAcquireRequest.timeoutEnforcer] 为 [TimeoutEnforcer.WATCHDOG] 时非空：
+     * 那条路没人 await 终结，期限线是它唯一的收尾人。归属 [TimeoutEnforcer.AWAITER]
+     * 时为 null（发起方自己收账），看门狗据此**不越权**。
      */
-    data class WatchAnchor(val runId: Long, val pid: Int?, val startedAtMillis: Long)
+    data class WatchAnchor(
+        val runId: Long,
+        val pid: Int?,
+        val startedAtMillis: Long,
+        val deadlineMillis: Long? = null,
+    )
 
     companion object {
         const val POLL_INTERVAL_MILLIS: Long = 200

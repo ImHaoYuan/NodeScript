@@ -25,7 +25,7 @@
 | §14 P1 | `ui` 原生 XML UI 宿主 / `ui_web` | 未落 |
 | §9.7 | OCR（P1）/ 插件（P2） | 未落 |
 | §10.5 | 生物特征二次确认 | 未落（`BiometricPrompt` 全仓零引用） |
-| §8.5 | 引擎侧 `waitCompletion` 超时不发起 | 未覆盖（§8.6 自己记的诚实边界） |
+| §8.5/§8.6 | 引擎侧 `waitCompletion` 超时不发起（无人 await 的 run 没人收尾） | **已覆盖（2026-10-01）**：`TimeoutEnforcer{WATCHDOG}` + 看门狗期限线（`KillCause.TIMEOUT`）—— 残余边界见 §8.6（期限只覆盖声明了期限的 run + 轮转须在跑） |
 | §15 | APK ≤ 40MB | **已超支**（实测 ≈81MB，见 [`design-decisions.md`](design-decisions.md#已推翻--已改口径)） |
 | — | 真机红测：exec/dlopen + 桥全链 | **已做**（2026-09-29，见下「流水」；非 root、Android 13/arm64、生产布局） |
 | — | 真机红测：16KB 页机 / SELinux enforcing / `nativeLibraryDir` 提取路径 / targetSdk36 exec 策略 | 未做（设备 PAGE_SIZE=4096，这几项该机**原理上测不到**） |
@@ -39,6 +39,20 @@
 只在那里写一份（本文件不复制，避免两处漂移）。
 
 ## 流水（最新在上）
+### 2026-10-01 —— §8.5/§8.6 收口：无人 await 的 run 自带期限（`feat/fastpath-16x`）
+- **治的病**：§8.6 自己记的诚实边界 —— 桥 `engines.exec` 拿句柄即返回、没人 await 终结，
+  而看门狗三路判据全看进程表现（心跳/CPU/RSS）：**心跳正常、CPU 空闲、RSS 很低的长跑脚本三路都判健康，谁也收不住它**。
+- **判据**：`PoolAcquireRequest.timeoutEnforcer: TimeoutEnforcer{AWAITER(缺省), WATCHDOG}` —— 看**发起方等不等**，不是"有没有声明超时"
+  （调度链路也声明 `timeoutMillis` 但它自己 `awaitCompletion` 超时强杀走 `REQUESTED`；看门狗再收一次就是两套口径）。
+  选 `WATCHDOG` 而不给 `scriptTimeoutMillis` → 构造期 `require` 响亮失败。
+- **落点**：`RuntimeController.WatchAnchor.deadlineMillis`（= `startedAt + scriptTimeoutMillis`，纯函数）→ `EngineWatchdog.tick()` **期限线判在 pid/心跳两条「量不到」分支之前**
+  （期限不依赖度量，排后面会让「宿主不给 pid / 心跳未接线」的 run 连期限都够不着）→ `KillCause.TIMEOUT`（归 `CRASHED`，`Tick.timeoutKilled` 单列）。
+- **接口收紧**：`engines.exec` 的 `timeoutMillis` 由可选改**必填**，缺席/`null`/`<= 0` → `ERR_INVALID_PARAM`（缺省值没有诚实来源）；
+  JS 侧不预检（同 payload 发出去、宿主回错，与空事件名同一条纪律）。`docs/design/08-execution.md` §8.1/§8.6、`12-js-api.md` §12.2/§12.3.1/§12.3.2 同批改。
+- **证据**：`:app-service:runtime:test` 109 例 0 败（`EngineWatchdogTest` 18 含 3 新增：到期收账 / 期限先于 pid+心跳两路 / `AWAITER` 不越权；`EnginesNamespaceHandlerTest` 20 含 3 新增：缺 `timeoutMillis` 拒 / 非正拒 / 期限随锚点交给看门狗）；
+  `bridge/js` `node --test` 193 例（`engines.test.cjs` 19 含新增「缺 timeoutMillis → ERR_INVALID_PARAM」）；`:app` 三处 `engines.exec` 字面载荷补 `timeoutMillis`。
+  本机全量门 13 模块 1765 例 0 败 0 skip。
+
 ### 2026-10-01 —— 三大形态修复：matchTemplate 大模板 / findFeature 恒假 / findColor 全帧（commits `a78515c`/`34fd80e`/`f6cb926`，`feat/fastpath-16x` 叠在 `8d20500` 之上）
 - **过程**：本轮治的不是"慢"，是三条**判据口径之外、真机上真会发生**的形态。
   每条都先量病灶机制再动手，三方（生产 / 探针 / host 夹具）互证。
