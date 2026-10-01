@@ -14,28 +14,49 @@ import org.junit.jupiter.api.Test
 
 class EnginesNamespaceHandlerTest {
 
-    private fun handler(capacity: Int = 1): Pair<EnginesNamespaceHandler, MutableList<FakeEngine>> {
+    private fun fullRig(capacity: Int = 1): Triple<EnginesNamespaceHandler, RuntimeController, MutableList<FakeEngine>> {
         val engines = MutableList(capacity) { FakeEngine(EngineId(it)) }
         val pool = FixedEnginePool({ id -> engines[id.poolIndex] }, capacity)
-        return EnginesNamespaceHandler(RuntimeController(pool)) to engines
+        val controller = RuntimeController(pool)
+        return Triple(EnginesNamespaceHandler(controller), controller, engines)
+    }
+
+    private fun handler(capacity: Int = 1): Pair<EnginesNamespaceHandler, MutableList<FakeEngine>> {
+        val (h, _, engines) = fullRig(capacity)
+        return h to engines
     }
 
     /** 桥侧 Request 工厂（步骤 4 后自定义 Request 已删；缺省 TTL = 常规桥请求量级）。 */
     private fun enginesReq(id: Long, method: String, payload: String?, ttlMillis: Long = 30_000) =
         BridgeRequest(id, "engines", method, payload, ttlMillis)
 
+    /**
+     * exec 载荷工厂。**timeoutMillis 缺省带上**：桥这条路必须显式声明执行期限
+     * （见 handler 方法表 `exec` 条），绝大多数用例验的不是"缺它会怎样"，
+     * 让它们各自抄一遍期限只会把噪音写进每条断言。传 null 才是不带该键。
+     */
     private fun execPayload(
         projectId: String = "p1",
         scriptPath: String = "a.js",
         extra: String = "",
-    ): String = """{"projectId":"$projectId","scriptPath":"$scriptPath"$extra}"""
+        timeoutMillis: Long? = 60_000,
+    ): String {
+        val t = if (timeoutMillis == null) "" else ",\"timeoutMillis\":$timeoutMillis"
+        return "{\"projectId\":\"$projectId\",\"scriptPath\":\"$scriptPath\"$t$extra}"
+    }
 
     @Test
     fun `exec 成功回 runId 与 handle`() = runBlocking {
         val (h, engines) = handler()
         val resp = assertInstanceOf(
             BridgeResponse.Ok::class.java,
-            h.handle(enginesReq(1, "exec", """{"projectId":"p1","scriptPath":"a.js","args":["x","y"],"runNonce":"n1"}""")),
+            h.handle(
+                enginesReq(
+                    1,
+                    "exec",
+                    """{"projectId":"p1","scriptPath":"a.js","timeoutMillis":60000,"args":["x","y"],"runNonce":"n1"}""",
+                ),
+            ),
         )
         val o = DomainJson.decodeObject(resp.payload!!)
         val runId = (o["runId"] as DomainJson.Value.N).raw.toLong()
@@ -106,6 +127,54 @@ class EnginesNamespaceHandlerTest {
         val retryId =
             (DomainJson.decodeObject(retry.payload!!)["runId"] as DomainJson.Value.N).raw.toLong()
         assertTrue(retryId != held, "释放后的槽位应分配给新 run")
+        Unit                                           // 显式收尾：void 返回值才被 JUnit5 视为测试
+    }
+
+    @Test
+    fun `exec 缺 timeoutMillis 回 ERR_INVALID_PARAM（桥路径无人 await，期限须显式声明）`() = runBlocking {
+        // 这条是把 §8.6 的诚实边界钉死：桥 exec 拿到句柄就返回，没人 await 终结 ——
+        // 缺省值在这里没有诚实来源（编一个 = 替脚本静默决定它能跑多久）。
+        // 缺键与显式 null 同判：都表示"没声明期限"。
+        val (h, _, engines) = fullRig()
+        for ((i, extra) in listOf("", ",\"timeoutMillis\":null").withIndex()) {
+            val resp = assertInstanceOf(
+                BridgeResponse.Err::class.java,
+                h.handle(enginesReq(20L + i, "exec", execPayload(timeoutMillis = null, extra = extra))),
+            )
+            assertEquals("ERR_INVALID_PARAM", resp.errorCode, "case $i")
+        }
+        assertTrue(engines[0].executed.isEmpty(), "守卫生效：拒绝先于投递，一条都没起")
+    }
+
+    @Test
+    fun `exec 非正 timeoutMillis 回 ERR_INVALID_PARAM（0 与负数都是漏配）`() = runBlocking {
+        // 与 §8.6 queueTimeoutMillis 传 0 视为漏配同一条纪律：0 = "永不允许跑"，
+        // 与"缺省"长得一样但含义相反，静默夹到某个下限会让脚本跑得比声明的久。
+        val (h, _, engines) = fullRig()
+        for ((i, bad) in listOf(0L, -1L, -60_000L).withIndex()) {
+            val resp = assertInstanceOf(
+                BridgeResponse.Err::class.java,
+                h.handle(enginesReq(30L + i, "exec", execPayload(timeoutMillis = bad))),
+            )
+            assertEquals("ERR_INVALID_PARAM", resp.errorCode, "timeoutMillis=$bad")
+        }
+        assertTrue(engines[0].executed.isEmpty())
+    }
+
+    @Test
+    fun `exec 声明的期限随锚点交给看门狗（归属 WATCHDOG，不是缺省 AWAITER）`() = runBlocking {
+        // 接线钉子：handler 只负责"把期限与归属一起递给池"，期限线本身由看门狗落
+        // （EngineWatchdogTest 验）。这里验的是**这条桥的请求真的带了期限归属** ——
+        // 少了它，声明过的期限在池里只是个没人读的字段，run 照样悬挂。
+        val (h, controller, _) = fullRig()
+        val resp = assertInstanceOf(
+            BridgeResponse.Ok::class.java,
+            h.handle(enginesReq(1, "exec", execPayload(timeoutMillis = 60_000))),
+        )
+        val runId = (DomainJson.decodeObject(resp.payload!!)["runId"] as DomainJson.Value.N).raw.toLong()
+        val anchor = controller.watchAnchors().single()
+        assertEquals(runId, anchor.runId)
+        assertEquals(anchor.startedAtMillis + 60_000, anchor.deadlineMillis, "期限 = 启动时刻 + 声明值")
         Unit                                           // 显式收尾：void 返回值才被 JUnit5 视为测试
     }
 

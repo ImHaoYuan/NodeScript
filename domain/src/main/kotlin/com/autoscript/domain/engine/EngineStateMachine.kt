@@ -56,7 +56,7 @@ class EngineStateMachine(private val initial: EngineStatus = EngineStatus.IDLE) 
      * 强制 kill：按原因归类，目标经 [transition] 校验（非法转移抛 [IllegalStateTransition]）。
      * - REQUESTED：RUNNING/QUIESCING → STOPPED（合法干净停）；其余状态（BOOTING/STOPPED/
      *   CRASHED/IDLE）→ CRASHED —— 非存活期的「主动停」视同异常终止，不伪造干净停；
-     * - 非 REQUESTED（心跳/CPU/OOM/引擎请求/DRIFT）→ CRASHED。
+     * - 非 REQUESTED（心跳/CPU/OOM/引擎请求/DRIFT/期限到期）→ CRASHED。
      */
     fun onKill(cause: KillCause) {
         val target = when (cause) {

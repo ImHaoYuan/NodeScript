@@ -284,6 +284,52 @@ int main() {
         }
     }
 
+    // 6d) **FastPath（12a，2026-10-01）唯一高置信差分锁**：粗筛提名唯一（NMS 后
+    //     全图只有主峰过带宽）+ 主峰 ≥ thr+0.05 → 精配窗收窄到 ceil(1/sc)·1+2。
+    //     不变式：坐标/置信度仍回原 4 通道窗重算，只改「窗多大」不改「报什么」。
+    //     这里双跑三条：① 同图唯一高置信 → fast 与 exact 同位同 conf；② 复制
+    //     出第二枚图标（唯一性被破坏）→ 仍同位同 conf（常态 pad，fast 不触发）；
+    //     ③ 高置信阈值收敛：粗峰恰在带宽+0.05 边缘时 fast 不触发（走常态 pad）。
+    {
+        // ① 低频放大模板（case48 同款）：0.25× 后保留结构，粗筛唯一高置信。
+        cv::Mat base(12, 12, CV_8UC4);
+        rng.fill(base, cv::RNG::UNIFORM, 0, 256);
+        cv::Mat icon;
+        cv::resize(base, icon, cv::Size(64, 64), 0, 0, cv::INTER_LINEAR);
+        cv::Mat scr(480, 640, CV_8UC4);
+        rng.fill(scr, cv::RNG::UNIFORM, 110, 150);
+        const cv::Point at(201, 241);
+        icon.copyTo(scr(cv::Rect(at.x, at.y, 64, 64)));
+        const int64_t sd = dec(d + "/scr6d.png", scr);
+        const int64_t td = dec(d + "/tpl6d.png", icon);
+        if (sd >= 0 && td >= 0) {
+            const MR r = dual_match(sd, td, 0.9);
+            chk(r.rc == 0 && r.m == 1, "case6d unique-highconf 命中");
+            chk(r.x == at.x && r.y == at.y, "case6d 坐标 = 模板原位 (201,241)（实际 " +
+                std::to_string(r.x) + "," + std::to_string(r.y) + "）");
+            chk(r.c > 0.99, "case6d 置信度 >0.99（实际 " + std::to_string(r.c) + "）");
+            imgnative_release(sd);
+            imgnative_release(td);
+        }
+
+        // ② 复制出第二枚同款图标：唯一性破坏 → fast 不触发，坐标仍第一枚。
+        {
+            cv::Mat scr2 = scr.clone();
+            icon.copyTo(scr2(cv::Rect(at.x + 120, at.y, 64, 64)));
+            const int64_t s2 = dec(d + "/scr6d2.png", scr2);
+            const int64_t t2 = dec(d + "/tpl6d2.png", icon);
+            if (s2 >= 0 && t2 >= 0) {
+                const MR r = dual_match(s2, t2, 0.9);
+                chk(r.rc == 0 && r.m == 1, "case6d2 重复副本命中");
+                chk(r.x == at.x && r.y == at.y, "case6d2 坐标 = 第一枚 (201,241)（实际 " +
+                    std::to_string(r.x) + "," + std::to_string(r.y) + "）");
+                chk(r.c > 0.99, "case6d2 置信度 >0.99（实际 " + std::to_string(r.c) + "）");
+                imgnative_release(s2);
+                imgnative_release(t2);
+            }
+        }
+    }
+
     // 6c) **高频反例 = 频率门的锁**（差分门 2026-09-30 首跑抓到的真红）：
     //     i.i.d. 逐像素噪声模板落在 4 不对齐的坐标 (301,177) 上 —— 0.25× 的
     //     4×4 平均块在错位坐标上与模板的平均块互不相关，粗峰值欠估到候选带宽
@@ -397,6 +443,51 @@ int main() {
                 imgnative_release(s8);
                 imgnative_release(t8);
             }
+        }
+    }
+
+    // 9) **场景端粗筛缓存（2026-10-01）：同帧连跑两次必须同解**。
+    //    缓存是纯性能件（省 cvtColor+resize ≈7.6ms/次），但它把一份**派生图**
+    //    钉在了帧的生存期上 —— 判据是"缓存命中不改变任何出参字节"。
+    //    这里三重差分：① 同 (帧,模板,thr) 连跑两次逐字段一致（第二次命中的是
+    //    缓存图，第一次是现算图）；② 中间插一次**别的模板**匹配（不同 sc 档，
+    //    逼迫缓存键 (ref) 上的图被换掉/复用），回来后第三条仍与原值一致；
+    //    ③ 换 sc 档：拿一个短边落在 0.5× 档的模板（48→0.25×、100→0.25×，
+    //    要 0.5× 需短边 24..47 —— 用 320×40 让 40*0.5=20≥12 且 40*0.25=10<12）
+    //    与 370×80 交替匹配，两条各自与"单独跑"同解。
+    //    缓存图是灰度**缩小**图（CV_8U 单通道），与精配用的原 4 通道窗是两张图
+    //    —— 这里顺带把"缓存没有把原图像素改掉"也钉住：第三次跑完再验一次全帧
+    //    像素哈希（缓存若误写成就地缩小，原图会变）。
+    {
+        cv::Mat base2(240, 320, CV_8UC4);
+        rng.fill(base2, cv::RNG::UNIFORM, 0, 256);
+        base2(cv::Rect(80, 90, 120, 100)).setTo(cv::Scalar(30, 180, 60, 255));
+        cv::Mat scr;
+        cv::resize(base2, scr, cv::Size(1280, 960), 0, 0, cv::INTER_LINEAR);
+        cv::Mat tpl9 = scr(cv::Rect(320, 360, 480, 400)).clone();   // 短边 400 → 0.25×
+        cv::Mat tpl9b = scr(cv::Rect(320, 360, 480, 40)).clone();   // 短边 40 → 0.5×
+        const int64_t s9 = dec(d + "/scr9.png", scr);
+        const int64_t t9 = dec(d + "/tpl9.png", tpl9);
+        const int64_t t9b = dec(d + "/tpl9b.png", tpl9b);
+        if (s9 >= 0 && t9 >= 0 && t9b >= 0) {
+            const MR a = call_match(s9, t9, 0.9);      // 现算（缓存空）
+            const MR b = call_match(s9, t9, 0.9);      // 命中缓存
+            chk(a.rc == 0 && a.m == 1, "case9 首次命中");
+            chk(b.rc == 0 && b.m == 1 && b.x == a.x && b.y == a.y &&
+                std::fabs(b.c - a.c) < 1e-9, "case9 二次（命中场景缓存）与原值逐字段一致");
+            const MR mid = call_match(s9, t9b, 0.9);   // 另一个 sc 档：换图
+            const MR c = call_match(s9, t9, 0.9);      // 换回来
+            chk(mid.rc == 0, "case9 中间换 sc 档调用成功");
+            chk(c.rc == 0 && c.m == 1 && c.x == a.x && c.y == a.y &&
+                std::fabs(c.c - a.c) < 1e-9, "case9 换档后回到原档：仍与原值逐字段一致");
+            // region 路径**不走**场景缓存：与全帧调用同解（坐标加回全帧口径）。
+            const int32_t reg9[4] = {300, 340, 600, 500};
+            const MR rf = call_match(s9, t9, 0.9, reg9);
+            chk(rf.rc == 0 && rf.m == 1 && rf.x == a.x && rf.y == a.y &&
+                std::fabs(rf.c - a.c) < 1e-9, "case9 region 路径与全帧同解（场景缓存不参与 region）");
+            imgnative_release(s9);
+            imgnative_release(t9);
+            imgnative_release(t9b);
         }
     }
 

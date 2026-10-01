@@ -32,14 +32,39 @@ interface EnginePool {
     fun stats(): PoolStats
 }
 
+/**
+ * 一次执行的**时限由谁收口**（§8.6 铁律"进入 RUNNING 的路径必须绑定一条终结它的时限"）。
+ *
+ * 判据是**发起方等不等**，不是"有没有声明超时"——声明了却没人执行等于没声明：
+ * - [AWAITER]：发起方自己 await 终结（调度链路的 `ControllerRunDispatcher`：
+ *   `awaitCompletion` 超时 → `killRun(REQUESTED)`）；
+ * - [WATCHDOG]：发起方不等（桥 `engines.exec` 拿到句柄即返回，之后只有脚本自己
+ *   `cancel`）——期限线随 `RuntimeController.watchAnchors()` 交给看门狗，到点由它落
+ *   `KillCause.TIMEOUT`。
+ */
+enum class TimeoutEnforcer { AWAITER, WATCHDOG }
+
 data class PoolAcquireRequest(
     val projectId: String,
     val scriptPath: String,
     val args: List<String> = emptyList(),
     val runNonce: String? = null,               // 调度幂等锚点，透传 EngineRunRequest（§8.5）
-    val scriptTimeoutMillis: Long? = null,      // 脚本自身超时，透传 EngineRunRequest
+    val scriptTimeoutMillis: Long? = null,      // 脚本自身超时，透传 EngineRunRequest（引擎不计时，见其 KDoc）
     val waitTimeoutMillis: Long? = null,        // 排队等待上限；null = 无限等
-)
+    /**
+     * 时限归属（见 [TimeoutEnforcer]）。缺省 [TimeoutEnforcer.AWAITER]（调度链路）。
+     *
+     * **选 [TimeoutEnforcer.WATCHDOG] 就必须给 [scriptTimeoutMillis]** —— 否则这条 run
+     * 又落回"没人收尾"那一类（init 里 require，构造即响亮失败，不静默放过）。
+     */
+    val timeoutEnforcer: TimeoutEnforcer = TimeoutEnforcer.AWAITER,
+) {
+    init {
+        require(timeoutEnforcer == TimeoutEnforcer.AWAITER || scriptTimeoutMillis != null) {
+            "TimeoutEnforcer.WATCHDOG 必须带 scriptTimeoutMillis：无人 await 的 run 必须自带期限（§8.6）"
+        }
+    }
+}
 
 sealed interface PoolAcquireOutcome {
     data class Granted(val handle: PoolHandle) : PoolAcquireOutcome

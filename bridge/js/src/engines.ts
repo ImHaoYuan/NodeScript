@@ -15,13 +15,25 @@ export interface EngineRunReceipt {
   readonly handle: { refId: number; generation: number }
 }
 
-/** 一次运行请求（与 :domain EngineRunRequest 对齐）。 */
+/**
+ * 一次运行请求（与 :domain EngineRunRequest 对齐）。
+ *
+ * **`timeoutMillis` 是必填的**（2026-10-01 起）：`engines.exec` 拿到句柄就返回，
+ * 没有任何人 await 这次执行 —— 期限不声明，run 就只能等看门狗按心跳/CPU/RSS 判死，
+ * 而**心跳正常的长跑脚本永远判不到**（三路判据看的是进程表现，不是契约）。
+ * 宿主侧对缺席/非正值一律回 `ERR_INVALID_PARAM`（不静默夹到某个缺省，
+ * 那等于替脚本决定它能跑多久）。要点：
+ * - 这是**墙钟总时长**，从执行开始算，不是"空闲多久"；
+ * - 到点宿主落 `KillCause.TIMEOUT`（归 CRASHED），`onExit` 看到 `{cause:'UNKNOWN'}`
+ *   —— 结算是离表，那时已无终态可读（见 `EngineSessionImpl.onExit`）；
+ * - 想让脚本跑多久就给多久：`timeoutMillis` 只管**上限**，不是预期时长。
+ */
 export interface EngineRunRequest {
   readonly projectId: string
   readonly scriptPath: string
   readonly args?: readonly string[]
   readonly runNonce?: string | null
-  readonly timeoutMillis?: number | null
+  readonly timeoutMillis: number
   /**
    * 满池排队上限（毫秒；透传进 exec payload 的 `waitTimeoutMillis`，Kotlin 侧优先于
    * 桥 TTL 取用 —— 见 handler `exec` 注释）。
@@ -230,6 +242,10 @@ export const engines = {
   /**
    * 启动一次执行（§8 池仲裁；返回会话句柄）。同引擎一次一脚本；运行态由 RuntimeController 仲裁。
    * 超载排队，不做静默丢弃。
+   *
+   * **`timeoutMillis` 必填**（见 [EngineRunRequest]）：本调用返回的是句柄不是结果，
+   * 宿主那条 run 没有人 await —— 期限是它唯一的收尾人。宿主对缺席/非正值回
+   * `ERR_INVALID_PARAM`，本层**不预检**（两处校验必然漂移，与空事件名同一条纪律）。
    *
    * 回包包成 [EngineSessionImpl]（此前是 wire 原样 `as EngineSession` —— `.cancel()`
    * 当场 TypeError 的空壳，已补实；与 `channel()` 包 `EngineChannel` 同一条纪律）。

@@ -35,6 +35,14 @@ function installMockEngines() {
           auto.handleResponse({ t: 'err', id: reqId, code: 'ERR_INVALID_PARAM', detail: '缺字段' })
           return undefined
         }
+        // Kotlin parseExec 的期限守卫（§8.6）：缺席/非正一律 ERR_INVALID_PARAM。
+        if (typeof p.timeoutMillis !== 'number' || !Number.isInteger(p.timeoutMillis) || p.timeoutMillis <= 0) {
+          auto.handleResponse({
+            t: 'err', id: reqId, code: 'ERR_INVALID_PARAM',
+            detail: 'exec 必须显式给 timeoutMillis（桥路径无人 await 终结，期限须由调用方声明；§8.6）',
+          })
+          return undefined
+        }
         const runId = nextRun++
         runs.set(runId, { payload: p, status: 'RUNNING' })
         auto.handleResponse({
@@ -150,7 +158,7 @@ function installMockEngines() {
 
 test('engines.exec → runId + handle:{refId,generation}（Kotlin 形状）', async () => {
   const runs = installMockEngines()
-  const s = await auto.engines.exec({ projectId: 'p1', scriptPath: 'a.js', args: ['x'], runNonce: 'n1' })
+  const s = await auto.engines.exec({ projectId: 'p1', scriptPath: 'a.js', args: ['x'], runNonce: 'n1', timeoutMillis: 60_000 })
   assert.strictEqual(typeof s.runId, 'number')
   assert.strictEqual(s.handle.refId, s.runId, 'handle.refId 与 runId 同源（Kotlin 语义）')
   assert.strictEqual(s.handle.generation, 1)
@@ -160,10 +168,10 @@ test('engines.exec → runId + handle:{refId,generation}（Kotlin 形状）', as
 test('engines.exec waitTimeoutMillis 透传 payload（Kotlin 优先口径）', async () => {
   const runs = installMockEngines()
   for (const [runId] of runsSnapshot()) await auto.engines.stop(runId).catch(() => {})
-  const s = await auto.engines.exec({ projectId: 'p1', scriptPath: 'a.js', waitTimeoutMillis: 200 })
+  const s = await auto.engines.exec({ projectId: 'p1', scriptPath: 'a.js', waitTimeoutMillis: 200, timeoutMillis: 60_000 })
   assert.strictEqual(runs.get(s.runId).payload.waitTimeoutMillis, 200, '显式排队上限进 payload（Kotlin 侧优先于桥 TTL）')
   await auto.engines.stop(s.runId)
-  const s2 = await auto.engines.exec({ projectId: 'p1', scriptPath: 'a.js' })
+  const s2 = await auto.engines.exec({ projectId: 'p1', scriptPath: 'a.js', timeoutMillis: 60_000 })
   assert.strictEqual('waitTimeoutMillis' in runs.get(s2.runId).payload, false, '缺省不发该键（JSON.stringify 丢弃 undefined）→ 宿主按桥 TTL 推导')
   await auto.engines.stop(s2.runId)
 })
@@ -173,10 +181,30 @@ function runsSnapshot() {
   return sharedRuns ? [...sharedRuns.keys()].map((runId) => [runId]) : []
 }
 
+test('engines.exec 缺 timeoutMillis → ERR_INVALID_PARAM（宿主守卫，JS 侧不预检）', async () => {
+  // 桥这条路的期限由**宿主**判（两处校验必然漂移，与空事件名同一条纪律）：
+  // JS 侧照发不误，宿主回错。这里验的是"发得出去、错回得来能识别"。
+  const req = { projectId: 'p1', scriptPath: 'a.js' }
+  delete req.timeoutMillis
+  await assert.rejects(
+    () => auto.engines.exec(req),
+    (e) => e.code === 'ERR_INVALID_PARAM',
+    '缺期限不得被宿主悄悄补一个缺省',
+  )
+  await assert.rejects(
+    () => auto.engines.exec({ projectId: 'p1', scriptPath: 'a.js', timeoutMillis: 0 }),
+    (e) => e.code === 'ERR_INVALID_PARAM',
+    '0 是漏配不是"无限"',
+  )
+  await assert.rejects(
+    () => auto.engines.exec({ projectId: 'p1', scriptPath: 'a.js', timeoutMillis: -1 }),
+    (e) => e.code === 'ERR_INVALID_PARAM',
+  )
+})
 test('engines.stop：干净 true；二次 stop → ERR_NOT_FOUND（不静默）', async () => {
   // 先清掉 test1 遗留的 run（单例桥 mock runs 跨 test 共享）
   for (const [runId] of runsSnapshot()) await auto.engines.stop(runId).catch(() => {})
-  const s = await auto.engines.exec({ projectId: 'p1', scriptPath: 'a.js' })
+  const s = await auto.engines.exec({ projectId: 'p1', scriptPath: 'a.js', timeoutMillis: 60_000 })
   assert.strictEqual(await auto.engines.stop(s.runId), true)
   await assert.rejects(() => auto.engines.stop(s.runId), (e) => e.code === 'ERR_NOT_FOUND')
 })
@@ -186,7 +214,7 @@ test('engines.poolStats：capacity/free/busy 快照', async () => {
   for (const [runId] of runsSnapshot()) await auto.engines.stop(runId).catch(() => {})
   const before = await auto.engines.poolStats()
   assert.deepEqual(before, { capacity: 1, free: 1, busy: 0 })
-  const s = await auto.engines.exec({ projectId: 'p1', scriptPath: 'a.js' })
+  const s = await auto.engines.exec({ projectId: 'p1', scriptPath: 'a.js', timeoutMillis: 60_000 })
   const during = await auto.engines.poolStats()
   assert.deepEqual(during, { capacity: 1, free: 0, busy: 1 })
   await auto.engines.stop(s.runId)
@@ -250,7 +278,7 @@ test('通道 close 幂等：重复 close 不再发桥调用', async () => {
  */
 test('engines.heartbeat：递增 seq 被采纳，重复 seq 回 false', async () => {
   const runs = installMockEngines()
-  const s = await auto.engines.exec({ projectId: 'p1', scriptPath: 'a.js' })
+  const s = await auto.engines.exec({ projectId: 'p1', scriptPath: 'a.js', timeoutMillis: 60_000 })
   assert.strictEqual(await auto.engines.heartbeat(s.runId, 1), true)
   assert.strictEqual(await auto.engines.heartbeat(s.runId, 2), true)
   assert.strictEqual(await auto.engines.heartbeat(s.runId, 2), false, '同 seq = 积压帧，不刷时间戳')
@@ -265,7 +293,7 @@ test('engines.heartbeat：未知 runId 回 false（结算后打点不伪装成�
 
 test('exec 回会话句柄：cancel 可用，channel 恒 null（显式开通道）', async () => {
   installMockEngines()
-  const s = await auto.engines.exec({ projectId: 'p1', scriptPath: 'a.js' })
+  const s = await auto.engines.exec({ projectId: 'p1', scriptPath: 'a.js', timeoutMillis: 60_000 })
   assert.strictEqual(typeof s.cancel, 'function', 'exec 不再是 wire 原样：.cancel 可用')
   assert.strictEqual(typeof s.onExit, 'function')
   assert.strictEqual(s.channel, null, '会话不隐式持通道：走 engines.channel(name) 显式开')
@@ -275,7 +303,7 @@ test('exec 回会话句柄：cancel 可用，channel 恒 null（显式开通道�
 
 test('engines.status：在途回状态名，结算后 NOT_FOUND（不伪造 STOPPED）', async () => {
   installMockEngines()
-  const s = await auto.engines.exec({ projectId: 'p1', scriptPath: 'a.js' })
+  const s = await auto.engines.exec({ projectId: 'p1', scriptPath: 'a.js', timeoutMillis: 60_000 })
   assert.strictEqual(await auto.engines.status(s.runId), 'RUNNING')
   await auto.engines.stop(s.runId)
   await assert.rejects(() => auto.engines.status(s.runId), (e) => e.code === 'ERR_NOT_FOUND')
@@ -294,7 +322,7 @@ function withTimeout(promise, ms, what) {
 
 test('会话 onExit：STOPPED 报 null（干净结束）', async () => {
   installMockEngines()
-  const s = await auto.engines.exec({ projectId: 'p1', scriptPath: 'a.js' })
+  const s = await auto.engines.exec({ projectId: 'p1', scriptPath: 'a.js', timeoutMillis: 60_000 })
   await withTimeout(new Promise((resolve) => {
     const sub = s.onExit((info) => {
       assert.strictEqual(info, null, 'STOPPED = 干净结束，无 CrashInfo')
@@ -308,7 +336,7 @@ test('会话 onExit：STOPPED 报 null（干净结束）', async () => {
 
 test('会话 onExit：CRASHED 报 cause（不吞终态）', async () => {
   installMockEngines()
-  const s = await auto.engines.exec({ projectId: 'p1', scriptPath: 'a.js' })
+  const s = await auto.engines.exec({ projectId: 'p1', scriptPath: 'a.js', timeoutMillis: 60_000 })
   await withTimeout(new Promise((resolve) => {
     s.onExit((info) => {
       assert.strictEqual(info && info.cause, 'CRASHED')
@@ -322,7 +350,7 @@ test('会话 onExit：CRASHED 报 cause（不吞终态）', async () => {
 test('会话 onExit：本会话 cancel 后结算报 null，外部结算报 UNKNOWN（不伪装干净）', async () => {
   installMockEngines()
   // 本会话亲手停的：结算离表 = 我们停的 = 干净
-  const s1 = await auto.engines.exec({ projectId: 'p1', scriptPath: 'a.js' })
+  const s1 = await auto.engines.exec({ projectId: 'p1', scriptPath: 'a.js', timeoutMillis: 60_000 })
   await withTimeout(new Promise((resolve) => {
     s1.onExit((info) => {
       assert.strictEqual(info, null, '经本会话 cancel 的结算 = 干净')
@@ -331,7 +359,7 @@ test('会话 onExit：本会话 cancel 后结算报 null，外部结算报 UNKNO
     void s1.cancel().then(() => {})
   }), 1000, 'cancel 后 onExit')
   // 外部结算的（他人 stop/看门狗/跑完离表）：UNKNOWN，绝不报 null
-  const s2 = await auto.engines.exec({ projectId: 'p1', scriptPath: 'a.js' })
+  const s2 = await auto.engines.exec({ projectId: 'p1', scriptPath: 'a.js', timeoutMillis: 60_000 })
   await withTimeout(new Promise((resolve) => {
     s2.onExit((info) => {
       assert.strictEqual(info && info.cause, 'UNKNOWN', '外部结算不得伪装成干净结束')
@@ -343,7 +371,7 @@ test('会话 onExit：本会话 cancel 后结算报 null，外部结算报 UNKNO
 
 test('会话 onExit：取消订阅后不再回调', async () => {
   installMockEngines()
-  const s = await auto.engines.exec({ projectId: 'p1', scriptPath: 'a.js' })
+  const s = await auto.engines.exec({ projectId: 'p1', scriptPath: 'a.js', timeoutMillis: 60_000 })
   let called = false
   const sub = s.onExit(() => { called = true }, { pollMillis: 20 })
   sub.cancel()

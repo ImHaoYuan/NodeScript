@@ -5,15 +5,24 @@
 // 不是新帧号。JVM/JS 两门结构上看不见的东西：mock 只回编好的坐标，ORB 参数
 // （nfeatures/距离口径/ratio 阈值）写错照样绿。
 //
-// 链（全固定，不做入参）：ORB(nfeatures=1000) → BFMatcher(HAMMING) knn k=2 →
-// Lowe ratio 0.75 → 中位数偏移 ±3px 几何一致性计数。每个固定点都有 host 实测依据
-// （见实现注释）：nfeatures 500/1000 描述子逐字节一致；BGRA 直喂与手转灰一致；
-// ratio 0.7~0.8 不换答案。
+// 链（全固定，不做入参）：ORB → BFMatcher(HAMMING) knn k=2 → Lowe ratio 0.75 →
+// 中位数偏移 ±3px 几何一致性计数 → **内点铺开度**（任一边跨度 ≥10% 模板边长）。
+// 每个固定点都有 host 实测依据（见实现注释）：nfeatures 500/1000 描述子逐字节一致；
+// BGRA 直喂与手转灰一致；ratio 0.7~0.8 不换答案。
 //
-// 钉七处：
+// **场景侧配额按形态分档（2026-10-01）**：短边 >640（整屏截图）才抬到
+// nfeatures=8000 / edgeThreshold=10，小场景保持缺省 1000/31。所以本文件的夹具
+// （场景 400×300）走的仍是**缺省那档**，32 例逐字不变；整屏那档的判据在下面的
+// 第 7、8 段（同样的模板放进 1080×2400 场景，必须仍命中）。
+//
+// 钉十处：
 //   * **命中**：圆点场景（400×300）里找左上子块（200×150），found=1，
-//     坐标落在子块中心 (100,75) 附近（±10px —— 内点质心，不是逐像素精确），
-//     confidence == 内点/good（[0,1]，与 matchTemplate 同域）。
+//     坐标 = **模板中心**在场景中的位置（中位偏移 + 模板半宽高；host 实测
+//     恰好 (100.00,75.00)，±10 是留给几何抖动的余量），confidence == 内点/good
+//     （[0,1]，与 matchTemplate 同域）。
+//     **位置口径不许退回「内点质心」**（2026-10-01 修）：质心被特征密集的一侧拽走，
+//     真机 540×600 偏 82.4px、300×150 偏 60.8px（探针 /tmp/ffix/cen.cpp），而本
+//     夹具只差 1.0px —— 所以既有断言看不见它，第 7 段（差 20.5px）才是这条的锁。
 //   * **未匹配是答案**：棋盘格模板 vs 圆点场景 → found=0 且 x/y/conf 全 0，
 //     status 仍 0（与 matchTemplate 的 out_match=0 同一条纪律；host 实测误报
 //     top 距离 60+，ratio 后 good 寥寥，几何验证过不了）。
@@ -29,6 +38,20 @@
 //     且四个出参一个字节都不写（与 match 同口径）。
 //   * **两帧都不消耗**：匹配后场景/模板照常可读（只读，不产出，不改原帧）。
 //   * **置信度语义**：命中时 0 < conf <= 1（内点/good）；未命中时 conf == 0。
+//   * **整屏场景仍命中**（2026-10-01）：同一枚 200×150 子块模板，场景从 400×300
+//     换成 1080×2400 —— 若场景侧还停在 nfeatures=1000，整屏 1000 个点全被高对比区
+//     吃掉、模板区一个点都没有，恒 found=0（这就是「真机 UI 上 findFeature 恒假」的
+//     病灶）。这一条把「场景侧按短边分档」钉住。
+//   * **薄条模板（短边 <=62）仍命中**（2026-10-01）：缺省 ORB 的
+//     `runByImageBorder` 在某边 <= 2*et(=62) 时**清空该层全部关键点** —— 与内容
+//     无关，短边 60 的一条工具行模板恒零关键点。修法是**零关键点垫边重试**
+//     （反射复制 32px 再 ORB）。这一条用第 7 段那套屏幕上的 240×60 薄条窗口钉住：
+//     现状 kp_t=0 → found=0，重试后 kp_t=117 → found=1 且中心正确。
+//   * **铺开度门**（2026-10-01）：内点挤在模板一小块里（任一边跨度 <10%）判未匹配。
+//     假阳的形状就是这个 —— 几枚误配凑出同一偏移、inl 够 4 个、conf 还挺漂亮
+//     （真机实测 200×150 err 208.7px / inl=7 / conf=0.64），但模板侧坐标只占 5%×3%。
+//     这一条用**人造挤堆**构造：把模板内容做成小块贴在角落、其余留平 —— 真匹配只有
+//     那一小块有特征 → 跨度小 → 必须判未匹配。
 #include <cerrno>
 #include <cmath>
 #include <cstdint>
@@ -182,6 +205,114 @@ int main() {
         chk(imgnative_feature(scene, sub, &f2, &x2, nullptr, &c2) == 4, "out_y=null → INVALID_PARAM(4)");
         chk(imgnative_feature(scene, sub, &f2, &x2, &y2, nullptr) == 4, "out_conf=null → INVALID_PARAM(4)");
         chk(f2 == -1 && x2 == -1 && y2 == -1 && c2 == -1, "空出参早退，一个字节都不写");
+    }
+
+    // 7) 整屏场景（短边 >640）仍命中：场景侧配额按形态分档的锁。
+    //    夹具 = 合成的 1080×2400「UI 屏」（一行行文字状小块 + 图标块，固定 seed），
+    //    模板取其中一行的 200×150 窗口。**这一条是分档的锁**：host 实测同一夹具
+    //    退回 nf=1000/et=31 时 good=6/inl=0 → found=0（整屏 1000 个点全被高对比区
+    //    吃掉，模板那片区域一个都不剩），分档后 good=11/inl=7 → found=1。
+    {
+        cv::Mat scr(2400, 1080, CV_8UC1, cv::Scalar(235));
+        {
+            cv::RNG r(23);
+            for (int y = 40; y < 2400 - 40; y += 64) {
+                for (int x = 30; x < 1080 - 30; x += r.uniform(8, 20)) {
+                    const int w = r.uniform(4, 16), h = r.uniform(8, 14);
+                    if (x + w >= 1080 - 30) break;
+                    cv::rectangle(scr, cv::Point(x, y), cv::Point(x + w, y + h),
+                                  cv::Scalar(r.uniform(0, 90)), -1);
+                }
+            }
+        }
+        const int64_t big = dec(d + "/scene_big.png", scr);
+        chk(big >= 0, "整屏场景就绪（1080×2400）");
+        if (big >= 0) {
+            const int64_t tb = dec(d + "/sub_big.png", scr(cv::Rect(200, 600, 200, 150)).clone());
+            chk(tb >= 0, "整屏夹具的模板就绪（200×150 @ (200,600)）");
+            if (tb >= 0) {
+                const Found r = match(big, tb);
+                chk(r.rc == 0, "整屏场景 feature 成功（rc=" + std::to_string(r.rc) + "）");
+                chk(r.f == 1, "整屏场景里 200×150 子块能找到（found=" + std::to_string(r.f) +
+                    " —— 场景侧配额分档被拆掉时这里红）");
+                chk(std::fabs(r.x - 300) <= 10 && std::fabs(r.y - 675) <= 10,
+                    "整屏命中在子块中心 (300,675)±10（实际 " + std::to_string(r.x) + "," +
+                    std::to_string(r.y) + "）");
+                imgnative_release(tb);
+            }
+            imgnative_release(big);
+        }
+    }
+
+    // 8) 铺开度门：内点挤在模板一小块里 → 未匹配（哪怕 inl/conf 都很漂亮）。
+    //    夹具 = 200×150 模板，只有**正中心 16×12 一小块**有纹理、其余纯平；场景里
+    //    同一小块真实存在。于是这是**真匹配**：host 实测 good=38/inl=36、
+    //    conf=0.95（比任何真命中的 conf 都好看）、中心也报得对 —— 但它只说明
+    //    「模板的那一小块出现在场景里」，不说明「模板出现在场景里」。
+    //    跨度 0.079/0.077 双双低于门槛 0.10 → 判未匹配。
+    //    （16×12 的块尺寸是刻意取在门槛之下的；换成 40×30 就会过门 —— 门槛的
+    //    位置是量出来的，不是拍的：真命中 0.120/0.577/0.820，假阳 0.053/0.032。）
+    {
+        cv::Mat scr(300, 400, CV_8UC1, cv::Scalar(128));
+        cv::Mat tpl(150, 200, CV_8UC1, cv::Scalar(128));
+        {
+            cv::RNG r(4242);
+            cv::Mat blk(12, 16, CV_8UC1);
+            r.fill(blk, cv::RNG::UNIFORM, 0, 256);
+            blk.copyTo(scr(cv::Rect(200, 100, 16, 12)));
+            blk.copyTo(tpl(cv::Rect((200 - 16) / 2, (150 - 12) / 2, 16, 12)));
+        }
+        const int64_t s8 = dec(d + "/flat_scr.png", scr);
+        const int64_t t8 = dec(d + "/flat_tpl.png", tpl);
+        chk(s8 >= 0 && t8 >= 0, "铺开度门夹具就绪（平坦底 + 16×12 纹理块）");
+        if (s8 >= 0 && t8 >= 0) {
+            const Found r = match(s8, t8);
+            chk(r.rc == 0, "铺开度夹具调用成功（rc=" + std::to_string(r.rc) + "）");
+            chk(r.f == 0, "内点挤在模板一角 → 未匹配（found=" + std::to_string(r.f) +
+                "；铺开度门被拆掉时这里红 —— 那里 inl=36/conf=0.95 报得出来）");
+            chk(r.x == 0 && r.y == 0 && r.c == 0, "铺开度不足时 x/y/conf 全 0");
+            imgnative_release(s8);
+            imgnative_release(t8);
+        }
+    }
+
+    // 9) 薄条模板（短边 <=62）：缺省 ORB 恒零关键点 → 垫边重试救回。
+    //    病灶**与内容无关**：ORB 每个八度的 runByImageBorder(kp, size, edgeThreshold)
+    //    在某边 <= 2*et 时清空该层全部关键点，缺省 et=31 → 短边 <= 62 的模板侧面
+    //    恒为空（host 实测 240×60 窗口 kp_t=0，且把 et 反解到 10 也只出 0~2 个点、
+    //    仍进不了匹配）。垫边 32（反射复制）后短边 +64 越过 62，内容两侧有了真实
+    //    邻域，描述子重新可比 —— host 实测 kp_t=117、good=22、inl=11、conf≈0.5、
+    //    中心 (320.0,622.4) 对真值 (320,622)。
+    //    **这一条是垫边重试的锁**：把重试拆掉，这里回到 found=0（现状就是恒假）。
+    //    模板窗口 @(200,592) 是这段里挑出来的稳定窗口 —— 同排其它 y 上有的窗口
+    //    垫边后仍配不上（真·无特征），有的复核不过，只有它三档都稳。
+    {
+        cv::Mat scr(2400, 1080, CV_8UC1, cv::Scalar(235));
+        {
+            cv::RNG r(23);
+            for (int y = 40; y < 2400 - 40; y += 64) {
+                for (int x = 30; x < 1080 - 30; x += r.uniform(8, 20)) {
+                    const int w = r.uniform(4, 16), h = r.uniform(8, 14);
+                    if (x + w >= 1080 - 30) break;
+                    cv::rectangle(scr, cv::Point(x, y), cv::Point(x + w, y + h),
+                                  cv::Scalar(r.uniform(0, 90)), -1);
+                }
+            }
+        }
+        const int64_t s9 = dec(d + "/thin_scr.png", scr);
+        const int64_t t9 = dec(d + "/thin_tpl.png", scr(cv::Rect(200, 592, 240, 60)).clone());
+        chk(s9 >= 0 && t9 >= 0, "薄条夹具就绪（240×60 工具行窗口）");
+        if (s9 >= 0 && t9 >= 0) {
+            const Found r = match(s9, t9);
+            chk(r.rc == 0, "薄条模板调用成功（rc=" + std::to_string(r.rc) + "）");
+            chk(r.f == 1, "短边 60 的薄条模板能找到（found=" + std::to_string(r.f) +
+                " —— 缺省 ORB 预筛把整条模板清空，重试被拆掉时这里红）");
+            chk(std::fabs(r.x - 320) <= 10 && std::fabs(r.y - 622) <= 10,
+                "薄条命中在窗口中心 (320,622)±10（实际 " + std::to_string(r.x) + "," +
+                std::to_string(r.y) + "）");
+            imgnative_release(s9);
+            imgnative_release(t9);
+        }
     }
 
     // 6) 两帧都不消耗：匹配后场景/模板照常可解、模板可再裁剪式使用（release 顺序无关）

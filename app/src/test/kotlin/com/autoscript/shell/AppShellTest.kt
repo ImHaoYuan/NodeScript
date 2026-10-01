@@ -98,7 +98,7 @@ class AppShellTest {
             assertEquals(1, s.console.size())
 
             val execResp = s.router.dispatch(
-                BridgeRequest(2, "engines", "exec", """{"projectId":"p1","scriptPath":"a.js"}""", 5_000),
+                BridgeRequest(2, "engines", "exec", """{"projectId":"p1","scriptPath":"a.js","timeoutMillis":60000}""", 5_000),
             )
             val ok = assertInstanceOf(BridgeResponse.Ok::class.java, execResp)
             assertTrue(ok.payload!!.contains("runId"))
@@ -151,7 +151,7 @@ class AppShellTest {
         val (s, _, _) = shell(heartbeatMillis = null)
         s.use {
             val resp = s.router.dispatch(
-                BridgeRequest(1, "engines", "exec", """{"projectId":"p1","scriptPath":"a.js"}""", 5_000),
+                BridgeRequest(1, "engines", "exec", """{"projectId":"p1","scriptPath":"a.js","timeoutMillis":60000}""", 5_000),
             )
             val ok = assertInstanceOf(BridgeResponse.Ok::class.java, resp)
             val runId = Regex("""runId"\s*:\s*(\d+)""").find(ok.payload!!)!!.groupValues[1].toLong()
@@ -181,7 +181,7 @@ class AppShellTest {
         val (s, _, _) = shell(heartbeatMillis = { 100L })
         s.use {
             val resp = s.router.dispatch(
-                BridgeRequest(1, "engines", "exec", """{"projectId":"p1","scriptPath":"a.js"}""", 5_000),
+                BridgeRequest(1, "engines", "exec", """{"projectId":"p1","scriptPath":"a.js","timeoutMillis":60000}""", 5_000),
             )
             assertInstanceOf(BridgeResponse.Ok::class.java, resp)
             val tick = s.watchdog.tick()

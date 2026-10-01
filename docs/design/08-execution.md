@@ -13,7 +13,7 @@ data class EngineRunRequest(projectId, scriptPath, args, runNonce, timeoutMillis
 data class EngineRunReceipt(runId, handle: HandleRef)
 enum class EngineStatus { IDLE, BOOTING, RUNNING, QUIESCING, STOPPED, CRASHED }
 sealed interface StopResult { Clean; TimedOut(partial) }
-enum class KillCause { REQUESTED, WATCHDOG_HEARTBEAT, WATCHDOG_CPU, OOM, ENGINE_REQUEST }
+enum class KillCause { REQUESTED, WATCHDOG_HEARTBEAT, WATCHDOG_CPU, OOM, ENGINE_REQUEST, DRIFT, TIMEOUT }
 
 interface EnginePool {                                // 实现在 :app-service:runtime
   val capacity: Int
@@ -27,7 +27,7 @@ interface EnginePool {                                // 实现在 :app-service:
 四条与早期草案的差异（都是落地后收敛的结果，写下来防止文档倒着改代码）：
 - **无 `pause/resume`/`console: Flow`/`events: Flow`/`channel()`**：暂停未进 P0；控制台与事件走 §7.3 的 TSF 双队列 + EventBus 拉取，不建模成引擎侧 Flow（轮询式 Flow 会把「事件」伪装成「流」，丢失 TTL 与背压语义）；命名通道在 `:app-service:runtime` 的 `EnginesNamespaceHandler` 侧按 `channel/channelEmit/channelDrain/channelClose` 显式管理。
 - **引擎是一次一脚本**（`execute(run)` 非 `start(session)`）：同槽位不并发两个脚本，会话身份 = `runId`。
-- **`acquire/release` 收 `PoolAcquireRequest`/`PoolHandle`**而不是 `EngineSession`/`ExecutionHandle`：排队上限（`waitTimeoutMillis`）必须与请求同行，否则满池只能无限等。
+- **`acquire/release` 收 `PoolAcquireRequest`/`PoolHandle`**而不是 `EngineSession`/`ExecutionHandle`：排队上限（`waitTimeoutMillis`）必须与请求同行，否则满池只能无限等。**时限归属（`TimeoutEnforcer`）同样与请求同行**：`AWAITER`（缺省，调度链路——发起方自己 await 终结并超时强杀）/ `WATCHDOG`（桥 `engines.exec`——发起方拿到句柄就返回，期限线随锚点交给看门狗，到点落 `KillCause.TIMEOUT`）；选 `WATCHDOG` 而不给 `scriptTimeoutMillis` 构造即 `require` 失败——判据是**发起方等不等**，不是「有没有声明超时」，声明了却没人执行等于没声明（§8.6）。
 - 实现：`:engine:node-process`（NodeFactory），经 **Provider/SPI** 注入（`QuickJSFactory` 随沙箱裁掉，§18 第 1 项；缝留在原处，将来真要第二个引擎不必改接口）。
 
 ### 8.2 引擎实例模型决议（批判决议）
@@ -126,7 +126,12 @@ interface EnginePool {                                // 实现在 :app-service:
 - **P0 已落地（deadline 记账）**：`PendingRun.deadlineMillis` + `isExpired(now)` 记下"本次投递的到期时刻"，与 dispatcher 的排队上限**同源但不同职**——dispatcher 那侧管"在途排队等不等得起"，deadline 管"宿主重启之后这条意向还值不值得投"（崩溃恢复面对的是另一件事：进程死过一次，用户早走了/外部事件早凉了）。期限写在 `IntentRun.deadlineMillis` 上随 RUN_START 行落盘，`reopen` 原样带到新行（恢复重投不得变期限，否则同一意向两套到期口径）；`Scheduler.onTrigger` 按 `排期时刻 + deadlineFor(触发源)` 填，`recoverUncommitted` 遇过期意向照样 `reopen` 封口记账，但**不再 dispatch**，直接 COMMIT [RunOutcome.Cancelled]（`RecoveryRecord.expired` 标出，任务中心按 runId 读到"为何没跑"——绝不在恢复路径里静默跳过）。两处口径同源由装配层保证：`Scheduler` 的 `deadlineFor` 与 `ControllerRunDispatcher.queueTimeout` 默认同喂一张分级表（`DefaultDeadlines` 与 `DEFAULT_QUEUE_TIMEOUTS` 数字一致，前者是缺省值不是契约，装配层可各自覆盖）。
 - **P0 已落地（调度侧停止与收口）**：`Scheduler.lastHandle`（`EngineStopHandle{idLink, name, runNonce, stop}`，§12.3 engines.exec 的调度侧投影）只在 dispatcher 真的产生了引擎执行（`DispatchReport.link != null`）时持有 —— 门禁拒绝/排队超时/启动失败没有可停的东西，不持有假句柄；停止入口由 dispatcher 经 `DispatchReport.stop` 填权（`:app` 的 `ControllerRunDispatcher` 在 start 成功时绑定 `RuntimeController.stop` → 池四步 quiesce；三条未产生执行的早退分支回 null stop；已结算后调用落 AlreadyGone 幂等 no-op，永不升级为 kill）；`stopLastRun()` 转发句柄的 stop（成功不清句柄，停止幂等），`canStopLastRun()` 从句柄现算；`sink()` 撤销全部触发器并置位（此后 `onTrigger` 早退）；`quiesceThenStop()` = sink → 停最近一次 run → 返回句柄供归档（§13 铁律 4 的调度侧部分）。线程契约诚实声明：lastHandle/sinking 读并发安全，写仅发生在 `onTrigger` 内（装配层负责把五类触发源串行化）。
 - **P0 已落地（执行侧急停）**：`RuntimeController.forceStopAll(cause)` —— 进程级急停的显式入口（应用被杀/系统回收/测试收口），与请求驱动的 `killAll` 区分（killAll 是裁决/停全部的落点，在途表经 guard 串行收走；forceStopAll 只做杀全部 + 清在途表 + 忘心跳，不走请求语义）。**装配层有序收口已落地**：`AppShell.shutdown(cause)` = `scheduler.quiesceThenStop()`（先 sink 拒收新投递、再停最近 run）→ `controller.forceStopAll(cause)`（再杀全部槽位并复用）。顺序不可反：先杀后停会在调度不知情窗口继续投递。两步都幂等；返回调度侧被停句柄供归档（无句柄时为空，不假装停过）。
-- **仍待覆盖**：调度链路**别说"无悬挂风险"**——deadline 只关掉了"重启后重投过期意向"这一路，引擎侧 `waitCompletion` 超时不发起的场景还没人管（在途 run 没人收尾时 watchdog 是唯一兜底）。
+- **P0 已落地（无人 await 的 run 自带期限，2026-10-01）**：
+  原先的诚实边界是「引擎侧 `waitCompletion` 超时不发起的场景还没人管——在途 run 没人收尾时 watchdog 是唯一兜底」，而看门狗三路判据全看**进程表现**（心跳/CPU/RSS）：一个心跳正常、CPU 空闲、RSS 很低的长跑脚本三路都判它健康，**没有任何一路收得住它**。收口判据不是「有没有声明超时」而是**发起方等不等**（`PoolAcquireRequest.timeoutEnforcer`，见 §8.1）：
+  - `AWAITER`（缺省）：调度链路的 `ControllerRunDispatcher` 自己 `awaitCompletion`，超时 → `killRun(REQUESTED)`（归 STOPPED）——这条本来就有人收尾；
+  - `WATCHDOG`：桥 `engines.exec` 拿到句柄即返回、没人 await 终结 —— 期限 `startedAt + scriptTimeoutMillis` 经 `RuntimeController.WatchAnchor.deadlineMillis` 交给看门狗，到点落 `KillCause.TIMEOUT`（归 CRASHED：期限到期是强制收账，不是调用方主动停）。
+  期限线在 `EngineWatchdog.tick()` 里**先于** pid/心跳那两条「量不到」分支判 —— 期限不依赖任何度量，它是发起方声明的事实；排在后面会让「宿主不给 pid」或「心跳未接线」的 run 连期限都够不着，恰好退回「没人收尾」那一类。同时 `engines.exec` 的 `timeoutMillis` 由可选改为**必填**：缺席/`null`/`<= 0` → `ERR_INVALID_PARAM`（构造期 `require` 同款守卫）——缺省值在这里没有诚实来源，编一个（30s？5min？）等于替脚本静默决定它能跑多久（与 `queueTimeoutMillis` 传 0 视为漏配同一条纪律：响亮失败）。
+  **仍待覆盖（诚实边界）**：期限只覆盖**声明了期限**的 run，且只在看门狗轮转真的在跑时有效（生产轮转挂 `AppShellApplication` 的 SupervisorJob 域）——轮转没起 = 没有期限线；池空退避（`idlePollMillis`）期间新起的 run 最坏晚一个退避周期才被看到。另外 `runNonce` 幂等只保证**外部副作用**不重复，不保证「期限内跑完」——期限到点即杀，写到一半的副作用仍由执行体自己的幂等键兜底。
 - **P0 已落地（Android 触发侧）**：`AlarmSchedulerProvider`（`:app` 装配层）把 `SchedulerProvider.registerTrigger` 翻译成闹钟——预拉提前量 `wakeAheadMillis` 是契约字段（60s，测试与调用方同一份值，不藏常量）；**提前量只向前推、不向后扯**（排期已到即夹到当前时刻，ROM 对负延迟处置不一）；`canScheduleExact` 为假时降级 `setWindow` 且**记账**（`degradedTasks()`，`taskId → 排期时刻`），能力中心据此标注「可能偏差」——**不静默降级**。框架调用（真 `AlarmManager`）在 `AndroidAlarmPort`，本类**无判断**：taskId → `KeyStableHash` 定 requestCode（同 taskId 恒同，重复 arm 是替换）、`setExactAndAllowWhileIdle`/`setWindow` 两个调用点、取消 = `alarmManager.cancel` + `pendingIntent.cancel`（两个都要）。`PendingIntent` 在 API 31+ 必须 `FLAG_MUTABLE`（系统要填 `EXTRA_ALARM_*`）。回投侧是**静态注册**的接收器 `AlarmReceiver`（精确闹钟响时进程可能已被 ROM 杀掉，`registerReceiver` 收不到）走 `goAsync()` 在广播窗口内把 taskId 经 `AlarmDispatch` → `SchedulerAlarmRoute` 送回 `Scheduler.onTrigger`（TIMED 来源 + 闹钟真实排期），于是 runNonce/意图日志/dispatcher 口径与手动触发完全一致。**装配前/后的漏投不静默丢弃**：没接路线的闹钟进 `AlarmDispatch.missed()`（同一 taskId 只留最新一条，`drainMissed()` 清账），`AppShellApplication.missedAlarms()` 供能力中心如实呈现「闹钟已响但调度未就绪」。
 - **P0 已落地（屏幕门禁的生产实现）**：`AndroidScreenGate`（`:app`）——`SCREEN_ON` 在两个系统查询缝（`interactive` = `PowerManager.isInteractive`，`deferWakeLock` = 持锁方）任一为假时**如实 `Deny`**，不降级成「锁屏也跑」（那条路径的表现是「任务成功、实际什么都没发生」）；`SCREEN_OFF` 先经 `ScreenOffGuard` 收起画面类能力再放行（无障碍 + 网络在锁屏下真实可用）；`ANY` 放行。两条缝的值由 JVM 单测注入，判断逻辑因此可测而不必 Mock 框架对象。**`AllowAll` 与 `AndroidScreenGate` 在 `ANY` 上必须同结论**（`AndroidScreenGateTest` 有断言守着），否则同一条任务在单测里放行、真机上被拒，差别只在现场暴露。
 

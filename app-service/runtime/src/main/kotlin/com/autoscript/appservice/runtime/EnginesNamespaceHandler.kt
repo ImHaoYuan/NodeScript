@@ -23,6 +23,11 @@ import com.autoscript.domain.json.DomainJson
  *   排队上限 = payload `waitTimeoutMillis` 优先，否则桥侧 [BridgeRequest.ttlMillis]
  *   （§7.4 每次跨进程操作必有 TTL）——没有上限时满池即无限等，只能靠调用方取消兜底，
  *   那条路径无法诚实回 ERR_TIMEOUT，故必须把 TTL 递进池；
+ *   **执行时限必须显式声明**：桥这条路拿到句柄就返回，没人 await 终结，所以
+ *   `timeoutMillis` 缺席不是"用缺省"而是**构造即拒**（[ErrorCode.ERR_INVALID_PARAM]）——
+ *   否则这条 run 落回"没人收尾"那一类，只能等看门狗按心跳/CPU/RSS 判死，而心跳正常的
+ *   长跑脚本永远判不到。声明了期限的走 [TimeoutEnforcer.WATCHDOG]：到点由看门狗落
+ *   `KillCause.TIMEOUT`（§8.6「没人 await 的必须自带期限」）；
  * - `stop`：payload `{runId}` → StoppedClean → Ok `true`；
  *   StoppedTimeout → Err ERR_TIMEOUT（软停未干净完成，已 kill 兜底，如实报错不伪造成功）；
  *   AlreadyGone → Err ERR_NOT_FOUND（未知 runId 不静默吞掉）；
@@ -141,13 +146,20 @@ class EnginesNamespaceHandler(
         val scriptPath = requiredStr(o, "scriptPath")
         if (projectId.isBlank()) throw IllegalArgumentException("projectId 不得为空")
         if (scriptPath.isBlank()) throw IllegalArgumentException("scriptPath 不得为空")
+        // 桥这条路的执行时限**必须显式给**（见方法表 `exec` 条）：拿到句柄就返回、没人 await
+        // 终结，缺省值在这里没有诚实来源 —— 编一个（30s？5min？）等于替脚本决定它能跑多久，
+        // 而且是静默的。与 §8.6 queueTimeoutMillis 传 0 视为漏配同一条纪律：响亮失败。
+        val timeout = optLong(o, "timeoutMillis")
+            ?: throw IllegalArgumentException("exec 必须显式给 timeoutMillis（桥路径无人 await 终结，期限须由调用方声明；§8.6）")
+        if (timeout <= 0) throw IllegalArgumentException("timeoutMillis 必须 > 0：$timeout")
         return PoolAcquireRequest(
             projectId = projectId,
             scriptPath = scriptPath,
             args = optStrList(o, "args"),
             runNonce = optStr(o, "runNonce"),
-            scriptTimeoutMillis = optLong(o, "timeoutMillis"),
+            scriptTimeoutMillis = timeout,
             waitTimeoutMillis = optLong(o, "waitTimeoutMillis"),
+            timeoutEnforcer = TimeoutEnforcer.WATCHDOG,
         )
     }
 

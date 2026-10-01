@@ -20,6 +20,13 @@ const { SocketBootstrap } = require(path.resolve(__dirname, '..', 'dist', 'boots
 /** 最小 mock 宿主：读 newline frame，按 method 回 ok/err。 */
 async function startMockHost(socketPath) {
   const server = net.createServer((sock) => {
+    // 宿主侧 socket 必须自己吞 error：对端（被测的 SocketBootstrap）在 close() 里
+    // 先 end 再 destroy，宿主这头正在写的字节会以 EPIPE/ECONNRESET 回来。Node 的
+    // socket 没有 'error' 监听时把它当**未捕获异常**抛，整个测试进程随之死掉 ——
+    // 表现是「测试文件莫名红 + write EPIPE」，与断言毫无关系（2026-10-01 CI 实测：
+    // 同一提交重跑即绿，时序相关）。这是 mock 宿主的义务，不是被测代码的问题：
+    // 生产侧 SocketBootstrap.connect 里本来就挂了 sock.on('error')。
+    sock.on('error', () => {})
     let buf = Buffer.alloc(0)
     sock.on('data', (chunk) => {
       buf = buf.length === 0 ? chunk : Buffer.concat([buf, chunk])
@@ -121,6 +128,10 @@ function childFor(sockPath, scenario) {
 /** 慢宿主：slow 法 300ms 回，fast 即时回（乱序）；late 250ms 迟到；oob 先带外未知 id 再回正常；big 回 200KB。 */
 async function startChaosHost(socketPath) {
   const server = net.createServer((sock) => {
+    // bigframe 案**故意**让对端在读满 64KB 后熔断，宿主这头还没写完的 ~136KB 必然
+    // 撞 EPIPE —— 这正是本条要测的行为，所以错误是预期内的，吞掉即可（同上：
+    // 没有 'error' 监听时它会打死测试进程，红在与断言无关的地方）。
+    sock.on('error', () => {})
     let buf = Buffer.alloc(0)
     const send = (o) => sock.write(`${JSON.stringify(o)}\n`)
     sock.on('data', (chunk) => {

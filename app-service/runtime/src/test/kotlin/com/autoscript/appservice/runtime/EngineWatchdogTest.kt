@@ -228,6 +228,81 @@ class EngineWatchdogTest {
     }
 
     @Test
+    fun `期限到期落 TIMEOUT 并收走在途账（§8-6 期限线）`() = runBlocking {
+        val monitor = ProcessMonitor(100, statReader = { stat(0) }, statusReader = { status() })
+        val clock = FakeClock()
+        val (controller, dog, engine) = rig(monitor, heartbeat = { 0L }, clock = clock)
+        // 归属 WATCHDOG：这条 run 没人 await 终结，期限线是它唯一的收尾人。
+        val started = assertInstanceOf(
+            RuntimeController.StartOutcome.Started::class.java,
+            controller.start(
+                PoolAcquireRequest(
+                    "p", "a.js",
+                    scriptTimeoutMillis = 1_000,
+                    timeoutEnforcer = TimeoutEnforcer.WATCHDOG,
+                ),
+            ),
+        )
+
+        // 未到点：心跳/CPU/RSS 三路都健康，期限线也不出手
+        clock.advance(999)
+        val before = dog.tick()
+        assertTrue(before.killed.isEmpty(), "还差 1ms：不杀")
+        assertTrue(before.timeoutKilled.isEmpty())
+
+        clock.advance(1)
+        val at = dog.tick()
+        assertEquals(listOf(started.runId), at.timeoutKilled, "到点收账")
+        assertTrue(at.killed.contains(started.runId), "timeoutKilled 是 killed 的子集")
+        assertEquals(1, engine.killCalls)
+        assertEquals(EngineStatus.CRASHED, engine.status(), "TIMEOUT 非 REQUESTED → 归 CRASHED")
+        assertTrue(controller.activeRunIds().isEmpty(), "杀即收走在途账")
+        assertEquals(PoolStats(1, free = 1, busy = 0), controller.stats(), "槽位与许可证成对归还")
+    }
+
+    @Test
+    fun `期限线先于 pid 与心跳两路：宿主不给 pid 也照样到点收账`() = runBlocking {
+        // 顺序钉子：期限不依赖任何度量（它是发起方声明的事实），所以不能被"量不到"
+        // 那两条分支挡在前面 —— 挡了的话，noPid / 心跳未接线的 run 恰好退回"没人收尾"。
+        val monitor = ProcessMonitor(100, statReader = { null }, statusReader = { null })
+        val clock = FakeClock()
+        val engine = FakeEngine(EngineId(0)).also { it.pid = null }
+        // 心跳这一路也没接（heartbeat 来源恒 null）
+        val (controller, dog, _) = rig(monitor, heartbeat = { null }, engine = engine, clock = clock)
+        controller.start(
+            PoolAcquireRequest(
+                "p", "a.js",
+                scriptTimeoutMillis = 500,
+                timeoutEnforcer = TimeoutEnforcer.WATCHDOG,
+            ),
+        )
+
+        clock.advance(500)
+        val tick = dog.tick()
+        assertEquals(1, tick.timeoutKilled.size, "量不到 pid / 心跳，期限照样算数")
+        assertTrue(tick.noPid.isEmpty() && tick.noHeartbeat.isEmpty(), "到点那一轮直接收账，不再走量不到的分支")
+        assertEquals(1, engine.killCalls)
+    }
+
+    @Test
+    fun `无人 await 却声明 AWAITER：期限不落看门狗（不越权替调用方收账）`() = runBlocking {
+        // 归属是判据：调度链路自己 await 并超时强杀（ControllerRunDispatcher → REQUESTED），
+        // 看门狗若也拿 scriptTimeoutMillis 去杀，就成了两套期限口径 —— 且调度侧那条
+        // 会先看到 Killed 而不是 TimedOut，把"等待超时"记成"引擎异常结束"。
+        val monitor = ProcessMonitor(100, statReader = { stat(0) }, statusReader = { status() })
+        val clock = FakeClock()
+        val (controller, dog, engine) = rig(monitor, heartbeat = { 0L }, clock = clock)
+        controller.start(PoolAcquireRequest("p", "a.js", scriptTimeoutMillis = 100))   // 缺省 AWAITER
+
+        clock.advance(10_000)
+        val tick = dog.tick()
+        assertTrue(tick.timeoutKilled.isEmpty(), "AWAITER 的期限不归看门狗")
+        assertTrue(tick.killed.isEmpty(), "三路判据也不出手（心跳 0ms、CPU 0%、RSS 1MB）")
+        assertEquals(0, engine.killCalls)
+        assertTrue(controller.activeRunIds().isNotEmpty(), "仍在途：等它自己的 await 侧收")
+    }
+
+    @Test
     fun `宿主不给 pid 时如实记 noPid 不判死`() = runBlocking {
         val monitor = ProcessMonitor(100, statReader = { stat(0) }, statusReader = { status() })
         val engine = FakeEngine(EngineId(0)).also { it.pid = null }
