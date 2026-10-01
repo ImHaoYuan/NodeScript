@@ -51,7 +51,6 @@
 | # | 事项 | 核实 | 成本 |
 |---|---|---|---|
 | **D1** | `:app-service:permission-center` main 只有 **91 行**（独立模块偏重）：并回现有模块，或明确"等它长" | ✅ 2026-10-01 | S |
-| **D2** | `engine/sandbox/` 目录仍在盘上（settings 里已注释）。**2026-10-01 未执行：与已裁定口径冲突** —— `design-decisions.md` 2026-09-30 的裁定行明写「空壳从 settings 注释摘除…**目录留盘**，复活 = 注释回 + 登记」，`CLAUDE.md` 模块表同口径。删目录 = 推翻这条裁定，得协调者拍板（删法本身无所谓：目录里只有 1 个 `build.gradle.kts`，git 历史留着） | ✅ 2026-10-01（含冲突核实） | S（+ 一次拍板） |
 | **D3** | `:platform:system` 4041 行 / ~45 文件**扁平单包**，而 `:platform:capabilities` 已用子包 → 对齐成 `clipboard/` `sensors/` `notification/` `images/` …（改包名要同步 ArchUnit 包模式 + `ModuleGraphTest` 允许集） | ✅ 2026-10-01 | M |
 | **D5** | 测试包不镜像 main（`platform/capabilities` 测试是扁平的） | 待核实 | S |
 | **D6** | 命名不一致：仓 `NodeScript` / 产品 `AutoScript` / npm 包 `@autoscript/bridge-js` 而描述写 `@autojs/*` / 目录 `.autojs` / 签名前缀 `autojs-lock-v1`。**顺带确认发布用的 npm scope 是自己拥有的** | ✅ 2026-10-01（命名面） | S–M |
@@ -71,7 +70,7 @@
 ## F. 建议批次（一次一批，每批跑完整 CI 同源门）
 
 1. ~~**批 1（S）**：A2 / A3 / A1b / A4~~ —— **2026-10-01 已完成**，流水见 [`design-status.md`](design-status.md)（A2b 是修 A2 时露出的新口子，留在这里）。
-2. ~~**批 2（S）**：B2（CI 卫生）+ C3（失效引用）+ D4（README 归位）~~ —— **2026-10-01 已完成**，流水见 [`design-status.md`](design-status.md)；**D2 未执行**（与 design-decisions 2026-09-30「目录留盘」裁定冲突，见上表 D2，待协调者拍板）。
+2. ~~**批 2（S）**：B2（CI 卫生）+ C3（失效引用）+ D4（README 归位）+ D2（删 sandbox 目录）~~ —— **2026-10-01 全部完成**，流水见 [`design-status.md`](design-status.md)。D2 当时因与 design-decisions 2026-09-30「目录留盘」裁定冲突而暂缓，经拍板后执行，口径变更追加在 design-decisions 同批。
 3. **批 3（S）**：C1/C5（人类 README + CONTRIBUTING）+ C4（只剩维护者开通上报入口）。
 4. **批 4（M，需先拍板）**：A1/A1c —— npm executor 与 lock 签名的**接线决策**（谁提供 `KeyProvider`、接缝形状、密钥生命周期）。
 5. **批 5（M）**：B1（CI 覆盖：nightly + assembleDebug + lint）。

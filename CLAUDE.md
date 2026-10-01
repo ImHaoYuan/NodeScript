@@ -13,7 +13,7 @@
 | `docs/backlog.md` | **待办池**：未排期项 + 外审建议（逐条带证据位置、核实状态、成本、建议批次）——是收件箱不是承诺，排期/做完/裁定不做了都从这里移走 | — |
 | `.claude/skills/skill-designer/` | 项目级 skill：设计/创建技能 + 外科手术式改代码 + git 提交 | — |
 
-## Gradle 模块（模块表由 `settings.gradle.kts` 冻结，15 个 —— `:engine:sandbox` 空壳 2026-09-30 已注释摘除、`:app-service:npm` 同日审查步骤 5 自 packager 拆出；复活 sandbox = 注释回 + ModuleGraphTest 登记）
+## Gradle 模块（模块表由 `settings.gradle.kts` 冻结，15 个 —— `:engine:sandbox` 空壳 2026-09-30 已注释摘除、`:app-service:npm` 同日审查步骤 5 自 packager 拆出；复活 sandbox = 重建模块目录 + 注释回 + ModuleGraphTest 登记）
 
 - `:app` — AppShellApplication 启动装配（§4.1 Composition Root）；Compose UI 已拆去 `:ui`（2026-09-23 落地：launcher 随库 manifest 合并，`:app` 源码零 compose / 零 import ui）
 - `:app-service:runtime` — RuntimeController / EnginePool / Watchdog 仲裁（§8）
@@ -27,7 +27,7 @@
 - `:bridge:native` — C++ N-API addon 控制面 + libnode.so 装载（§7，CI 构建）
 - `:bridge:image` — C++ 图像管线 libopencv.so（OpenCV 4.x，§9.2，CI 构建）
 - `:engine:node-process` — :nodeN 进程宿主：`NodeProcessEngine`（Kotlin spawn，实现 `:domain` 的 `ScriptEngine`）+ main.cpp（§5/§7.8；addon `.so` 本机 NDK 可交叉编译验证，APK `assembleDebug` 本机可直跑）
-- `:engine:sandbox` — QuickJS 宿主进程（**已裁 §18 第 1 项；壳 2026-09-30 已从 settings 注释摘除、不计入模块数**，目录留盘；复活 = 注释回 include + ModuleGraphTest 允许集登记）
+- `:engine:sandbox` — QuickJS 宿主进程（**已裁 §18 第 1 项；壳 2026-09-30 已从 settings 注释摘除、不计入模块数**，空壳目录 2026-10-01 已从盘上删除，见 `design-decisions.md` 同批追加行；复活 = 重建模块目录 + 注释回 include + ModuleGraphTest 允许集登记）
 - `:platform:capabilities` — **无障碍三面**：a11y 树/手势、screen 截图帧源、dialogs 对话框编排（`capabilities/{a11y,screen,dialogs,device}/` 子包；2026-09-30 步骤 6 系统面迁出，§9.1–9.4）
 - `:platform:system` — **系统面 handler + SPI 实现 + 能力专用契约**：`SystemNamespaces` 十一件（shell/device/app/floatingWindow/datastore/zip/settings/notification/clipboard/sensors/images）+ 电源面 `PowerManagerNamespaceHandler`/`WakeLockLedger`（§8.7）+ `SystemSpis.of` 实现入口 + 五契约（步骤 6a 自 :domain 迁入；`DialogHost` 留 :domain，§9.6/§12.2）
 - `:ui` — Compose UI 呈现层：启动 Activity（launcher）、首屏/任务中心/控制台/能力中心界面；状态经 `:domain` 的 `HostSummary` 读口现取，禁依赖 `:app`（§6）

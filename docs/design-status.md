@@ -21,7 +21,7 @@
 |---|---|---|
 | §18 | 开放决策点 | **已全部拍板**（第 8/9 项 2026-09-25，第 1–7 项 2026-09-26，见 [`design-decisions.md`](design-decisions.md)；§18 保留作决策台账） |
 | §14 P1 | MediaProjection 高清会话 | 未落（授权 UI + FGS；换 producer 即插，语义面不动） |
-| §14 P1 | QuickJS `:sandbox` 进程 | 未落；模块壳 **2026-09-30 已从 settings 注释摘除**（目录留盘、不计入模块数；复活 = 注释回 + ModuleGraphTest 登记） |
+| §14 P1 | QuickJS `:sandbox` 进程 | 未落；模块壳 **2026-09-30 已从 settings 注释摘除**（不计入模块数），**空壳目录 2026-10-01 已从盘上删除**（复活 = 重建模块目录 + 注释回 + ModuleGraphTest 登记） |
 | §14 P1 | `ui` 原生 XML UI 宿主 / `ui_web` | 未落 |
 | §9.7 | OCR（P1）/ 插件（P2） | 未落 |
 | §10.5 | 生物特征二次确认 | 未落（`BiometricPrompt` 全仓零引用） |
@@ -42,7 +42,7 @@
 
 ## 流水（最新在上）
 
-### 2026-10-01 —— 待办池**批 2**（B2 / C3 / D4；分支 `hellish-shrimp`）—— D2 未执行（冲突，待拍板）
+### 2026-10-01 —— 待办池**批 2**（B2 / C3 / D4 / D2；分支 `hellish-shrimp`）
 
 - **B2 CI 卫生**：三个 workflow 一起收口 —— `permissions: contents: read`（三个都没有，默认令牌过宽；
   只用 artifact 运行时令牌与缓存，不需要写权限，已核**无**任何 `git push`/release 步骤）、`ci.yml` 补
@@ -74,9 +74,13 @@
 - **D4 README 归位**：`platform/{system,capabilities}/src/main/kotlin/.../README.md` → 模块根
   （`git mv`，内容不变）。`06-modules.md` 里「见 `platform/system/README.md`」的引用**因此才成立**（原来指的是
   一个不存在的路径）。
-- **D2 未执行**：`engine/sandbox/` 删目录与 `design-decisions.md` 2026-09-30 的裁定行「空壳从 settings 注释摘除…
-  **目录留盘**，复活 = 注释回 + 登记」冲突（`CLAUDE.md` 模块表同口径）。删法本身无所谓（目录里只有 1 个
-  `build.gradle.kts`，git 历史留着），但那是推翻一条已裁定项，**留给协调者拍板**，backlog D2 行已记录冲突。
+- **D2 删 `engine/sandbox/`**（**先暂缓、后经拍板执行**）：首轮发现它与 `design-decisions.md` 2026-09-30 的裁定行
+  「空壳从 settings 注释摘除…**目录留盘**，复活 = 注释回 + 登记」冲突（`CLAUDE.md` 模块表同口径），按协作纪律
+  停下来问；拍板后删除（目录里只有 1 个 `build.gradle.kts`，`git rm` 后仍可从历史取回）。裁撤口径本身不变
+  （§18 第 1 项「不要沙箱」），改的只是「壳要不要留在盘上」这一条附带口径 —— 口径变更追加在
+  [`design-decisions.md`](design-decisions.md) 已推翻表（原行不删），`CLAUDE.md` 模块表、`06-modules.md`
+  模块行、`13-roadmap-budget.md` P1 段、本文件接口期表同批同步；复活现在多一步「重建模块目录」。
+  `settings.gradle.kts` 里 `// include(":engine:sandbox")` 那行属协调者冻结文件，未动。
 
 ### 2026-10-01 —— 待办池**批 1**（A2 / A3 / A1b / A4；分支 `hellish-shrimp`）
 - **A2 `AndroidShellExecutor` 超时真修**（`platform/system`）：病灶是「超时抛错后 `coroutineScope` 要等两条
