@@ -10,6 +10,7 @@
 | `docs/design/*.md` | 架构设计**分卷**（**契约的单一事实来源**）—— 只写「是什么」；`00-overview/03-technology/04-architecture/06-modules/07-bridge/08-execution/09-capabilities/10-npm/11-security/12-js-api/13-roadmap-budget/18-19-ledger` | §0–§19 |
 | `docs/design-decisions.md` | 决策记录：已拍板项（原 §18 全部九项 + 后续编号项）+ 被推翻/改过的口径（原口径不删，只追加） | 原 §18 |
 | `docs/design-status.md` | 落地台账：接口期清单 + 流水（原 §19 的 9,584 字符流水外迁于此） | 原 §19 |
+| `docs/backlog.md` | **待办池**：未排期项 + 外审建议（逐条带证据位置、核实状态、成本、建议批次）——是收件箱不是承诺，排期/做完/裁定不做了都从这里移走 | — |
 | `.claude/skills/skill-designer/` | 项目级 skill：设计/创建技能 + 外科手术式改代码 + git 提交 | — |
 | `module-stubs` 之外的模块 | 各模块职责见下 | §6 |
 

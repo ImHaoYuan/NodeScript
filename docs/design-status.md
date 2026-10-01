@@ -41,6 +41,18 @@
 
 ## 流水（最新在上）
 
+### 2026-10-01 —— 第二次外审：建议落进新建的 **[`docs/backlog.md`](backlog.md)**（待办池）
+- **不是台账条目，是收件箱**：本轮外审（优化 / 文档 / 结构三部分约 30 条）**逐条落进 [`docs/backlog.md`](backlog.md)**，
+  每条带证据位置、优先级、成本、**核实状态**与建议批次 —— 排期/做完/裁定不做了都要从那里移走（做完来本文件记流水）。
+- **落表时核实过的、与本台账直接相关的两条**：① **npm 生产装配未接线** —— `AppShellKit` 调 `NpmShellKit.assembleHandler`
+  用缺省，`executor` = `HeavyOpExecutor.Unavailable`、`lockKey` = null，`HostNodeExecutor` 在 `app/src/main` 零引用；
+  即真机安装走 `ERR_NOT_IMPLEMENTED`、`lock.sig` 不生成、`ci` 不验签 —— 而 `SECURITY.md` 的密钥表写「生产走 Android Keystore」。
+  ② **`AndroidShellExecutor` 超时形同虚设**：超时抛错后 `coroutineScope` 要等不可取消的 `readBytes()` 子协程结束才传播，
+  `destroyForcibly()` 在该作用域**外**的 finally 里 —— 子进程把管道传给孙进程时就是「超时 1s、实际卡住且没杀」，测试假流是
+  `ByteArrayInputStream` 故测不到。两条都进 backlog 的 A 组，**本文件不预判排期**。
+- **本文件与 backlog 的边界**：本文件的「接口期」表 = **契约已写、实现未落**的功能面（锚 §X.Y）；backlog = **没进契约**的工程/文档/结构事项。
+  一处内容只写一处，不复制。
+
 ### 2026-10-01 —— 外审整改·文档侧收尾 + 四处稳健性修复（5+1+4；`0e42ed3`…`08e89a6`，分支 `hellish-shrimp`）
 - **5 文档**：① 八个分卷里 >500 字节的长行折短 67 处（`0e42ed3`；纯折行，去行首 `>` 与全部空白后两侧逐字符比对过）。
   ② 实现注记**外迁**：§9.2 截图管线 + §8.3–8.7 + §9.5/§9.6 共 33KB **逐字**搬进本文件「实现注记（自各分卷外迁，逐字保留）」段，分卷只留契约 + 指针（`a9a4df6`；
