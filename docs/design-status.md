@@ -40,6 +40,29 @@
 只在那里写一份（本文件不复制，避免两处漂移）。
 
 ## 流水（最新在上）
+
+### 2026-10-01 —— 外审整改·文档侧收尾 + 四处稳健性修复（5+1+4；`0e42ed3`…`08e89a6`，分支 `hellish-shrimp`）
+- **5 文档**：① 八个分卷里 >500 字节的长行折短 67 处（`0e42ed3`；纯折行，去行首 `>` 与全部空白后两侧逐字符比对过）。
+  ② 实现注记**外迁**：§9.2 截图管线 + §8.3–8.7 + §9.5/§9.6 共 33KB **逐字**搬进本文件「实现注记（自各分卷外迁，逐字保留）」段，分卷只留契约 + 指针（`a9a4df6`；
+  `09-capabilities.md` 43,955→14,870 B、`08-execution.md` 23,559→14,382 B）。**没迁的那 14KB 是判断后不迁**：与所在卷主题绑定（13-roadmap 是进度/预算卷、
+  18-19-ledger 是历史卷、§7.7 是一次测量记录），搬走那几卷读不成句 —— 见「各分卷实现注记的搬迁状态」。`12-js-api.md` 的 wiring 表**严格未动**
+  （`wiring-table.test.cjs` 读它：表头→首个空行、≥15 行、不许空行/折行）。③ 顺手修 `c6814cc` 自己引入的生成物漂移（`generate.mjs` 的 Kotlin 模板还留着「审查步骤 7」，
+  生成物已删 → `gen:wire` 门红，`d977c94`）。
+- **1 计数**：「15 个模块」「13 个测试任务」改成**派生值**校验 —— `ModuleGraphTest` 真数 `settings.gradle.kts` 的 include、正则抽 `ci.yml` 的 `./gradlew` 任务名，
+  两者互等 + 文档里出现的数字必须等于派生值（`fe27efa`）。关键一步是把这几个文件声明成 `:domain:test` 的 `inputs.files` —— 不声明则改文档 Gradle 判 UP-TO-DATE，
+  **门在本机是哑的**（正反两向都验过才算数）。
+- **4 稳健性**：① 帧服务（`8381a9a`）：解码失败若 `probeRequestId` 还捞得到 id 就回 ERR（原先静默丢弃，对端要干等满 TTL）；在途帧数 `Semaphore` 有界
+  （默认 256，配额在起协程**前**取 = 背压）；单帧上限 64MB→8MB（Kotlin/JS 两侧同批）。② `InstallCoordinator`（`8381a9a`）：`handles`/`projectLocks` 终态逐出；
+  `projectLocks` 改 `compute` 原子入表（原 `getOrPut` 并发下会各造一把锁，per-project 串行当场失效）。③ `AppShellApplication` 三处 `GlobalScope`（`87d01bb`）：
+  换成自有 `appScope`（SupervisorJob + IO，`onTerminate` cancel）。**代价与补法**：域可取消后多出「域已取消 → 协程体根本不跑」，而广播 `goAsync()` 窗口必须回执
+  （漏调挂到超时、双调 = 崩），故新增 `launchGuaranteed`（一次性闩：协程体结尾 + `invokeOnCompletion` 各试一次）；反向验证过，去掉兜底「域已取消」一例即红。
+  ④ 意图日志（`08e89a6`）：回放改**流式**（原 `readAllBytes` = 启动按文件大小要内存，改为按块读 + 整行 UTF-8 解码，多字节字符跨块不解坏）；如实标注 §8.5「SQLite」
+  与现状的分歧（见上面接口期表）；`node_modules` 尺寸预检加 60s TTL 缓存（原每次安装全量遍历，且跑在拿全局会话锁之前）。
+- **证据**：13 模块 CI 同源门**单次 `--rerun-tasks` 全跑**：域 71 / 桥 53 / 运行时 109 / 调度 113 / 脚本库 41 / 权限 11 / 打包 74 / npm 160 / 能力 104 / 系统 177 /
+  引擎 18 / UI 50 / App 199 = **1180 例 0 败 0 skip**（`-PskipNpmE2E`；逐模块只取本期任务那个结果目录，不把 `test/` 与 `testDebugUnitTest/` 相加）；
+  `bridge/js` `npm test` 193 例（192 过 / 1 skip / 0 败）+ `gen:wire` 后 `git diff --exit-code` 零漂移。
+- **仍不在本批范围**（等裁，未动）：版本升级（AGP/Kotlin/Compose/targetSdk36）、`runHeavy` 重复记账 bug、贡献者文档、`autojspro-docs.txt` 归位、拆 `InstallCoordinator`、
+  native 宿主测试 + ASan、CI assemble+lint、真安全上报渠道。
 ### 2026-10-01 —— npm P1 T1 放行门禁的**存盘移植**（`node-slice` 两提交 → `feat/npm-t1-lifecycle`）
 - **背景**：`dcc548b`（T1 门禁三段式）+ `7fe9246`（取消路径分流）2026-09-29 写在本地 `node-slice` 分支、**从未推送**；
   次日 `eae38fc`（审查步骤 5）把 npm 从 `:app-service:packager` 拆成 `:app-service:npm`，两条提交的路径与包名全部落到旧位置。
