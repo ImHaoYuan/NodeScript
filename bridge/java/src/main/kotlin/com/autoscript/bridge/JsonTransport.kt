@@ -76,6 +76,19 @@ class JsonTransport : BridgeTransport {
         }
     }
 
+    /**
+     * 尽力取 id（不抛）：[decodeRequest] 抛错后仍能回错误帧的唯一依据。
+     *
+     * 走一遍 `decodeObject` 但不做白名单与信封校验 —— 正是这些校验在报错，
+     * 此时「id 还读不读得到」才是问题。读不到（非 JSON / 无 id / id 非数字）回 null。
+     */
+    override fun probeRequestId(bytes: ByteArray): Long? = try {
+        val id = DomainJson.decodeObject(String(bytes, StandardCharsets.UTF_8))["id"]
+        (id as? DomainJson.Value.N)?.raw?.toLongOrNull()
+    } catch (_: Exception) {
+        null
+    }
+
     /** payload 契约：字符串（JSON 编码参数）或 null。非字符串值显式拒绝 —— 静默丢 null 会让 handler 收到无参请求。 */
     private fun payloadOrNull(m: Map<String, DomainJson.Value>): String? = when (val f = m["payload"]) {
         null, DomainJson.Value.Null -> null

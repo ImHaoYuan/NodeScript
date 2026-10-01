@@ -6,6 +6,8 @@ import java.io.ByteArrayOutputStream
 import java.net.ServerSocket
 import java.net.Socket
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
@@ -134,5 +136,57 @@ class NewlineFrameServerTest {
             listener.close()
             server.close()
         }
+    }
+
+    @Test
+    fun `帧坏了但 id 还在 —— 回错误帧而不是静默丢弃`() = runBlocking {
+        val server = NewlineFrameServer(router())
+        // payload 是数字：decodeRequest 拒绝值型，但信封 id 读得到 —— 对端不该干等 TTL。
+        val bad = frame(
+            """{"t":"req","id":7,"ns":"echo","m":"m","ttl":5000,"payload":123}"""
+                .toByteArray(StandardCharsets.UTF_8),
+        )
+        val output = ByteArrayOutputStream()
+        withTimeout(5_000) {
+            server.serveConnection(ByteArrayInputStream(bad), output).join()
+            withTimeout(1_000) { while (readFrames(output).isEmpty()) delay(10) }
+        }
+        val responses = readFrames(output)
+        assertEquals(1, responses.size, "坏帧必须回一帧，否则对端要等满 TTL")
+        val err = assertInstanceOf(BridgeResponse.Err::class.java, responses[0])
+        assertEquals(7L, err.id)
+        assertEquals("ERR_INVALID_PARAM", err.errorCode)
+        server.close()
+    }
+
+    @Test
+    fun `在途帧数受 maxInFlight 约束（背压，不无限起协程）`() = runBlocking {
+        val running = AtomicInteger()
+        val peak = AtomicInteger()
+        val gate = CompletableDeferred<Unit>()
+        val slowRouter = BridgeRouter(RequestRegistry())
+        slowRouter.register("slow") { req ->
+            val now = running.incrementAndGet()
+            peak.updateAndGet { maxOf(it, now) }
+            gate.await()
+            running.decrementAndGet()
+            BridgeResponse.Ok(req.id, null)
+        }
+        val server = NewlineFrameServer(slowRouter, maxInFlight = 2)
+        val requests = (1..6).fold(ByteArray(0)) { acc, i ->
+            acc + frame(transport.encodeRequest(com.autoscript.domain.bridge.BridgeRequest(i.toLong(), "slow", "m", null, 5_000)))
+        }
+        val output = ByteArrayOutputStream()
+        val conn = server.serveConnection(ByteArrayInputStream(requests), output)
+        withTimeout(5_000) { while (peak.get() < 2) delay(5) }
+        delay(100)   // 给"多起协程"留出发生的时间窗
+        assertEquals(2, peak.get(), "在途帧数越过 maxInFlight：读循环没有背压")
+        gate.complete(Unit)
+        withTimeout(5_000) {
+            while (readFrames(output).size < 6) delay(10)
+        }
+        conn.join()
+        assertEquals(6, readFrames(output).size, "背压解除后剩下的帧仍要处理完")
+        server.close()
     }
 }

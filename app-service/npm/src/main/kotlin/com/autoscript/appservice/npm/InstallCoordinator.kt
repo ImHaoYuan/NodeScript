@@ -214,7 +214,23 @@ class InstallCoordinator(
     // —— 运行态（全局互斥 + per-project 锁 + 事件流 + 句柄账） ——
 
     private val globalSession = Mutex()
-    private val projectLocks = ConcurrentHashMap<String, Mutex>()
+
+    /**
+     * per-project 串行锁，**用完即逐出**（曾经是只增不减的 `ConcurrentHashMap<String, Mutex>`）。
+     *
+     * 两件事在这里一起修：
+     * - 逐出：map 随 projectId 单调增长，长跑应用里等于一份不回收的小泄漏。计数归零才摘，
+     *   「有人在等/在持」时摘掉会让后来者拿到新 Mutex，per-project 串行当场失效；
+     * - 原子入表：原 `getOrPut` 在 ConcurrentHashMap 上**不是**原子操作 —— 两个并发安装
+     *   可能各造一个 Mutex 各持一把，两个 npm 会话同写一个项目目录。改用 `compute`：
+     *   取/造与计数自增在同一把 key 锁内完成。
+     */
+    private val projectLocks = ConcurrentHashMap<String, ProjectLock>()
+
+    private class ProjectLock {
+        val mutex = Mutex()
+        val users = java.util.concurrent.atomic.AtomicInteger(0)
+    }
     private val events = MutableSharedFlow<InstallEvent>(extraBufferCapacity = 256)
     private val approvalFlow = MutableSharedFlow<ApprovalRequest>(extraBufferCapacity = 64)
     // 脚本侧拉取口的宿主缓冲（[progress]/[approvals] 那两条 Flow 无重放、只服务 :main；
@@ -399,10 +415,40 @@ class InstallCoordinator(
                     )
                     staging.sweep(handle.projectId, setOf(it.nonce))
                 }
-                it.done = true
+                it.finish()
                 emit(InstallEvent.Finished(handle.projectId, handle.id, success = false, detail = "已取消"))
             }
         }
+    }
+
+    /**
+     * per-project 串行段的唯一入口：入表 → 计数 → 执行 → 计数归零即逐出（见 [projectLocks]）。
+     */
+    private suspend fun <T> withProjectLock(projectId: String, block: suspend () -> T): T {
+        val lock = projectLocks.compute(projectId) { _, cur ->
+            (cur ?: ProjectLock()).also { it.users.incrementAndGet() }
+        }!!
+        try {
+            return lock.mutex.withLock { block() }
+        } finally {
+            lock.users.decrementAndGet()
+            // 归零才摘；`compute` 里再确认一次，与并发的入表互斥（不肯让「有人刚拿到」被摘走）。
+            projectLocks.compute(projectId) { _, cur ->
+                if (cur === lock && cur.users.get() == 0) null else cur
+            }
+        }
+    }
+
+    /**
+     * 句柄进入终态：置位 + **从 [handles] 摘除**。
+     *
+     * 摘除是必须的：`handles` 原本只增不减，长跑应用里每装一次就留一条 `TrackedOp`。
+     * 语义零改 —— `cancel()` 对已终态句柄本来就只做 no-op（`if (!it.done)` 那层），
+     * 摘掉之后同样什么都不做，只是不再留记录。
+     */
+    private fun TrackedOp.finish() {
+        done = true
+        handles.remove(handle.id)
     }
 
     // ══════════ 轻操作（Kotlin 直读，零 Node 进程） ══════════
@@ -582,8 +628,7 @@ class InstallCoordinator(
         )
         val tracked = TrackedOp(handle, "script-${handle.id}", journaled = false)
         handles[handle.id] = tracked
-        val projectLock = projectLocks.getOrPut(projectId) { Mutex() }
-        projectLock.withLock {
+        withProjectLock(projectId) {
             globalSession.withLock {
                 emit(InstallEvent.Progress(projectId, handle.id, InstallEvent.Phase.QUEUED))
                 try {
@@ -600,14 +645,14 @@ class InstallCoordinator(
                     if (tracked.cancelled) {
                         throw AutojsException(ErrorCode.ERR_ENGINE_STOPPED, "脚本执行已取消（执行体已收尾，结果不采纳）")
                     }
-                    tracked.done = true
+                    tracked.finish()
                     history?.record(action.name.lowercase(), projectId, true, summary)
                     emit(InstallEvent.Finished(projectId, handle.id, success = true, detail = summary))
                 } catch (e: Exception) {
                     // cancel() 可能已就地把 done 置位并发过终态（见上面那段竞态说明）。
                     // 一个句柄只能有一个终态事件 —— 两条会让订阅方无从裁决「那次到底成没成」。
                     val firstTerminal = !tracked.done
-                    tracked.done = true
+                    tracked.finish()
                     if (firstTerminal) {
                         history?.record(action.name.lowercase(), projectId, false, e.message)
                         emit(InstallEvent.Finished(projectId, handle.id, success = false, detail = e.message))
@@ -707,9 +752,8 @@ class InstallCoordinator(
         val tracked = TrackedOp(handle, nonce)
         handles[handle.id] = tracked
 
-        val projectLock = projectLocks.getOrPut(projectId) { Mutex() }
         // 协程内联执行（挂起语义 = 排队；调用方要 fire-and-forget 可自行 launch）
-        projectLock.withLock {
+        withProjectLock(projectId) {
             globalSession.withLock {
                 if (quotaWarned) {
                     emit(
@@ -761,7 +805,7 @@ class InstallCoordinator(
             // 执行体把产物写在 stageDir；落位由 staging.commit 原子 rename
             staging.commit(projectId, nonce)
             journal.commit(nonce, projectId, stageDir.fileName.toString())
-            tracked.done = true
+            tracked.finish()
             // §10.5-1：install 会重写项目 lock（执行体 harvest 写回），签要跟着更新——
             // 用旧签会导致紧随其后的 ci 验签失败。签名失败 = 不谎称成功（回滚太重，
             // 改为中止本次安装：journal 已 commit 但 UI 拿到的是失败事件，用户可重试）。
@@ -780,7 +824,7 @@ class InstallCoordinator(
         } catch (e: Exception) {
             journal.fail(nonce, projectId, stageDir.fileName.toString(), e.message)
             staging.sweep(projectId, setOf(nonce))
-            tracked.done = true
+            tracked.finish()
             history?.record(opName(args), projectId, false, e.message)
             emit(InstallEvent.Finished(projectId, handle.id, success = false, detail = e.message))
             throw e

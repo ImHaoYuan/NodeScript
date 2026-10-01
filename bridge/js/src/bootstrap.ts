@@ -29,7 +29,10 @@ export interface SocketBootstrapOptions {
   connectTimeout?: number
 }
 
-const DEFAULT_MAX_FRAME = 64 * 1024 * 1024
+// 单帧上限：§7.5 口径是控制面结构化小对象（大二进制走 side-channel，不过 JSON），
+// 8MB 覆盖最肥的合法帧并留余量。Kotlin 侧同值（NewlineFrameServer.DEFAULT_MAX_FRAME_BYTES），
+// 两侧必须一起改 —— 一侧 8MB 一侧 64MB 会让超限帧在两端表现不一致。
+const DEFAULT_MAX_FRAME = 8 * 1024 * 1024
 const FALLBACK_CONNECT_TIMEOUT = 10_000
 
 export class SocketBootstrap {

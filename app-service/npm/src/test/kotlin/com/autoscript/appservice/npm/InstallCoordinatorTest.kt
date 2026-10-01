@@ -14,8 +14,10 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.yield
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -269,6 +271,50 @@ class InstallCoordinatorTest {
 
         assertEquals(InstallJournal.State.FAIL, journal.all().lastOrNull()?.state)
         assertTrue(events.filterIsInstance<InstallEvent.Finished>().any { !it.success })
+    }
+
+    @Test
+    fun `句柄账与项目锁在终态即逐出（长跑不涨）`() = runBlocking {
+        val c = coordinator()
+        c.install("p1", listOf(PackageSpec("axios")))
+        c.install("p2", listOf(PackageSpec("axios")))
+        assertTrue(cHandles(c).isEmpty(), "安装结束的句柄仍留在账上：${cHandles(c).keys}")
+        assertTrue(cProjectLocks(c).isEmpty(), "项目锁用完没摘：${cProjectLocks(c).keys}")
+
+        // 失败路径同样收口（不留残迹才算收口）
+        val bad = coordinator(executor = FakeExecutor { throw IllegalStateException("boom") })
+        runCatching { bad.install("p1", listOf(PackageSpec("axios"))) }
+        assertTrue(cHandles(bad).isEmpty() && cProjectLocks(bad).isEmpty(), "失败路径留了残迹")
+
+        // 取消路径同样收口
+        val gate = CompletableDeferred<Unit>()
+        val cancelling = coordinator(executor = FakeExecutor { gate.await() })
+        val job = launch { runCatching { cancelling.install("p1", listOf(PackageSpec("axios"))) } }
+        withTimeout(5_000) { while (cHandles(cancelling).isEmpty()) yield() }
+        val tracked = cHandles(cancelling).values.single()
+        val hf = tracked.javaClass.getDeclaredField("handle").apply { isAccessible = true }
+        cancelling.cancel(hf.get(tracked) as InstallHandle)
+        gate.complete(Unit)
+        job.join()
+        assertTrue(cHandles(cancelling).isEmpty() && cProjectLocks(cancelling).isEmpty(), "取消路径留了残迹")
+    }
+
+    @Test
+    fun `同一项目的并发安装不重入（per-project 锁原子入表）`() = runBlocking {
+        val inflight = java.util.concurrent.atomic.AtomicInteger()
+        val peak = java.util.concurrent.atomic.AtomicInteger()
+        val exec = object : InstallCoordinator.HeavyOpExecutor {
+            override suspend fun execute(op: InstallCoordinator.HeavyOp, sink: InstallCoordinator.ProgressSink): String {
+                val now = inflight.incrementAndGet()
+                peak.updateAndGet { maxOf(it, now) }
+                delay(50)
+                inflight.decrementAndGet()
+                return "ok"
+            }
+        }
+        val c = coordinator(executor = exec)
+        (1..6).map { launch { runCatching { c.install("p1", listOf(PackageSpec("axios"))) } } }.forEach { it.join() }
+        assertEquals(1, peak.get(), "同一项目出现并行安装：per-project 锁没生效")
     }
 
     // ═══ 审计史（§10.2 install-history） ═══
@@ -1047,6 +1093,12 @@ class InstallCoordinatorTest {
     @Suppress("UNCHECKED_CAST")
     private fun cHandles(c: InstallCoordinator): Map<String, Any> {
         val f = InstallCoordinator::class.java.getDeclaredField("handles")
+        f.isAccessible = true
+        return f.get(c) as Map<String, Any>
+    }
+
+    private fun cProjectLocks(c: InstallCoordinator): Map<String, Any> {
+        val f = InstallCoordinator::class.java.getDeclaredField("projectLocks")
         f.isAccessible = true
         return f.get(c) as Map<String, Any>
     }
