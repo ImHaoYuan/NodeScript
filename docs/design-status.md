@@ -26,6 +26,7 @@
 | §9.7 | OCR（P1）/ 插件（P2） | 未落 |
 | §10.5 | 生物特征二次确认 | 未落（`BiometricPrompt` 全仓零引用） |
 | §8.5/§8.6 | 引擎侧 `waitCompletion` 超时不发起（无人 await 的 run 没人收尾） | **已覆盖（2026-10-01）**：`TimeoutEnforcer{WATCHDOG}` + 看门狗期限线（`KillCause.TIMEOUT`）—— 残余边界见 §8.6（期限只覆盖声明了期限的 run + 轮转须在跑） |
+| §8.5 | 意图日志的 **SQLite 实现**（契约写的是「append-only（SQLite，启动即回放）」） | **未落，且分歧已如实标注**：今天全平台生产（含 Android）跑的都是 `JournalFileStore`（jsonl 追加 + fsync + 流式回放，`AppShellKit` 装的就是它）。卡点是接口住 `:app-service:scheduler`（纯 JVM、零 `import android.`），而依赖铁律 `:platform:*` → `:domain` 不反向 —— SQLite 实现要么把 `IntentStore` 搬到 `:domain`（跨模块契约变更，待裁），要么给该模块加 Android 依赖（丢掉纯 JVM 可测）。另：日志**只追加、从不清理**，体积随 run 数线性增长（每次 run 恒定两条行，已无冗余可压），**保留期策略**（老终态行 / 老 nonce 能否丢）会动到 §8.5 的幂等锚点，同样待裁；`JournalFileStore` 的类注释与 `IntentStore` 接口注释已按此改写 |
 | §15 | APK ≤ 40MB | **已超支**（实测 ≈81MB，见 [`design-decisions.md`](design-decisions.md#已推翻--已改口径)） |
 | — | 真机红测：exec/dlopen + 桥全链 | **已做**（2026-09-29，见下「流水」；非 root、Android 13/arm64、生产布局） |
 | — | 真机红测：16KB 页机 / SELinux enforcing / `nativeLibraryDir` 提取路径 / targetSdk36 exec 策略 | 未做（设备 PAGE_SIZE=4096，这几项该机**原理上测不到**） |

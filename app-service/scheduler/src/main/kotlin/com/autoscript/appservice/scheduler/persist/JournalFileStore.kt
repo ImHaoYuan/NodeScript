@@ -1,5 +1,6 @@
 package com.autoscript.appservice.scheduler.persist
 
+import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
@@ -10,7 +11,8 @@ import java.nio.file.StandardOpenOption
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * jsonl 追加式意图存储（JVM 本机/单测实现；Android 生产由 SQLiteDatabase 实现替换，语义不变）。
+ * jsonl 追加式意图存储（**当前全平台的生产实现**，含 Android —— `AppShellKit` 装的就是它；
+ * §8.5 写的 SQLite 目标形态为何不在这里，见 [IntentStore] 的说明）。
  *
  * 持久化形态：`<dir>/intent-log.jsonl`，每行一条 record：
  * - `{"op":"start","runId":N,...}` —— START 行
@@ -43,42 +45,74 @@ class JournalFileStore(private val dir: Path) : IntentStore {
         )
     }
 
-    // —— replay：读全部行，截断容忍最后半行，重建索引 ——
+    // —— replay：**流式**逐行读，截断容忍最后半行，重建索引 ——
     // 注：单一全局写锁（writeLock）保护的内存视图是查询真值；replay 只在构造期跑（尚无并发）。
 
+    /**
+     * 回放整个日志，把内存索引（行表 + 存活/已提交 nonce 表）折出来。
+     *
+     * **流式，不 `readAllBytes`**：日志按设计只追加、从不清理，一台常跑任务的机器上
+     * 它会长到几十上百 MB —— 一次性读进堆等于"启动时按日志大小要内存"，而回放需要的
+     * 只是行与行之间互相独立这一点。这里按块读、按 `\n` 切、逐行折叠，峰值内存与
+     * 文件大小无关（只剩行缓冲 = 最肥的那一条 START 行）。
+     *
+     * 行边界先按**字节**找 `\n`、整行再 UTF-8 解码：UTF-8 多字节字符被读取块切开
+     * 也不会解坏（`String(chunk)` 那种按块解码的写法会）。
+     *
+     * 尾部没有 `\n` 的半行丢弃（写中断留下的残行，§8.5「容忍最后一条半行」）——
+     * 与写路径的 force 组口径一致：没落完的组等于没发生。
+     */
     private fun replay() {
         if (!Files.exists(file)) return
-        val bytes = Files.readAllBytes(file)
-        var pos = 0
-        var maxId = 0L
-        while (pos < bytes.size) {
-            val nl = findNewline(bytes, pos)
-            if (nl < 0) break                       // 最后半行：丢弃（崩溃截断）
-            val line = String(bytes, pos, nl - pos, StandardCharsets.UTF_8)
-            pos = nl + 1
-            if (line.isBlank()) continue
-            val rec = JournalCodec.parse(line)
-            when (rec) {
-                is Rec.Start -> {
-                    val row = rec.toStoredRow()
-                    rows[row.runId] = row
-                    liveNonce[row.start.runNonce] = row.runId
-                    if (row.runId >= maxId) maxId = row.runId + 1
-                }
-                is Rec.Seal -> {
-                    val old = rows[rec.runId] ?: continue
-                    val sealed = old.copy(outcome = rec.outcome, committedAtMillis = rec.atMillis)
-                    rows[rec.runId] = sealed
-                    liveNonce.remove(old.start.runNonce)
-                    if (rec.outcome.name != "INTERRUPTED") committedNonce[old.start.runNonce] = rec.runId
+        Files.newInputStream(file).use { input ->
+            val chunk = ByteArray(REPLAY_CHUNK_BYTES)
+            val line = ByteArrayOutputStream(256)
+            while (true) {
+                val n = input.read(chunk)
+                if (n < 0) break
+                var from = 0
+                while (true) {
+                    val nl = indexOfNewline(chunk, from, n)
+                    if (nl < 0) {
+                        line.write(chunk, from, n - from)   // 本块没有完整行尾：攒着
+                        break
+                    }
+                    line.write(chunk, from, nl - from)
+                    fold(String(line.toByteArray(), StandardCharsets.UTF_8))
+                    line.reset()
+                    from = nl + 1
                 }
             }
+            // 走到这里若 line 还有内容 = 尾部半行：**丢弃**（不 fold），与旧实现同口径。
         }
-        nextId.set(maxOf(maxId, 1L))
+        // runId 单调：每个 Seal 指向的行必有先行的 Start，故行表的最大键就是已分配的最大 runId。
+        // **空表要单独走**：`SortedMap.lastKey()` 是 Java 方法，空表上抛 NoSuchElementException
+        // （不是返回 null）——「文件存在但一行完整行都没有」（刚建的空文件、或只有半行）是常态。
+        nextId.set(if (rows.isEmpty()) 1L else rows.lastKey() + 1)
     }
 
-    private fun findNewline(b: ByteArray, from: Int): Int {
-        for (i in from until b.size) if (b[i] == '\n'.code.toByte()) return i
+    /** 折叠一行到内存索引（与写路径同构：Start 建行、Seal 封口；空白行跳过）。 */
+    private fun fold(line: String) {
+        if (line.isBlank()) return
+        when (val rec = JournalCodec.parse(line)) {
+            is Rec.Start -> {
+                val row = rec.toStoredRow()
+                rows[row.runId] = row
+                liveNonce[row.start.runNonce] = row.runId
+            }
+            is Rec.Seal -> {
+                val old = rows[rec.runId] ?: return
+                val sealed = old.copy(outcome = rec.outcome, committedAtMillis = rec.atMillis)
+                rows[rec.runId] = sealed
+                liveNonce.remove(old.start.runNonce)
+                if (rec.outcome.name != "INTERRUPTED") committedNonce[old.start.runNonce] = rec.runId
+            }
+        }
+    }
+
+    /** 在 `chunk[from, end)` 里找 `\n`；-1 = 本块内没有完整行尾。 */
+    private fun indexOfNewline(chunk: ByteArray, from: Int, end: Int): Int {
+        for (i in from until end) if (chunk[i] == '\n'.code.toByte()) return i
         return -1
     }
 
@@ -222,5 +256,10 @@ class JournalFileStore(private val dir: Path) : IntentStore {
 
         private fun q(s: String): String = JsonLine.quote(s)
         // 解析器见共享 [JsonLine]（同一冻结行格式，单测与生产同一份解析）。
+    }
+
+    private companion object {
+        /** 回放读取块：足够摊薄 syscall，又不给启动路径加常数内存。 */
+        const val REPLAY_CHUNK_BYTES = 64 * 1024
     }
 }

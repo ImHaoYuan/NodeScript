@@ -240,6 +240,27 @@ class InstallCoordinator(
     private val handles = ConcurrentHashMap<String, TrackedOp>()
     private val handleSeq = AtomicLong(0)
 
+    /**
+     * 项目 node_modules 的已测尺寸（键 = projectId），[SIZE_CACHE_TTL_MILLIS] 内直接复用。
+     *
+     * 为什么缓存：配额预检原本**每次安装**都全量 `Files.walk` 一遍 node_modules
+     * （大项目十万级文件、秒级），而它跑在拿全局会话锁**之前** —— 直接顶在
+     * 「点安装 → 有反应」之间；`storage()` 读口同理（能力中心轮询会反复问）。
+     *
+     * 为什么敢缓存：这条配额是**项目的礼貌上限**，不是磁盘满的真防线 —— 真防线是
+     * [freeSpaceProbe]，每次安装都真读文件系统可用空间，不受这里影响。代价是
+     * **最多 [SIZE_CACHE_TTL_MILLIS] 的陈旧**：本进程装完**不失效**（一失效就等于
+     * 每次安装照旧全量遍历，正是要修的东西），脚本自己跑 npm 装的那部分更看不见 ——
+     * 期间可能放行一次把项目顶过配额的安装，表现是 npm 自己报 ENOSPC 或下次预检拦下，
+     * 不会静默写坏数据（尺寸只决定「让不让开始」，不参与任何写路径决策）。
+     *
+     * 条目数 = 见过的项目数（每个一条小记录，随项目数有界，不随安装次数增长）——
+     * 与 [projectLocks] 的逐出不同，这里**不能**用完即摘：摘了就等于每次都重算。
+     */
+    private val sizeCache = ConcurrentHashMap<String, MeasuredSize>()
+
+    private data class MeasuredSize(val bytes: Long, val atMillis: Long)
+
     private data class TrackedOp(
         val handle: InstallHandle,
         val nonce: String,
@@ -488,12 +509,11 @@ class InstallCoordinator(
         Files.list(layout.projectsRoot).use { s ->
             s.filter { Files.isDirectory(it) }.forEach { proj ->
                 val id = proj.fileName.toString()
-                val nm = layout.nodeModules(id)
                 val pkgs = LockfileReader.readLocked(layout.lockfile(id)).size
                 out[id] = NodeModulesStats(
                     projectId = id,
                     pkgCount = pkgs,
-                    totalBytes = DirSizer.sizeBytes(nm),
+                    totalBytes = nodeModulesBytes(id),
                 )
             }
         }
@@ -722,6 +742,15 @@ class InstallCoordinator(
         }
     }
 
+    /** 项目 node_modules 尺寸：缓存优先，过期才真遍历（见 [sizeCache]；只服务配额预检与 [storage]）。 */
+    private fun nodeModulesBytes(projectId: String): Long {
+        val at = now()
+        sizeCache[projectId]?.let { if (at - it.atMillis < SIZE_CACHE_TTL_MILLIS) return it.bytes }
+        return DirSizer.sizeBytes(layout.nodeModules(projectId)).also {
+            sizeCache[projectId] = MeasuredSize(it, at)
+        }
+    }
+
     // ══════════ 编排核心 ══════════
 
     /**
@@ -741,7 +770,7 @@ class InstallCoordinator(
                 "磁盘可用 ${free / 1024 / 1024}MB < 预检下限 ${config.minFreeBytes / 1024 / 1024}MB，拒绝安装",
             )
         }
-        val used = DirSizer.sizeBytes(layout.nodeModules(projectId))
+        val used = nodeModulesBytes(projectId)
         if (used >= config.projectQuotaBytes) {
             throw AutojsException(ErrorCode.ERR_DISK_FULL, "项目 node_modules 已达配额 ${config.projectQuotaBytes / 1024 / 1024}MB")
         }
@@ -954,5 +983,14 @@ class InstallCoordinator(
          * ERR_TIMEOUT 并由执行体走 TERM→SIGKILL 回收。
          */
         const val SCRIPT_TIMEOUT_MILLIS = 60_000L
+
+        /**
+         * node_modules 尺寸缓存 TTL（见 [sizeCache]）。
+         *
+         * 60s 的取舍：短到「刚装完立刻再装」也顶多多走一两趟遍历、长到能吃掉
+         * 连续安装/轮询查询里的绝大多数遍历。它同时是「外部（脚本自跑 npm）改动
+         * 最多被看不见多久」的上界。
+         */
+        const val SIZE_CACHE_TTL_MILLIS = 60_000L
     }
 }

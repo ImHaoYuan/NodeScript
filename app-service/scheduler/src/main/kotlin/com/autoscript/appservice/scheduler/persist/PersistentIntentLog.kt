@@ -8,7 +8,8 @@ import com.autoscript.appservice.scheduler.core.TriggerSource
 
 /**
  * 持久化意图日志（docs §8.5 生产实现）：语义与 [InMemoryIntentLog] 严格一致，
- * 存储引擎由 [IntentStore] 注入（JVM=jsonl journal，Android=SQLiteDatabase）。
+ * 存储引擎由 [IntentStore] 注入（当前唯一实现 = jsonl journal，**全平台生产同此**；
+ * §8.5 的 SQLite 目标形态尚未落地，原因见 [IntentStore]）。
  *
  * 崩溃恢复路径（§8.5「启动即回放，恢复只跟随 COMMIT」）：
  * 构造后 [IntentLog.uncommitted] 即存活行（= 崩溃遗留意向），调度器据此 reopen 重投。

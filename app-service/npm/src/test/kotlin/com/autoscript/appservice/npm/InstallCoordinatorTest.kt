@@ -129,6 +129,8 @@ class InstallCoordinatorTest {
         registryOf: ((String) -> String?)? = null,
         /** T1 lifecycle 执行体（null = 缺省 [ScriptOpExecutor.Unavailable]，即"门禁过了也跑不起来"）。 */
         script: InstallCoordinator.ScriptOpExecutor? = null,
+        /** 时钟（尺寸缓存的 TTL 判定读它；不注入则走真实时间）。 */
+        now: () -> Long = { System.currentTimeMillis() },
     ) = InstallCoordinator(
         services = NpmServices(
             layout = layout,
@@ -143,6 +145,7 @@ class InstallCoordinatorTest {
             registryVerifier = registryVerifier,
         ),
         executor = executor,
+        now = now,
         freeSpaceProbe = { free },
         registryOf = registryOf,
         scriptExecutor = script ?: InstallCoordinator.ScriptOpExecutor.Unavailable,
@@ -731,7 +734,7 @@ class InstallCoordinatorTest {
     }
 
     @Test
-    fun `storage 遍历算尺寸`() = runBlocking {
+    fun `storage 冷缓存遍历算尺寸`() = runBlocking {
         val nm = layout.nodeModules("p1")
         Files.createDirectories(nm.resolve("axios"))
         Files.write(nm.resolve("axios/index.js"), ByteArray(100))
@@ -1109,6 +1112,24 @@ class InstallCoordinatorTest {
         val root = layout.projectRoot(projectId)
         Files.createDirectories(root)
         Files.write(root.resolve("package.json"), json.toByteArray())
+    }
+
+    @Test
+    fun `node_modules 尺寸走缓存：TTL 内不重算，过期才重测`() = runBlocking {
+        var clock = 1_000_000L
+        val c = coordinator(now = { clock })
+        val nm = layout.nodeModules("p1")
+        Files.createDirectories(nm)
+        Files.write(nm.resolve("a.bin"), ByteArray(1000))
+
+        assertEquals(1000L, c.storage()["p1"]!!.totalBytes)
+
+        // TTL 内目录变了也**不**重算：这正是省掉那次全量遍历的代价（陈旧上界 = TTL）
+        Files.write(nm.resolve("b.bin"), ByteArray(500))
+        assertEquals(1000L, c.storage()["p1"]!!.totalBytes, "TTL 内必须命中缓存，不再遍历")
+
+        clock += InstallCoordinator.SIZE_CACHE_TTL_MILLIS + 1
+        assertEquals(1500L, c.storage()["p1"]!!.totalBytes, "TTL 过期必须重测")
     }
 
     /** 走「未获批 → 自请入队 → 人工批准」完整路径，返回宿主重算出的内容哈希。 */
