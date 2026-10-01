@@ -1,0 +1,74 @@
+name: E2E（nightly / 手动）
+
+# ── 为什么单独开一条 workflow（B1）─────────────────────────────────────────────
+# ci.yml 里那条与 CI 逐字同源的 `./gradlew …` 恒带 `-PskipNpmE2E`：三个真 npm 路径
+# （HostNodeNpmE2ETest 真装 lodash / NpmCacheSeedDeployerTest 仅凭种子 cache 离线 ci /
+# P0LoopbackTest 桥→真 npm→树→点击全链路）在 PR 门里**永不执行** —— 它们恰好是
+# 交付轨最危险的那段。这里跑的就是**同一条命令、只是不带那个 flag**。
+#
+# 与 ci.yml 分开而不是加个 job 的原因：nightly 会拉真 registry 网络装包（分钟级、
+# 受上游可用性影响），不该把噪声和时长灌进每个 PR；而 PR 门要保持"分钟级、确定性"。
+#
+# 收口靠 .github/scripts/check-e2e-ran.sh：跑完**验尸**（XML 在不在、tests>0、skipped==0），
+# 因为 `assumeTrue` 诚实跳过的契约在本机成立、在 CI 上会退化成一片绿的假通过。
+on:
+  schedule:
+    # UTC 19:23 = 北京时间 03:23。刻意避开整点/半点：Actions 的调度在 :00 全球拥堵，
+    # 实测能晚十几分钟才起（off-minute 是免费的稳定性）。
+    - cron: "23 19 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  npm-e2e:
+    name: 真 npm 路径 E2E（不带 -PskipNpmE2E）
+    runs-on: ubuntu-latest
+    timeout-minutes: 60       # 三个 E2E 有真网络装包；冷跑含 SDK + npm ci + 全量编译，留足余量
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: 安装 Android SDK 组件（platform-35 + build-tools）
+        run: |
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+            "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+      # Node 24：既是 facade dist 的构建器（jvm-tests 同款），也是**被测的宿主**
+      # —— HostNpm 从 `node -p process.execPath` 推 prefix 找 npm-cli.js，
+      # setup-node 把 node 装进 /opt/hostedtoolcache/node/<ver>/x64/，旧写法
+      # （写死 /usr/lib/node_modules/npm）在那里会静默跳过。
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: bridge/js/package-lock.json
+      - name: 构建 facade dist（dist 已出库；bridgeDist 随包任务与 P0 回环要它）
+        run: |
+          npm --prefix bridge/js ci
+          npm --prefix bridge/js run build
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+      - name: 真 npm E2E（与 ci.yml 同一条命令，**不带** -PskipNpmE2E）
+        run: |
+          ./gradlew :domain:test :bridge:java:test :app-service:runtime:test :app-service:scheduler:test :app-service:script-repo:testDebugUnitTest :app-service:permission-center:test :app-service:packager:test :app-service:npm:test :platform:capabilities:testDebugUnitTest :platform:system:testDebugUnitTest :engine:node-process:testDebugUnitTest :ui:testDebugUnitTest :app:testDebugUnitTest --stacktrace
+      # 跑完验尸：Gradle 绿不代表真跑（assumeTrue 跳过也是绿）。`if: always()` 让它在
+      # E2E 真红时也执行 —— 那时这步的 ✗ 行就是最短的病因说明。
+      - name: 证明 E2E 真跑了（XML 在、tests>0、skipped==0）
+        if: always()
+        run: bash .github/scripts/check-e2e-ran.sh
+      - name: 上传测试报告
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: e2e-test-reports
+          path: |
+            **/build/reports/tests/**
+            **/build/test-results/**
