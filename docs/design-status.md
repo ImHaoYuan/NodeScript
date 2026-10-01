@@ -73,6 +73,9 @@
   `HostNodeExecutor` 硬编码的 `--ignore-scripts`（§11.1 T1 主控，与版本无关）单独承担；
   非脚本 spawn 路径的第二层兜底（child_process 拦截 shim）仍未落。口径追加在
   [`design-decisions.md`](design-decisions.md#已推翻--已改口径)，升级路径登记在 `backlog.md`。
+  **同日实测否掉了「等 Node 线携带」这条升级路**：`nodejs.org/dist/index.json` 的 **868 条**
+  官方发布里**一条 npm 12.x 都没有**（最新 v26.10.0 / 2026-09-21 携带 npm 11.19.1）——
+  要 12.x 只能另找素材来源（npm 12 本身是否存在仍未核实：本机 `registry.npmjs.org` 不可达）。
 - **门**：CI 同源 13 任务 `./gradlew` 全绿（**1208 tests / 0 skipped**，本机闭环含真 npm 的
   E2E 与 `NpmCliDeployerTest` 那例「部署出的 CLI 真能跑起来」）。
 - **剪裁口径实测过，不是推的**：把 `prepareNpmCliAssets` 用 `NPM_CLI_ROOT=/usr/lib/node_modules/npm`
