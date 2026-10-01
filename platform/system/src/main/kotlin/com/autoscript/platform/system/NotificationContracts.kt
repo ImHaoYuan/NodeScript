@@ -3,7 +3,7 @@ package com.autoscript.platform.system
 /**
  * `notification` 命名空间契约（docs §12.2；JS 对偶 `auto.notification`）。
  *
- * 2026-09-30 审查步骤 6 自 `:domain` 迁入本模块（grep 判据同 [ClipboardContracts]：
+ * 自 `:domain` 迁入本模块（grep 判据同 [ClipboardContracts]：
  * 仅 handler+impl 消费，生产读面零引用）—— 与 [ShellExecutor] / [SystemSettings]
  * 同批。「发什么」与「怎么发」仍切开成契约 / `AndroidNotificationPoster` 两类型，
  * handler 纯 JVM 可测不因同模块而变差。

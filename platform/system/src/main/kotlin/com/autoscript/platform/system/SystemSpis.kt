@@ -5,7 +5,7 @@ import com.autoscript.domain.storage.DataStore
 
 /**
  * `:platform:system` 的实现入口（docs §12.2「分两层」的**下面那层**）：
- * 系统面十个 SPI 的 Android 实现一次性造齐（2026-09-30 审查步骤 6 起，SPI 契约本身
+ * 系统面十个 SPI 的 Android 实现一次性造齐（SPI 契约本身
  * 也随迁本模块同包 —— 判据见 `SystemHostContracts.kt` KDoc），交装配层组合。
  *
  * **本类与 [SystemNamespaces] 的分工（同模块内仍两对象）**：本类负责「拿 `Context`

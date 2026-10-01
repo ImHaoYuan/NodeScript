@@ -52,7 +52,7 @@ fun interface NamespaceHandler {
     suspend fun handle(request: BridgeRequest): BridgeResponse
 
     /**
-     * 本命名空间申报的方法表（审查步骤 7 的 wire-schema 对账挂点）。
+     * 本命名空间申报的方法表（wire-schema 对账挂点）。
      *
      * **缺省空 = 未申报**，对账层按未接入处理（`wire-schema.test.cjs` 会红，逼申报）；
      * 正式申报写法 = 单源指向生成物：

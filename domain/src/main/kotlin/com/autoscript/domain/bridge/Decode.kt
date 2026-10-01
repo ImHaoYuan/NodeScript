@@ -3,7 +3,7 @@ package com.autoscript.domain.bridge
 import com.autoscript.domain.json.DomainJson
 
 /**
- * 桥载荷解码 helpers（审查步骤 4 从 `:platform:capabilities` 上移）：
+ * 桥载荷解码 helpers（从 `:platform:capabilities` 上移）：
  * 每个方法在非法输入上抛 [IllegalArgumentException] —— [RpcNamespaceHandler] 统一折叠为
  * `ERR_INVALID_PARAM`（§7 诚实上报，不伪造成功），处理器里不再逐段 try/catch。
  *

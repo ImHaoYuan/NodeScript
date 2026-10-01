@@ -18,10 +18,10 @@ import com.autoscript.platform.capabilities.screen.ScreenshotSource
  * a11y/screen/dialogs 三个无障碍面的 handler 装配工厂束（§4.1/§6）。
  *
  * 系统面十一件（shell/device/app/floatingWindow/datastore/zip/settings/notification/
- * clipboard/sensors/images）2026-09-30 审查步骤 6 随 handler 迁去
+ * clipboard/sensors/images）随 handler 迁去
  * `com.autoscript.platform.system.SystemNamespaces` —— 本文件只留无障碍面。
  *
- * 审查步骤 4（2026-09-30）之后**本文件不再做字段转接**：全部 handler 直接实现
+ * **本文件不再做字段转接**：全部 handler 直接实现
  * `:domain` 的 [NamespaceHandler]（基类 `RpcNamespaceHandler` 收口错误映射，
  * `BridgeRequestLite`/`ResponseLite` 与 a11y/screen 的自定义 Request/Response 已退役）。
  * 现存职责只剩「SPI 参数 → handler 实例」的构造收拢：装配层（`PlatformWiring`/

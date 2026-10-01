@@ -15,7 +15,7 @@ import java.nio.charset.StandardCharsets
  * "side" 为传输层扩展：大二进制（Bitmap/像素）走 §7.4 side-channel 时携带句柄引用；
  * 领域类型 BridgeRequest/BridgeResponse 不感知（payload 内自持，由实现方约定）。
  *
- * 编解码走 `:domain` [DomainJson]（审查步骤 3 合一后的仓内唯一 codec —— 原 TinyJson 已删）；
+ * 编解码走 `:domain` [DomainJson]（仓内唯一 codec —— 原 TinyJson 已删）；
  * [decodeFlat] 的 allowed 白名单是**传输层协议纪律**（未知字段如实拒绝，防乱码注入），
  * 不是 codec 的一部分。
  */

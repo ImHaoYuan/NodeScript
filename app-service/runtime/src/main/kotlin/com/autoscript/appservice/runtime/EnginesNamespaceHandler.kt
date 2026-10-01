@@ -13,7 +13,7 @@ import com.autoscript.domain.json.DomainJson
  * 归属说明：本类住在 `:app-service:runtime`（不是 `:bridge:java`），因为它直接驱动
  * [RuntimeController]/[EnginePool]；本类即 `NamespaceHandler`（承 [RpcNamespaceHandler]），
  * `:app` 装配层 `router.register("engines", it)` 直挂 `BridgeRouter`。
- * 载荷编解码用 `:domain` 的 [DomainJson]（审查步骤 3 合一后的仓内唯一 codec ——
+ * 载荷编解码用 `:domain` 的 [DomainJson]（仓内唯一 codec ——
  * 原 EngineBridgeJson 已删，不再有「各模块自带一份」的形状）。
  *
  * 方法表（与 `bridge/js` engines.ts 一一对应）：

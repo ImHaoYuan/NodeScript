@@ -144,7 +144,7 @@ object PlatformWiring {
      * 单测可传 null/替身绕过 native —— 同一函数真假可注入，不绑死构造。
      */
     /**
-     * §8.7 唤醒锁账本的生产构造缝（审查步骤 6 起账本类住 `:platform:system`）。
+     * §8.7 唤醒锁账本的生产构造缝（账本类住 `:platform:system`）。
      * 根包 `AppShellApplication` 经此拿账本 —— 它不 import 任何
      * `com.autoscript.platform..`（ArchitectureTest「平台实现只许装配包碰」看住）。
      */

@@ -5,8 +5,8 @@ import java.nio.file.Path
 /**
  * `zip` 归档契约（docs §9.6，JS 对偶待建 `auto.zip`）。
  *
- * 2026-09-30 审查步骤 6 自 `:domain` 迁入实现同模块 `:platform:system`（grep 判据：
- * 仅 handler+impl 消费）—— 契约与 `JdkZipArchiver` 实现仍切两类型：「要什么操作」
+ * 自 `:domain` 迁入实现同模块 `:platform:system`（grep 判据：仅 handler+impl 消费）——
+ * 契约与 `JdkZipArchiver` 实现仍切两类型：「要什么操作」
  * 与「怎么编排归档字节」分开，上层（handler/装配）才不背归档细节。`java.util.zip`
  * 本身零 Android 依赖，实现可整类进本机 JVM 单测（README ops 表里唯一「接触面：无」的一行）。
  *
@@ -16,7 +16,8 @@ import java.nio.file.Path
  * 归档是**外部输入**，脚本解一个来路不明的 zip 不该能把文件写到应用私有区之外。
  *
  * 与 npm 面既有 zip 代码的边界：`NpmSnapshot`/离线包那套 `java.util.zip`
- * 是 npm 专用（住 `:app-service:npm`，2026-09-30 自 packager 拆出）（固定 mtime、integrity 清单），**不是**本 SPI 的实现也不复用 ——
+ * 是 npm 专用（住 `:app-service:npm`，自 packager 拆出）（固定 mtime、integrity 清单），
+ * **不是**本 SPI 的实现也不复用 ——
  * 通用归档面归这里。
  */
 interface ZipArchiver {

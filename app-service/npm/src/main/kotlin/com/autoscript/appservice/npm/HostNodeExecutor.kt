@@ -34,7 +34,7 @@ class HostNodeExecutor(
     private val nodeBin: String = "node",
     private val env: Map<String, String> = emptyMap(),
     // 与 NpmRegistryVerifier 的首选同源（交叉校验要比的就是实际安装用的那一家）：
-    // 出厂官方，§18 第 7 项 2026-09-26 拍板。
+    // 出厂官方，§18 第 7 项拍板。
     private val registry: String = NpmRegistryVerifier.OFFICIAL,
 ) : InstallCoordinator.HeavyOpExecutor {
 

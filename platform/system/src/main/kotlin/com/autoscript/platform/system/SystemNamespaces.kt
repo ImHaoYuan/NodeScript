@@ -23,7 +23,7 @@ import com.autoscript.domain.bridge.NamespaceHandler
  * `shell` / `device` / `app` / `floatingWindow` 四个命名空间的桥处理器 + 系统面
  * handler 工厂束 [SystemNamespaces]（docs §9.4/§9.6/§12.2；JS 对偶 `extras.ts`）。
  *
- * **归属（审查步骤 6，2026-09-30）**：自 `:platform:capabilities` 迁入本模块 —— 这批
+ * **归属**：自 `:platform:capabilities` 迁入本模块 —— 这批
  * handler 的 Android 实现与 SPI 替身本就住这里，语义层与实现同模块收拢；§12.2 原
  * 「语义层 handler 不住 system」口径已反转（记入 design-decisions）。capabilities
  * 收敛为 a11y/screen/dialogs 三个无障碍面（`dialogs` handler 拆去

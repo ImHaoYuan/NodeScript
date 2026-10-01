@@ -32,7 +32,7 @@ import java.util.concurrent.atomic.AtomicLong
  *   恒为真实帧 —— 请求过尺寸不代表能拿到那个尺寸；
  * - 会话外 nextFrame / 已 close 后操作 → ERR_SERVICE_DISABLED（诚实上报，不伪造帧）。
  *
- * **帧表与 `images` 共用**（§18 第 8 项 (b) 2026-09-25 拍板，发号侧归一）：给了
+ * **帧表与 `images` 共用**（§18 第 8 项 (b) 拍板，发号侧归一）：给了
  * [analyzer] 就把截出的帧经 [ImageAnalyzer.ingest] 登记进**它的**帧表 —— 于是
  * `screen.capture()` 的句柄与 `images.decode()` 的句柄同号段、互认：
  * `images.findImage(screenFrame, decodeFrame)` 通，`images.release(screenFrame)` 也通，

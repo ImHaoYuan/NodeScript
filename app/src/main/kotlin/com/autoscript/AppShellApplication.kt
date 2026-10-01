@@ -56,9 +56,9 @@ import java.nio.file.Path
  * 3. **重建/恢复**：接到广播时 application 已 attach，就地走 2 的路线，幂等由
  *    scheduler 的 runNonce 承担（同一个 runNonce 重复投递不会双跑）。
  *
- * §8.7 的保活与电源**已接线**（2026-09-23）：`AndroidWakeLockOps` 取真 `PARTIAL_WAKE_LOCK`、
- * `WakeLockLedger`（2026-09-30 审查步骤 6 起住 `:platform:system`，经
- * `PlatformWiring.wakeLockLedger` 构造）做 token 引用计数与超时自动释放、[ForegroundKeeper]
+ * §8.7 的保活与电源**已接线**：`AndroidWakeLockOps` 取真 `PARTIAL_WAKE_LOCK`、
+ * `WakeLockLedger`（住 `:platform:system`，经 `PlatformWiring.wakeLockLedger` 构造）
+ * 做 token 引用计数与超时自动释放、[ForegroundKeeper]
  * 管 specialUse FGS 的起停与续期。屏幕门禁的持锁判定取 [ForegroundKeeper.lockHeld]
  * （= 账本 `isHeld`，账本与系统两侧都真）——
  * 于是熄屏 + `SCREEN_ON` 的任务要么真有锁放行、要么**如实拒绝**，没有第三条路

@@ -196,7 +196,7 @@ class NativeImageAnalyzer(
         }
     }
 
-    // ── P1 图像桥消费方五算子（2026-09-29 开通；:domain `ImageAnalyzer` 新方法）──
+    // ── P1 图像桥消费方五算子（:domain `ImageAnalyzer` 新方法）──
     // 形状统一：源帧 → 产出帧（[frameFromNative] 落表发号，与 decode/ingest 同一张
     // 表、同一个号段 —— release 对产出帧与源帧同口径）。
     // 域校验与 findColor 同一条纪律：handler 已先拒，这里再兜一次（两条判据若
@@ -412,7 +412,7 @@ class NativeImageAnalyzer(
  * 方法名与 `:bridge:image` 的 `images_jni.cc`
  * 的 `Java_com_autoscript_platform_system_JniOps_*` 对表 ——
  * **换包名/换类名必须同批改那边**（JNI 符号名是字符串约定，编译器不看护；
- * `bridge/js/test/jni-names.test.cjs` 钉的就是这条，2026-09-26 曾抓到
+ * `bridge/js/test/jni-names.test.cjs` 钉的就是这条，曾抓到
  * cc 用 `NativeImageAnalyzer_` 而声明类是 `JniOps` 的对不上）。
  *
  * loadLibrary 在**类初始化**时做（companion 之外的实例化都跑得到）：so 缺位

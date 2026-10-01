@@ -34,15 +34,15 @@ import com.autoscript.domain.core.ErrorCode
  *
  * **十方法**（照抄 `ImageAnalyzer`）：`decode`/`matchTemplate`/`findImage`/`findColor`/`release`
  * + P1 桥消费方五算子 `toGrayscale`/`crop`/`resize`/`rotate`/`findFeature`
- * （2026-09-29 开通，§9.2 末"桥面刻意不开"的推演兑现 —— 计算核与 host 语义门
- * 2026-09-25 已落，消费方已到，同批开）。阈值键**统一叫 `threshold`**（[matchTemplate] 与
+ * （§9.2 末"桥面刻意不开"的推演兑现 —— 计算核与 host 语义门已落，消费方已到，
+ * 同批开）。阈值键**统一叫 `threshold`**（[matchTemplate] 与
  * [findImage] 同一个 opencv 概念，facade 曾一个发 `tolerance` 一个发 `threshold`，
  * 两侧 mock 各自自洽所以漂移没被抓到）；域 `[0,1]`，越界 → `ERR_INVALID_PARAM` 且
  * **一次 SPI 调用都不发**。两匹配方法另有**可选 `region`**（缺键/JSON null = 全帧；
  * 给了必须 `[x,y,w,h]` 四元组，与 findColor 同键同判据；命中坐标恒**全帧口径**，
  * region 比模板小由 SPI/native 判 `ERR_IO`）。
  *
- * **帧句柄：发号侧归一到 [ImageAnalyzer]（§18 第 8 项 (b)，2026-09-25 拍板）**。
+ * **帧句柄：发号侧归一到 [ImageAnalyzer]（§18 第 8 项 (b) 拍板）**。
  * 本 handler **不再自管帧表**（曾经有 `ids`/`live`/`sizes` 三张本地图 —— 与 SPI 的
  * native 帧表**双写**，靠"两个计数器各自从 1 起、每次 decode 各加一"的隐式不变式
  * 对齐，一处失败分岔就错位）：`decode` 回包直接用 SPI 回的 [HandleRef]（单调 refId +
@@ -209,8 +209,8 @@ class ImagesNamespaceHandler(
         }
     }
 
-    // ── P1 图像桥消费方五算子（2026-09-29 开通；§9.2 末 —— 计算核 2026-09-25 已落，
-    // host 语义门全绿，消费方已到，桥面同批开）─────────────────────────────
+    // ── P1 图像桥消费方五算子（§9.2 末 —— 计算核与 host 语义门已全绿，
+    // 消费方已到，桥面同批开）─────────────────────────────
     // 形状统一：`{source}` → `{ref,width,height}`（回包与 decode 同形 —— 新帧也落
     // 进 SPI 同一张表，宽高随产出帧回真值）；域校验照 findColor 同一条纪律
     // （越界先拒，**一次 SPI 调用都不发**）。

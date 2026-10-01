@@ -31,7 +31,7 @@ import com.autoscript.platform.capabilities.screen.InMemoryInputProvider
  * 只需实现这三块 SPI 即可替换内存树/输入 —— 本类逐行逻辑不变（替换 = 调
  * `CapabilityNamespaces.a11y` 时换 tree/actions/input/events 四个参数）。
  *
- * `:app` 装配层薄转接挂 BridgeRouter。载荷用 `:domain` 的 [DomainJson]（审查步骤 3
+ * `:app` 装配层薄转接挂 BridgeRouter。载荷用 `:domain` 的 [DomainJson]（
  * 合一后的仓内唯一 codec —— 各模块自带 codec 的旧形状已全部删除）。
  *
  * 方法表（与 `bridge/js` a11y.ts 一一对应）：

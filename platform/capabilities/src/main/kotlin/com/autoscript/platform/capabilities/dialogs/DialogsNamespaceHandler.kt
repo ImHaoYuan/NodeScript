@@ -19,10 +19,10 @@ import com.autoscript.domain.system.DialogPromptRequest
 /**
  * `dialogs` 命名空间桥处理器（docs §9.4 / §12.2；JS 对偶 `extras.ts`）。
  *
- * 归属（审查步骤 6）：住 `:platform:capabilities` 的 dialogs 面 —— 语义层与
+ * 归属：住 `:platform:capabilities` 的 dialogs 面 —— 语义层与
  * [com.autoscript.platform.capabilities.AndroidDialogHost]（BAL 安全路径编排）同模块；
  * 自 SystemNamespaces.kt 拆出（原与 shell/device/app/floatingWindow 同文件，那四件
- * 2026-09-30 已随实现迁去 `:platform:system`）。
+ * 已随实现迁去 `:platform:system`）。
  *
  * 能力门禁不在这里：`SYSTEM_ALERT_WINDOW` 判定在 `AndroidDialogHost`/装配层，
  * handler 只做参数校验与分类错误。

@@ -6,7 +6,7 @@ import com.autoscript.domain.bridge.HandleRef
  * `sensors` 命名空间契约（docs §12.2；JS 对偶 `auto.sensors`，
  * 对标 AutoJsPro v9 `sensors.register/unregister/unregisterAll` + `SensorDelay` 四档）。
  *
- * 2026-09-30 审查步骤 6 自 `:domain` 迁入本模块（grep 判据同 [ClipboardContracts]）——
+ * 自 `:domain` 迁入本模块（grep 判据同 [ClipboardContracts]）——
  * 与 [Clipboard] / [NotificationPoster] 同批。「采什么、怎么拿」与「怎么问系统」
  * 仍切开成契约 / `AndroidSensorSource` 两类型，handler 纯 JVM 可测不因同模块而变差。
  *

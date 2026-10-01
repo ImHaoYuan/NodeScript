@@ -17,8 +17,8 @@ import java.time.ZoneId
 /**
  * `workManager` 命名空间桥处理器（docs §8.6/§9.6 定时 API；JS `workManager.*` 的 Kotlin 对偶）。
  *
- * 归属（2026-09-30 审查步骤 6 反转）：自 `:app` 装配包迁入 `:app-service:scheduler`
- * —— 与 `engines` 住 `:app-service:runtime` 同形态：**handler 归位实现模块**，
+ * 归属：自 `:app` 装配包迁入 `:app-service:scheduler` —— 与 `engines` 住
+ * `:app-service:runtime` 同形态：**handler 归位实现模块**，
  * 直驱本模块 [Scheduler]（登记/取消/列举）。原驻 `:app` 的理由是 arch 门禁禁
  * `domain.bridge`，本批同门撤该条并量化：handler 只碰转接面三型
  * （BridgeRequest/BridgeResponse/RpcNamespaceHandler），不进引擎/权限/平台。

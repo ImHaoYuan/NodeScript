@@ -3,7 +3,7 @@ package com.autoscript.platform.system
 /**
  * `clipboard` 命名空间契约（docs §12.2；JS 对偶 `auto.clipboard`）。
  *
- * 2026-09-30 审查步骤 6 自 `:domain` 迁入本模块（grep 判据：仅 handler+impl 消费，
+ * 自 `:domain` 迁入本模块（grep 判据：仅 handler+impl 消费，
  * `:app`/`:ui`/app-service 生产读面零引用）—— 与 [NotificationPoster] /
  * [SystemSettings] 同批。「读写什么」与「怎么问系统」仍切开成契约 / `AndroidClipboard`
  * 两类型，handler 纯 JVM 可测不因同模块而变差。

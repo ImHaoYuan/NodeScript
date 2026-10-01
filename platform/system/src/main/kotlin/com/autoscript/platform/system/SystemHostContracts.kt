@@ -4,11 +4,10 @@ import com.autoscript.domain.bridge.HandleRef
 
 /**
  * `shell` / `device` / `app` / `floatingWindow` 四个命名空间的契约 DTO/SPI
- * （§9.3/§9.6/§12.2；`extras.ts` 的 Kotlin 对偶）—— 2026-09-30 审查步骤 6 自
- * `:domain` `SystemContracts.kt` 拆入：handler 语义层与实现同批迁
- * `:platform:system`，契约随「仅 handler+impl 消费」判据随迁（`:app`/`:ui`/
- * app-service 生产读面零引用 —— grep 判定见步骤 6 提交信息；DialogHost 反例留
- * `:domain`，装配层 PlatformWiring 生产参数面在读）。
+ * （§9.3/§9.6/§12.2；`extras.ts` 的 Kotlin 对偶）—— 自 `:domain`
+ * `SystemContracts.kt` 拆入：handler 语义层与实现同批迁 `:platform:system`，
+ * 契约随「仅 handler+impl 消费」判据随迁（`:app`/`:ui`/app-service 生产读面
+ * 零引用；DialogHost 反例留 `:domain`，装配层 PlatformWiring 生产参数面在读）。
  *
  * **非法即拒**：构造期 `require`（空型号/SDK 越界/负尺寸），handler 据此折叠
  * ERR_INVALID_PARAM，绝不把垃圾发往平台层。

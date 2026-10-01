@@ -44,7 +44,7 @@ fun interface ScreenOffGuard {
  * （PowerManager + [WakeLockLedger] 的持锁事实），JVM 单测注入即时值 ——
  * 门禁的判断逻辑因此可测，不需要 Mock 任何 Android 框架对象。
  *
- * **`deferWakeLock` 的生产实参已接线**（2026-09-23，§8.7 保活落地）：
+ * **`deferWakeLock` 的生产实参已接线**（§8.7 保活落地）：
  * `AppShellApplication.screenGateOf` 传的是 `keeper::lockHeld`（= 账本 `isHeld`，两侧都真），
  * 不再是恒真 —— §8.7 里那条"恒真 = 明写的待接"因此收口。
  */

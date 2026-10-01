@@ -12,7 +12,7 @@ import com.autoscript.domain.core.KeepAliveRenew
 /**
  * `power_manager` 命名空间桥处理器（docs §8.7 保活与电源；JS `auto.power` 的 Kotlin 对偶）。
  *
- * 归属（2026-09-30 审查步骤 6 迁入）：自 `:app` 装配包移入 `:platform:system` ——
+ * 归属：自 `:app` 装配包移入 `:platform:system` ——
  * 与 [WakeLockLedger] 同模块直驱**同一本账**（框架保活与脚本锁引用计数共存）。
  * keepalive 缝收窄为 `:domain` 的 [KeepAliveRenew]（`ForegroundKeeper` 实现之、住
  * `:app`），本模块不反向见 :app。`AppShell.assemble` 经独立缝 `powerManagerHandler`
