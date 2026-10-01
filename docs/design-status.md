@@ -27,7 +27,7 @@
 | §10.5 | 生物特征二次确认 | 未落（`BiometricPrompt` 全仓零引用） |
 | §8.5/§8.6 | 引擎侧 `waitCompletion` 超时不发起（无人 await 的 run 没人收尾） | **已覆盖（2026-10-01）**：`TimeoutEnforcer{WATCHDOG}` + 看门狗期限线（`KillCause.TIMEOUT`）—— 残余边界见 §8.6（期限只覆盖声明了期限的 run + 轮转须在跑） |
 | §8.5 | 意图日志的 **SQLite 实现**（契约写的是「append-only（SQLite，启动即回放）」） | **未落，且分歧已如实标注**：今天全平台生产（含 Android）跑的都是 `JournalFileStore`（jsonl 追加 + fsync + 流式回放，`AppShellKit` 装的就是它）。卡点是接口住 `:app-service:scheduler`（纯 JVM、零 `import android.`），而依赖铁律 `:platform:*` → `:domain` 不反向 —— SQLite 实现要么把 `IntentStore` 搬到 `:domain`（跨模块契约变更，待裁），要么给该模块加 Android 依赖（丢掉纯 JVM 可测）。另：日志**只追加、从不清理**，体积随 run 数线性增长（每次 run 恒定两条行，已无冗余可压），**保留期策略**（老终态行 / 老 nonce 能否丢）会动到 §8.5 的幂等锚点，同样待裁；`JournalFileStore` 的类注释与 `IntentStore` 接口注释已按此改写 |
-| §11.2 T2 / §10.2 | **npm 生产装配接线**（`lockKey` / `executor` / `scriptExecutor`） | **未落（2026-10-01 核实）**：`AppShellKit` 调 `NpmShellKit.assembleHandler(filesDir, cacheDir)` 走全缺省 —— 真机安装如实回 `ERR_NOT_IMPLEMENTED`、`lock.sig` **既不签也不验**、快照不导出；全仓无 `KeyProvider` 实现。契约侧已如实标注（§11.2 T2「接线现状」+ §11.3 第 8 条 + `SECURITY.md` 密钥表），接线决策待办在 [`backlog.md`](backlog.md) A1/A1c |
+| §11.2 T2 / §10.2 | **npm 生产装配接线**（`lockKey` / `executor` / `scriptExecutor`） | **部分落地（2026-10-01）**：`executor` **已接线** —— 素材随包（`assets/npm/**` ← gradle `prepareNpmCliAssets` ← `node-runtime-build` 出口）→ 启动期 `AssetTreeCliSource` 幂等落位 `files/npm/` → 注入 `HostNodeExecutor`（宿主 = `nativeLibraryDir/libnoden.so`）；两条同时成立才注入（部署就位 + 有宿主），否则保持 `Unavailable` 且原因原文进 `AssembledShell.npmCliFailure`。**仍缺**：`lockKey`（`lock.sig` 既不签也不验，全仓无 `KeyProvider` 实现；接缝形状 A1c 已就位）与 `scriptExecutor`（T1 spawn 属 P1）、快照导出。另：素材版本 = **npm 11.19.0 ≠ §10 脊梁的 npm 12.x 系**（落差登记在 [`backlog.md`](backlog.md)）。契约侧已如实标注（§10.1 接线现状 + §10.12 风险表 + §11.2 T2 + §11.3 第 8 条 + `SECURITY.md`） |
 | §15 | APK ≤ 40MB | **已超支**（实测 ≈81MB，见 [`design-decisions.md`](design-decisions.md#已推翻--已改口径)） |
 | — | 真机红测：exec/dlopen + 桥全链 | **已做**（2026-09-29，见下「流水」；非 root、Android 13/arm64、生产布局） |
 | — | 真机红测：16KB 页机 / SELinux enforcing / `nativeLibraryDir` 提取路径 / targetSdk36 exec 策略 | 未做（设备 PAGE_SIZE=4096，这几项该机**原理上测不到**） |
@@ -41,6 +41,42 @@
 只在那里写一份（本文件不复制，避免两处漂移）。
 
 ## 流水（最新在上）
+
+### 2026-10-01 —— 批 4 后半：**A1 npm 生产装配接线收口**（素材随包 → 启动期落位 → 注入执行体；分支 `hellish-shrimp`）
+
+四个子缺口按依赖序全补，链路今天在生产路径上是通的：
+
+- **①素材出库**（`129e6f3`）：`fetch-and-build.sh` 新增 §9/§10 —— 从 Node 源码树 `deps/npm`
+  收敛到 `OUT/npm`（剪裁 `docs/` `man/`、**清掉全部点条目**、`cp -RL` 解引用符号链接），
+  版本与 `NPM_CLI_VERSION` 逐字比对（漂移即死），并出逐文件基表 `OUT/npm-manifest.sha256`；
+  `node-slice.yml` 的产物审计与 artifact 清单同行带上（`out/npm` 是唯一**要随 APK** 的产物）。
+- **②随包**（`e540b4b`）：`:app` 约定插件新增 `prepareNpmCliAssets` —— 素材树 →
+  `generated/npmCliAssets/npm/`（`assets.srcDir` 取**父目录**，资产键 = `npm/<rel>`；
+  候选序 = `NPM_CLI_ROOT` env → `node-runtime-build/out/npm`），缺锚（`bin/{npm,npx}-cli.js`）
+  即**红**（半瘫 CLI 比没交付更糟）、无货只 warn（本机构建的 APK 常态）。
+- **③`CliSource` 实现**（`e540b4b`）：`AssetTreeCliSource`（`:app-service:npm`）——
+  纯逻辑 + 两个 lambda（`listDir`/`openFile`），生产两行接 `AssetManager`；
+  惰性 BFS（不把整棵树的路径列表在开机时全展开）。
+- **④启动期落位 + 注入执行体**（`55727cf`）：`AppShellKit` 收 `npmCliSource` / `npmNodeBin`
+  两个缝，`npmHandler ?: run { deploy → 有宿主才 `HostNodeExecutor` }`；`AppShellApplication`
+  喂 `AssetTreeCliSource("npm", assets::list/open)` + `nativeDir/libnoden.so`。
+- **三个刻意的边界**（都由测试钉住，`AppShellNpmCliTest` 4 例 0 skipped）：判定在装配层一处做完；
+  `npmCli == null ⟺ 落位没成`（"部署成了、执行体没接上"是两者皆非 null 的中间态，原因原文说清）；
+  异常不外抛（素材缺失不该掀翻整个壳，而 `deploy` 对缺失/半瘫是 loud 的，必须接住并记账）；
+  调用方自带 `npmHandler` 时本配方**不碰素材**。
+- **验的是行为不是字段**：「素材齐 + 有宿主」那例真把 `npm.install` 打到桥上，断言错误码
+  **不是** `ERR_NOT_IMPLEMENTED` 且详情指向故意不存在的假宿主路径 —— 证明真走到了 exec，
+  而不是停在某条前置（`HostNodeExecutor` 自己的头一道前置是项目 `package.json`，
+  测试先摆好它，免得测出的是另一件事）。
+- **落差如实记**：素材版本 **npm 11.19.0**（Node 24.21.0 的 `deps/npm`），**低于 §10 脊梁写的
+  「npm 12.x 系」**。npm 12 的 `allowScripts=none`「官方默认语义」当前不在位，护栏由
+  `HostNodeExecutor` 硬编码的 `--ignore-scripts`（§11.1 T1 主控，与版本无关）单独承担；
+  非脚本 spawn 路径的第二层兜底（child_process 拦截 shim）仍未落。口径追加在
+  [`design-decisions.md`](design-decisions.md#已推翻--已改口径)，升级路径登记在 `backlog.md`。
+- **门**：CI 同源 13 任务 `./gradlew` 全绿（**1208 tests / 0 skipped**，本机闭环含真 npm 的
+  E2E 与 `NpmCliDeployerTest` 那例「部署出的 CLI 真能跑起来」）。
+- **未验**：真机（无设备）—— `assets/npm/**` 在真机 AssetManager 上的可见性、`libnoden.so`
+  作为 `nodeBin` 的 exec 权限，都只有本机同形逻辑 + 宿主 npm 树代跑的证据，不是设备实证。
 
 ### 2026-10-01 —— 批 4 前半：**A1c 接缝形状**（`secretKey(): SecretKey`；分支 `hellish-shrimp`）
 
@@ -59,7 +95,8 @@
   §11.3 第 3/8 条的「目标形态，非现状」口径只补了一句「接缝形状已就位」，结论不变。
 - **A1（真接线）仍未做，且体量比外审估计的大** —— 深挖出四个子缺口（按依赖序）：① 随包 npm CLI 素材根本不存在
   （`assets/npm/**` 无目录、无产出任务）；② `NpmCliDeployer.CliSource` 零实现（KDoc 说的 assets 版没人写）；
-  ③ 无人调用 `deploy`（`:app` 零引用）；④ 才轮到注入 `HostNodeExecutor`。证据已写进 `backlog.md` 的 A1 行。
+  ③ 无人调用 `deploy`（`:app` 零引用）；④ 才轮到注入 `HostNodeExecutor`。证据已写进 `backlog.md` 的 A1 行
+  （~~该行~~ **作废（2026-10-01 同日晚些）**：A1 四项已收口，行随出池，见上一条流水）。
   下一步卡在**「npm CLI 素材从哪来」（CI 产 / 入库 / 取本机 npm 目录）**这个构建管线决定上。
 - 门：`:app-service:npm:test` 全绿（6 处夹具全跑）。
 

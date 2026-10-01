@@ -51,7 +51,22 @@
 5. **16KB 页机未测**：真机红测只有 16KB 模拟器镜像或 Pixel 8+ 能给，SELinux enforcing 上下文与 targetSdk 提取策略同样待真机（design-status「仍未验」块）。
 6. **审批卡呈现层未排期**：审批账本与桥面拉取口已通（`drainApprovals` → `NpmBridgeHandler` → JS `pumpApprovals`），但能力中心的审批卡不在当前排期内，期间审批只能靠脚本侧拉取。
 7. **无上报时限承诺**：私密上报渠道已于 2026-10-01 开通（GitHub Security → Report a vulnerability，见根 [`SECURITY.md`](../../SECURITY.md)）—— 缺的从此不是渠道，而是**响应 / 修复时限**：单人维护的开发期项目不作承诺。（原条目「上报流程缺失」同日改写。）
-8. **npm 生产装配未接线（2026-10-01 核实）**：`AppShellKit` 调 `NpmShellKit.assembleHandler(filesDir, cacheDir)` 走全缺省 —— `executor = HeavyOpExecutor.Unavailable`（真机安装如实回 `ERR_NOT_IMPLEMENTED`，`HostNodeExecutor` 在 `app/src/main` 零引用）、`lockKey = null`（T2 的签/验与快照导出都不发生）、`scriptExecutor = Unavailable`（T1 门禁过了也跑不起来）。即：**设计上写着「已接线」的那几道 npm 防线，当前在生产路径上都不生效**；这是接线缺口，不是设计缺口。
+8. **npm 生产装配：执行体已接线，签名与脚本门禁仍未落（2026-10-01 起分档）** —— `AppShellKit` 不再走全缺省：
+   - **`executor` 已接线**：素材（`assets/npm/**`，vendored npm CLI）启动期幂等落位 `files/npm/`，
+     注入 `HostNodeExecutor`（宿主 = `nativeLibraryDir/libnoden.so`）；**两条同时成立才注入**
+     （落位就位 + 有宿主），否则保持 `HeavyOpExecutor.Unavailable` 并对 npm.* 如实回
+     `ERR_NOT_IMPLEMENTED`，原因原文进 `AssembledShell.npmCliFailure`（不吞）。即 T1/T7 的
+     安装路径**有执行体了**，但仍**依赖素材随包**：本机自建、没跑过 Node 构建线的 APK
+     就是「无素材」那一档（警告 + 空产出，装配照过）。
+   - **`lockKey` 仍 `null`**（T2 的签/验与快照导出都不发生；全仓无 `KeyProvider` 实现，
+     接缝形状 2026-10-01 已就位 —— 见第 3 条）。
+   - **`scriptExecutor` 仍 `Unavailable`**（T1 门禁过了也跑不起来，spawn 桥属 P1）。
+   - **素材版本落差**：vendored 的是 **npm 11.19.0**（Node 24.21.0 的 `deps/npm`），不是 §10.1
+     脊梁写的 npm 12.x —— npm 12 的「拒绝全部 lifecycle」官方默认不在位，T1 的护栏当前**只由
+     硬编码 `--ignore-scripts` 一层承担**（与版本无关），且**非脚本** spawn 路径的第二层兜底
+     （§10.12 末行 child_process 拦截 shim）未落。口径见 [`design-decisions.md`](../design-decisions.md#已推翻--已改口径)。
+
+   即：**设计上写着「已接线」的那几道 npm 防线，当前在生产路径上只接上了一道（执行体）**；这是接线缺口，不是设计缺口。
 
 ### 11.4 非目标
 
