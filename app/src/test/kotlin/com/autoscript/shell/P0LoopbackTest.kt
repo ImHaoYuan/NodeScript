@@ -48,10 +48,7 @@ class P0LoopbackTest {
     lateinit var dir: Path
 
     companion object {
-        private val npmCli: Path? = sequenceOf(
-            "/usr/lib/node_modules/npm/bin/npm-cli.js",
-            "/usr/local/lib/node_modules/npm/bin/npm-cli.js",
-        ).map { Path.of(it) }.firstOrNull { Files.isRegularFile(it) }
+        private val npmCli: Path? = HostNpm.cliJs
     }
 
     private val files: Path get() = dir.resolve("files")

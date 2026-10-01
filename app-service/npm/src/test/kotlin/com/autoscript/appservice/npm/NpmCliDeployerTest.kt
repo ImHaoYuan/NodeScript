@@ -13,7 +13,8 @@ import java.util.concurrent.TimeUnit
 
 /**
  * vendored CLI 部署器单测（目录树契约）。
- * 素材源默认取本机 /usr/lib/node_modules/npm（CI ubuntu 同样有 node）；
+ * 素材源 = 宿主 npm 安装树（[HostNpm] 现查：`npm root -g` → node prefix → 老静态位；
+ * 不写死 `/usr/lib/node_modules/npm`，理由见 HostNpm KDoc）；
  * 没有则整体跳过（本地只有 JVM 的机器不假扮通过）。
  */
 class NpmCliDeployerTest {
@@ -39,9 +40,9 @@ class NpmCliDeployerTest {
     }
 
     private fun sourceOrSkip(): DirSource {
-        val npm = Path.of("/usr/lib/node_modules/npm")
-        assumeTrue(Files.isRegularFile(npm.resolve("bin/npm-cli.js")), "本机无 npm 安装，跳过")
-        return DirSource(npm)
+        val npm = HostNpm.root
+        assumeTrue(npm != null, "本机无 npm 安装，跳过（HostNpm 三来源都没探到）")
+        return DirSource(npm!!)
     }
 
     @Test
@@ -146,21 +147,16 @@ class NpmCliDeployerTest {
         }
     }
 
-    private fun hasNode(): Boolean = try {
-        ProcessBuilder("node", "--version").start().waitFor(30, TimeUnit.SECONDS)
-    } catch (_: java.io.IOException) {
-        false
-    }
-
     @Test
     fun `资产源部署出的 CLI 真能跑起来（点条目不可见的 AssetManager 口径）`() {
-        val npm = Path.of("/usr/lib/node_modules/npm")
-        assumeTrue(Files.isRegularFile(npm.resolve("bin/npm-cli.js")), "本机无 npm 安装，跳过")
-        assumeTrue(hasNode(), "PATH 里没有 node，跳过")
+        val npm = HostNpm.root
+        assumeTrue(npm != null, "本机无 npm 安装，跳过（HostNpm 三来源都没探到）")
+        assumeTrue(HostNpm.hasNode, "PATH 里没有 node，跳过")
         // 本机 npm 树**就是**素材根：把资产前缀 "npm" 摘掉映射回文件系统
+        val root = npm!!
         fun fsRel(p: String) = p.removePrefix("npm").trimStart('/')
-        val src = AssetTreeCliSource("npm", { assetList(npm, fsRel(it)) }) { path ->
-            Files.newInputStream(npm.resolve(fsRel(path)))
+        val src = AssetTreeCliSource("npm", { assetList(root, fsRel(it)) }) { path ->
+            Files.newInputStream(root.resolve(fsRel(path)))
         }
         val r = NpmCliDeployer.deploy(dir, src) as NpmCliDeployer.Outcome.Ready
         // 真起一次：部署出来的树缺一个 require 得到的东西就当场炸（比"文件都在"强）

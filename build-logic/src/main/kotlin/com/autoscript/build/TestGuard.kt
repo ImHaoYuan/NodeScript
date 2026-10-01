@@ -14,6 +14,8 @@ import org.gradle.api.tasks.testing.TestResult
  *
  * 放行只有两条路：
  *  · [ENV_GATED] —— 设计上"环境不齐就诚实跳过"的 E2E（各类 KDoc 自述该契约）；
+ *    **登记 ≠ 可以不跑**：nightly 的 e2e-nightly.yml 另有 check-e2e-ran.sh 证明这些类
+ *    在那边真的执行过（登记只免掉"本机没装 node/npm 时"的红）；
  *  · `-PallowSkipped=<类名,…>`（简单名或全名，逗号分隔）—— 显式、临时、留痕。
  */
 object TestGuard {
@@ -22,6 +24,8 @@ object TestGuard {
     private val ENV_GATED: Set<String> = setOf(
         "NpmCliDeployerTest",        // app-service/npm：素材源取本机 npm 安装
         "HostNodeNpmE2ETest",        // app-service/npm：拉真宿主 node+npm 进程
+        "NpmCacheSeedDeployerTest",  // app-service/npm：离线首装金标准要宿主 npm + 真 tarball
+        "P0LoopbackTest",            // app：P0 回环要宿主 node+npm（-PskipNpmE2E 下整类不跑）
     )
 
     fun apply(project: Project) {
