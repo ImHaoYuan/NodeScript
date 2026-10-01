@@ -42,6 +42,93 @@
 
 ## 流水（最新在上）
 
+### 2026-10-01 —— 批 5：**B1 CI 覆盖收口**（Android Lint / APK 构建进 PR 门；真 npm E2E 进 nightly + 验尸门；分支 `hellish-shrimp`）
+
+B1 记的是「CI 跳过最危险的路径」：`-PskipNpmE2E` 恒开 → 三条真 npm 路径在 CI **永不执行**，
+且 APK 构建与 lint 不在任何 workflow 里。本批把三件事分开做完：
+
+- **① Android Lint 先修干净（`lintDebug` 第一次跑就抓出 15 处 error —— 全是 minSdk 26 上的真崩）**：
+  - **`Path.of` 在 Android 上 since=34**（`api-versions.xml` 实查；`Paths.get` 才是 since=26），
+    minSdk 26 下 `NewApi` 直接红。全仓 main 源 **6 处 / 5 文件**统一回 `Paths.get`：
+    `AppShellApplication`（`nativeLibraryDir`）、`ProcessMonitor`（`/proc/<pid>/{stat,status}`）、
+    `ZipNamespaceHandler`、`NpmSnapshot`、`InstallCoordinator`（后两者是 `Uri → Path`）。
+    注意这与「设备上跑得动」不矛盾：真机是 **API 33**，`Path.of` 在 34 才出现 —— 设备上
+    能不能跑是**另一回事**，lint 抓的是「minSdk 26 的机器上会 `NoSuchMethodError`」。
+  - **`NotificationPermission`：`app` 的 manifest 从没声明过 `POST_NOTIFICATIONS`**。
+    targetSdk 35 下这不是 lint 洁癖而是**功能缺口**：不声明时 `areNotificationsEnabled()`
+    在 API 33+ 恒为 false，`SystemDialogOps` 每次都在 `requireNotificationsEnabled` 抛
+    `ERR_PERMISSION_DENIED`，且系统设置里连开关都不给 —— `dialogs` 的 prompt/choose 成了
+    **永久不可用**（而不是"用户没开"）。补 `uses-permission` + 就地注释；**声明 ≠ 可用**：
+    门禁仍在 SPI（`NotificationContracts`「未开则抛 `ERR_PERMISSION_DENIED`，不是回 false」），
+    授予路径仍是能力中心 → `GrantPage.NOTIFICATIONS`。
+  - **把门开到全模块后又抓出 13 处**（`:app:lintDebug` 一个模块看不见库模块的 NewApi ——
+    AGP 的 `checkDependencies` 缺省 false，而真要崩的恰好在库模块里）。逐条都是
+    「声明 minSdk 26 与实际调用面不符」= 老设备上的 `NoSuchMethodError`：
+    - **`:app-service:script-repo`（4 处）**：`Stream#toList()` 是 **API 34** ×2 —— 在
+      `AtomicDeployer` 的 stage 清理路径上（**素材部署每走一次就到**），改
+      `collect(Collectors.toList())`（API 24）；顺手 `.use{}` 收口目录流（`Files.list` 不 close
+      = 每次清理漏一个 fd，原写法靠 GC 收尾）。注意 Kotlin 的 `kotlin.streams.toList` 扩展
+      **救不了这个**：Java 的成员函数优先于扩展函数。`URLEncoder/URLDecoder#(String,Charset)`
+      是 **API 33** ×2（`DeployPath.FieldCodec`，行式 journal 的字段编码），回落
+      `(String, "UTF-8")` 重载（API 1，语义逐字相同：UTF-8 百分号编码、空格编成 `+`）。
+    - **`:platform:capabilities`（9 处）**：a11y 截图的 API30/34 面（`takeScreenshot` API30、
+      `takeScreenshotOfWindow` API34、`TakeScreenshotCallback` API30、`hardwareBuffer` /
+      `colorSpace` API30、`wrapHardwareBuffer` API29）+ `ContextWrapper#getMainExecutor`
+      **API 28** ×2 + 清单里 `BIND_ACCESSIBILITY_SERVICE` 的 `ProtectedPermissions`。
+      **根因是 lint 不追踪 `val sdk = Build.VERSION.SDK_INT` 的局部分支**（原写法
+      `if (sdk >= 34) … else …` 被逐行报 error）。改法：公开入口照旧按 SDK_INT 分流，版本面
+      收进带 `@TargetApi` 的私有方法（`screenshotApi30Plus`(30) / `requestWindowScreenshot`(34)
+      / `requestDisplayScreenshot`(30) / `frameOf`(30) / `ScreenshotCallback`(30)）—— 行为逐字
+      不变（同一个 deferred、同一个回调、同一套失败分类），`@TargetApi` 同时是**给人看的守卫
+      证据**（它就在 `if (sdk < R) throw` 的下一行）。清单那处用 `tools:ignore` 就地说明
+      「本模块就是该 signature 级权限的合法持有者」（与 `:app` 的 `PACKAGE_USAGE_STATS` 同处理）。
+  - 修完：**全模块 `lintDebug` 0 error / 11 warning**（`:app` 6 + `:platform:capabilities` 1 +
+    `:platform:system` 4），余下见下方「留着没修的」。
+- **② PR 门新增 `android-build` job**（`ci.yml`）：`setup SDK` → `npm --prefix bridge/js ci && build`
+  （`prepareBridgeDistAssets` 缺件即红，是前置不是优化）→ `./gradlew :app:lintDebug` →
+  `./gradlew :app:assembleDebug`，APK 与 lint 报告 `always()` 上传。
+  **assemble 与 lint 合一个 job**：两者共用同一套冷启动开销，拆两个等于付两遍；
+  步骤名分开红，信号不混。**这个 APK 里没有引擎二进制**（noden/libnode/libopencv/npm 素材
+  都不在 git，装配期按「缺位只 warn」放行）—— 这是如实交付不是漏项，补齐路径登记为 backlog **B5**。
+- **③ 真 npm E2E 进 nightly**（新 workflow `.github/workflows/e2e-nightly.yml`，
+  `schedule` + `workflow_dispatch`）：跑的是**与 ci.yml 逐字同一条 `./gradlew` 命令、只是不带
+  `-PskipNpmE2E`** —— `HostNodeNpmE2ETest`（真装 lodash）、`NpmCacheSeedDeployerTest`
+  （仅凭种子 cache 的离线 `npm ci`）、`P0LoopbackTest`（`:app` 全链路）。与 ci.yml 分开而不是
+  加个 job：nightly 要拉真 registry 网络装包（分钟级、受上游可用性影响），不该把噪声灌进每个 PR。
+- **④ 「跑完了但没跑」这个坑才是 B1 的真身**，所以 nightly 有两道额外收口：
+  - **`HostNpm` 宿主 npm 发现**（测试源集，`:app-service:npm` 与 `:app` 各一份、算法同源）：
+    原先三处测试都写死 `/usr/lib/node_modules/npm`（Debian 系布局）—— 在 GitHub runner 上
+    （`setup-node` 装到 `/opt/hostedtoolcache/node/<ver>/x64/`）`assumeTrue` 会**静默跳过**，
+    nightly 一片绿而真路径一次没走。改成三来源现查：`npm root -g` → 从 `node -p process.execPath`
+    推 `<prefix>/lib/node_modules/npm` → 老静态位兜底；探不到才 null（仍不假扮通过）。
+  - **`.github/scripts/check-e2e-ran.sh` 验尸门**（nightly 内 `if: always()` 跑）：逐类查
+    Gradle 的 JUnit XML —— **缺 XML（整类没跑）/ `tests=0` / `skipped>0` 都红**。
+    「Gradle 绿 ≠ 真跑过」在这三条路径上是**默认状态**（`assumeTrue` 诚实跳过的契约在本机
+    成立、在 CI 上退化成假通过），这道门是唯一能证明它们真跑过的证据面。
+  - 同批**修掉一处静默跳过**：`NpmCacheSeedDeployerTest` 的金标准用例原本是
+    `realTarball() ?: return@runBlocking` + `if (npmCli == null) return@runBlocking` ——
+    **无声的通过**（连 skipped 都不算，TestGuard 也看不见）。改成 `assumeTrue`（如实中止），
+    并把 `NpmCacheSeedDeployerTest` / `P0LoopbackTest` 登记进 `TestGuard.ENV_GATED`
+    （跳过是其契约）；登记 ≠ 可以不跑 —— nightly 的验尸门负责证明。
+- **留着没修的（如实记）**：全模块 11 条 warning 都是「知道且认了」类，lint 门默认只对 **error**
+  红，它们不挡门（要收成 error 级需先逐条裁定，未排期）：
+  `:app` 6 条 —— `InlinedApi`（`ACTION_REQUEST_SCHEDULE_EXACT_ALARM` 取值内联，调用点已有
+  `sdkInt >= S` 分支）、`DataExtractionRules`（`allowBackup=false` 是有意为之，见 §11.2 T9）、
+  `ObsoleteSdkInt` ×2、`MissingApplicationIcon`（无图标资源，非发行向）、`UseTomlInstead`
+  （`app/build.gradle.kts` 的 `testRuntimeOnly` 字面量 —— 改它要动 libs.versions.toml，协调者冻结）；
+  `:platform:system` 4 条 —— `WakelockTimeout`（**有意不设超时**：`WakeLockLedger` 的取/放就是
+  §8.7 的账本，超时会让"谁没还"这件事消失）与 `ObsoleteSdkInt` ×3；
+  `:platform:capabilities` 1 条 —— `UnusedAttribute`（`canTakeScreenshot` 是 API30 属性，
+  minSdk 26 的机器上忽略它正是设计：低版本走 `ERR_NOT_IMPLEMENTED` 分支）。
+- **覆盖率不在本批**：jacoco 要改**根 `build.gradle.kts`**（协调者冻结），登记为 backlog **B6** 待批。
+- **生效面如实说**：`ci.yml` 的 `android-build` 是 PR 门，推分支开 PR 即跑（本轮可远端验证）。
+  但 **`e2e-nightly.yml` 的 `schedule` / `workflow_dispatch` 只在默认分支上生效**（Actions 的
+  workflow 列表读默认分支）—— 合入 `main` 前它不会自己跑，本批只能证明「本机同一条命令 + 验尸脚本
+  都通」；真正的 nightly 从合入后的第一个 03:23 起算。
+- **门**：CI 同源 13 任务 `./gradlew` 全绿（本机，含不带 `-PskipNpmE2E` 的那条 —— 三条真 npm
+  E2E 本机实测真跑过）；`bash .github/scripts/check-e2e-ran.sh` 本机同一条命令可跑；
+  全模块 `./gradlew lintDebug` 0 error（`:app` + `:platform:{capabilities,system}` + `:ui` +
+  `:engine:node-process` + `:app-service:script-repo` + `:bridge:{native,image}`）；`yaml` 两个 workflow 解析通过。
 ### 2026-10-01 —— 批 4 后半：**A1 npm 生产装配接线收口**（素材随包 → 启动期落位 → 注入执行体；分支 `hellish-shrimp`）
 
 四个子缺口按依赖序全补，链路今天在生产路径上是通的：
@@ -86,7 +173,7 @@
   这棵树真跑：`--version` → 11.19.0、`npm ls`（arborist 真载入）、`npm install lodash@4.17.21`
   （与 `HostNodeExecutor` 同参数）→ 装出来真能 `require`。**至此「素材能不能用」不再有推断成分**；
   CI 那次跑（`node-slice`）保留作 artifact 出库与真机件来源。（顺带量到原树 `test/` 1.9M +
-  `tap-snapshots/` 816K 是纯测试件，可再剪 —— 记在 `backlog.md` B1 旁的观察位。）
+  `tap-snapshots/` 816K 是纯测试件，可再剪 —— 记在 `backlog.md` 的 E4 行。）
 - **剪裁口径实测过，不是推的**：把 `prepareNpmCliAssets` 用 `NPM_CLI_ROOT=/usr/lib/node_modules/npm`
   跑出来的树（1668 文件 / 9MiB / **点条目 0**，剪掉了 npm 自己树里的 `.npmrc`、
   `node_modules/.bin`、`node_modules/.package-lock.json`）拿去真跑：`npm ls --json`（**装进
@@ -204,7 +291,7 @@
     （design-status / design-decisions 已推翻表 / `06-modules` 删除说明 / `TestGuard` 的「承…纪律」）保留不动。
   - `CLAUDE.md` 仓库地图悬空行「`module-stubs` 之外的模块」删除；`ci.yml` 结尾与 `CLAUDE.md` 里
     「Android assemble 走 `node-runtime-build/Dockerfile`」的**旧口径改正**（该镜像产出 libnode.so/OpenCV.so，
-    与 APK 无关；assemble 目前不在任何 workflow 里，搬上 CI 记在 backlog B1）。
+    与 APK 无关；~~assemble 目前不在任何 workflow 里，搬上 CI 记在 backlog B1~~ **作废（2026-10-01 批 5）：已进 `ci.yml` 的 `android-build` job，B1 出池**）。
   - **新增文档链接门**（`docs-check` job + `.github/scripts/check-doc-links.sh`，零依赖、本机同一条命令）：
     扫 git 跟踪的全部 `*.md`，markdown 相对链接按**文件所在目录**解析，目标不存在即红。**只查链接不查反引号
     里的路径**是有意的 —— 实测反引号候选 92 条里真引用是少数（斜杠词表/分支名/别仓路径/相对另一基准的子路径），

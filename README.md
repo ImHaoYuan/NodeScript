@@ -90,8 +90,10 @@ bash .github/scripts/check-doc-links.sh
 - **`skipped` / `aborted` 不算绿**。守卫做在约定插件里（`build-logic` 的 `autoscript.test-guard`）：
   测试出现跳过即红。设计上就该环境门禁的少数 E2E 例外在 `TestGuard.ENV_GATED` 名单里，其余要放行得
   显式 `-PallowSkipped=<类名>`。
-- **npm 端到端测试本机默认跑，CI 反而排除**：`P0LoopbackTest` / `HostNodeNpmE2ETest` 要拉真 npm
-  进程，CI 用 `-PskipNpmE2E` 排除（这也是 CI 已知覆盖缺口，记在 [`docs/backlog.md`](docs/backlog.md) B1）。
+- **npm 端到端测试本机默认跑，PR 门排除、nightly 必跑**：`P0LoopbackTest` / `HostNodeNpmE2ETest` /
+  `NpmCacheSeedDeployerTest` 要拉真 npm 进程，PR 门（`ci.yml`）用 `-PskipNpmE2E` 排除；
+  [`.github/workflows/e2e-nightly.yml`](.github/workflows/e2e-nightly.yml) 每天跑**不带**该 flag 的那条，
+  并由 `bash .github/scripts/check-e2e-ran.sh` 证明它们真跑过（不是 `assumeTrue` 静默跳过）。
   本机跑全量门**不要**带这个 flag。
 
 ## 运行

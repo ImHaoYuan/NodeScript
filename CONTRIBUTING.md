@@ -72,8 +72,9 @@ bash .github/scripts/check-doc-links.sh   # 文档相对链接门
 - **`skipped` / `aborted` 不算绿**：守卫在 `build-logic` 的 `autoscript.test-guard` 里，测试出现跳过即红。
   设计上就该环境门禁的少数 E2E 在 `TestGuard.ENV_GATED` 名单内；其余要放行得显式 `-PallowSkipped=<类名>`，
   别用它掩盖失败。
-- CI 用 `-PskipNpmE2E` 排除拉真 npm 进程的端到端用例（覆盖缺口记在
-  [`docs/backlog.md`](docs/backlog.md) B1）；**本机跑全量门不要带这个 flag**。
+- PR 门（`ci.yml`）用 `-PskipNpmE2E` 排除拉真 npm 进程的端到端用例；它们由
+  [`.github/workflows/e2e-nightly.yml`](.github/workflows/e2e-nightly.yml) 每天跑（不带该 flag），
+  跑完由 `bash .github/scripts/check-e2e-ran.sh` 验尸（缺结果 / 跳过即红）。**本机跑全量门不要带这个 flag**。
 - 构建 / 测试的完整前置（JDK、SDK、Node 版本）见 [`README.md`](README.md)。
 - 不改行为、纯文档的改动也一样过门 —— 文档链接门与 `ModuleGraphTest` 都会读到文档。
 
@@ -87,8 +88,9 @@ bash .github/scripts/check-doc-links.sh   # 文档相对链接门
 - 从 `main` 切分支开发（`feat/…`、`fix/…`、`docs/…`），PR 回 `main`。
 - **不要为了触发 CI 而直推 `main`**：push 到分支、开 PR 即跑全套门。
 - PR 描述里写清：改了哪些文档、跑了哪道门、结果如何（红过就说红过）。
-- Android APK 全量装配（`./gradlew :app:assembleDebug`）**目前不在 CI 里**，改了装配面请本机跑一次并说明
-  （搬上 CI 记在 [`docs/backlog.md`](docs/backlog.md) B1）。
+- Android 构建与 Lint（`./gradlew :app:assembleDebug` / `:app:lintDebug`）已在 PR 门里
+  （`ci.yml` 的 `android-build` job）。注意 CI 出的 APK **不含引擎二进制**（那些产物不在 git，
+  装配期缺位只 warn）——改了装配面仍建议本机跑一次并说明。
 
 ## 安全问题
 

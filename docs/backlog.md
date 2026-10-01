@@ -27,7 +27,8 @@
 
 | # | 事项 | 证据位置 | 核实 | 影响 | 成本 |
 |---|---|---|---|---|---|
-| **B1** | **CI 跳过最危险的路径**：`-PskipNpmE2E` 恒开 → `HostNodeNpmE2ETest` / `NpmCacheSeedDeployerTest` / `P0LoopbackTest` 在 CI **永不执行**；没有 `assembleDebug`；没有 lint / detekt / ktlint；没有覆盖率 | `ci.yml:41`；`app/build.gradle.kts:58` | ✅ 2026-10-01 | APK 构建与真 npm 路径可无声回归 | M（建议：nightly 或 `workflow_dispatch` 跑不带 skip 的那条；单独 assembleDebug job；Android Lint） |
+| **B5** | **CI 出的 APK 里没有引擎二进制**（2026-10-01 加 `android-build` job 时暴露）：`engine/node-process/build/native-local/*`、`node-runtime-build/out/{libnode.so,npm}` 都不在 git，装配期按「缺位只 warn」放行 → CI 的 APK 是**无引擎**形态（能装、能起 UI、脚本跑不了）。要 CI 出真形态就得先拿 node-slice / image-native 的 artifact（跨 workflow 取件：`actions/download-artifact` 需同一 run 或 `gh api` 拉历史 artifact），再喂 `LIBNODE` / `NPM_CLI_ROOT` / `LIBOPENCV` 起 assemble | `.github/workflows/ci.yml`（`android-build` job）；`build-logic/src/main/kotlin/autoscript.engine-natives.gradle.kts` | ✅ 2026-10-01（三大来源全不在 git，实读 gradle 任务确认） | CI 的 APK 门只证明「能构建」，不证明「能跑」 | M |
+| **B6** | **覆盖率仍为零**（B1 的原始清单里唯一没做的一项）：jacoco 要挂在**根 `build.gradle.kts`**（协调者冻结）或各模块约定插件里；先要定口径 —— 门设不设阈值、报告传不传 artifact、`:domain` 之外哪些模块纳入 | `build.gradle.kts`（根，冻结）；`build-logic/` | ✅ 2026-10-01（全仓零 jacoco 引用） | 改动质量只有"红/绿"，没有盲区可见性 | S（技术）/ 待批（改冻结文件） |
 | **B3** | 无设备/仪器化测试道；`libs.versions.toml` 里的 `espresso` / `androidx-test-junit` **零引用**（要么用起来要么删目录项）；16KB 页 / SELinux / targetSdk exec 三条真机检查仍空白 | 全仓无 `androidTest` 目录；`libs.versions.toml:15,31,32` | ✅ 2026-10-01 | native exec/dlopen/a11y 只在一台设备上验过 | L |
 | **B4** | 无依赖漏洞扫描 / SBOM / `dependency-review-action`；`bridge/js/package.json` 无 `engines` 字段 | `package.json`；CI 无相关 job | 待核实（`engines` 未逐字读） | 升级债与漏洞看不见 | M |
 
@@ -69,6 +70,6 @@
 2. ~~**批 2（S）**：B2（CI 卫生）+ C3（失效引用）+ D4（README 归位）+ D2（删 sandbox 目录）~~ —— **2026-10-01 全部完成**，流水见 [`design-status.md`](design-status.md)。D2 当时因与 design-decisions 2026-09-30「目录留盘」裁定冲突而暂缓，经拍板后执行，口径变更追加在 design-decisions 同批。
 3. ~~**批 3（S）**：C1/C5（人类 README + CONTRIBUTING）+ C4（只剩维护者开通上报入口）~~ —— **2026-10-01 完成**，流水见 [`design-status.md`](design-status.md)。C4 当时因「只剩维护者动作」留在池里 —— **该动作 2026-10-01 已由维护者完成**（GitHub 私密上报入口开通，`private-vulnerability-reporting` 复核为 `enabled:true`），仓库侧四处照实写法同批改掉，C4 随之出池。
 4. ~~**批 4（M）**：A1/A1c~~ —— **2026-10-01 全部完成**，流水见 [`design-status.md`](design-status.md)：A1c 接缝形状 `secretKey(): SecretKey` + 实现落 `:app` 装配层；A1 四个子缺口按依赖序全补（素材出库 → 随包任务 → `AssetTreeCliSource` → 启动期落位 + 注入 `HostNodeExecutor`），素材来源拍板「Node 源码树 `deps/npm`」（口径追加在 [`design-decisions.md`](design-decisions.md#已推翻--已改口径)）。**收口时露出一个新口子**：素材版本 npm 11.19.0 ≠ §10 脊梁的 npm 12.x —— 登记为 **A6**，要不要升是独立的产品判断。
-5. **批 5（M）**：B1（CI 覆盖：nightly + assembleDebug + lint）。
+5. ~~**批 5（M）**：B1（CI 覆盖：nightly + assembleDebug + lint）~~ —— **2026-10-01 完成**，流水见 [`design-status.md`](design-status.md)：Android Lint 从 **15 error 修到 0**（`:app` 2：`Path.of`→`Paths.get` ×6、manifest 补 `POST_NOTIFICATIONS`；开成全模块后又抓出 13 处 minSdk 26 上的真崩 —— `Stream#toList` API34 / `URLEncoder(String,Charset)` API33 / a11y 截图的 API30·34 面 / `getMainExecutor` API28，逐条已修）、`ci.yml` 新增 `android-build` job、新 workflow `e2e-nightly.yml`（不带 `-PskipNpmE2E`）+ `check-e2e-ran.sh` 验尸门、`HostNpm` 三来源发现替掉写死的宿主 npm 路径。**收口时露出两个新口子**：CI 的 APK 不含引擎二进制 → **B5**；覆盖率仍为零（要动冻结的根 build 文件）→ **B6**。
 6. **批 6（M）**：D3/D5（platform 子包对齐）、D7（大文件拆分）—— 结构性改动，一次一个 PR。
 7. **批 7（L/产品）**：E1/E2/E3 + B3 —— 需要人拍板后再排。
