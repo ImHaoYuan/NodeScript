@@ -15,6 +15,11 @@ android {
         applicationId = "com.autoscript"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
+        // 版本号是**占位**：本仓不发行正式版（§18 第 3 项「不发行」），没有发版流程 ——
+        // 所以刻意**不引第二个版本来源**（gradle.properties / 版本目录），那只会变成一处
+        // 与这里漂移的事实来源（本仓对"同一事实写两遍"的代价有惨痛先例，见 ModuleGraphTest
+        // 的派生计数注释）。真要发版时：两个数一起改成有单一来源的形态，versionCode 必须
+        // 单调递增，并同步 §13/§14 的交付轨。
         versionCode = 1
         versionName = "0.1.0"
     }
