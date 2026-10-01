@@ -17,6 +17,7 @@ bridge/js/dist/
 
 # node-runtime-build 构建产物（大体积二进制）
 node-runtime-build/work/
+node-runtime-build/out/          # libnode.so / node / npm 素材（14MB 级）
 node-runtime-build/out-opencv/
 
 # misc

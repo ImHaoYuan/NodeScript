@@ -13,6 +13,8 @@ name: node-slice
 #
 # 产物不随 APK 走：out/node 供 adb push 到设备做 §844 垂直切片验证；
 # out/libnode.so.* 是 :bridge:native dlopen 的宿主引擎。artifact 给人下载核验。
+# （例外：out/npm 是 vendored npm CLI 素材，它**确实要随 APK** —— 下载 artifact 后
+# 解包到 node-runtime-build/out/npm/，assembleDebug 的 prepareNpmCliAssets 会取件。）
 #
 # 缓存两层（合并写法 actions/cache，命中即用、安全阀见各步骤注释）：
 #   A. 下载层 `$WORK/dl`（NDK zip 722MB + Node tarball 30MB+，key 钉 VERSIONS.env
@@ -150,6 +152,11 @@ jobs:
         run: |
           cat "$WORK_DIR/out/SHASUMS256"
           ls -l "$WORK_DIR/out/node" "$WORK_DIR"/out/libnode.so*
+          # npm 素材基表逐文件 ~1.5k 行：只报行数与体量，全文在 artifact 里
+          echo "--- npm 素材 ---"
+          du -sh "$WORK_DIR/out/npm"
+          wc -l "$WORK_DIR/out/npm-manifest.sha256"
+          head -3 "$WORK_DIR/out/npm-manifest.sha256"
 
       - name: 上传 artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -162,5 +169,9 @@ jobs:
             work/out/SHASUMS256
             work/out/config.gypi
             work/out/config.mk
+            # vendored npm CLI 素材（§10.2）：:app 随包任务取件用（解包后落
+            # node-runtime-build/out/npm/，prepareNpmCliAssets 的候选位），逐文件基表同行出库。
+            work/out/npm
+            work/out/npm-manifest.sha256
           if-no-files-found: error
 

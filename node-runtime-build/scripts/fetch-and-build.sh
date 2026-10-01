@@ -232,4 +232,48 @@ bash "$SCRIPT_DIR/check-alignment.sh" "$TOOLCHAIN/bin/llvm-objdump" "$OUT" "$OUT
 # 三件套同基表（libc++_shared 与 libnode 同 16KB 口径、同为装载闭包成员 —— 真机实测
 # 它是 libnode 的传递依赖，RUNPATH 不替它解析，2026-09-29）。基表件数从 4 → 5。
 (cd "$OUT" && sha256sum node libnode.so* libc++_shared.so config.gypi config.mk | tee SHASUMS256)
-say "完成。产物：$OUT/node + $OUT/libnode.so.* + $OUT/libc++_shared.so（垂直切片见设计 §844）"
+
+# ── 9) vendored npm CLI 素材（§10.2 调用链首段：assets/npm/** → filesDir/npm/）──
+# 素材 = Node 源码树里的 vendored npm（deps/npm），与 libnode.so 同批产出、同一 artifact
+# 出库；:app 的随包任务（build-logic 的 prepareNpmCliAssets）从这里取件，启动期由
+# NpmCliDeployer 原子部署到 filesDir/npm/。为什么不在 gradle 侧现下 registry tarball：
+# 版本必须与 libnode 走同一条「钉死 + 全链回归」纪律（下面的版本断言就是那道闸）。
+#
+# 剪裁（动手前先想清楚代价）：
+#   · docs/ man/ —— 只有 `npm help` 用得到，不参与 install/ci/ls/prune 任何一条链；
+#   · 以 . 开头的条目**一律不随包** —— AssetManager 对点条目的可见性在 ROM 间不一致
+#     （历史上有的实现直接跳过 list 结果），留着就是「源里有、设备上没有」的静默差。
+#     npm 树里的点条目只有 node_modules/.bin（npm 自己的 bin 链接；用户项目的
+#     bin-links 由 npm 现建，不读这里）与 node_modules/.package-lock.json（npm 自身
+#     node_modules 的隐藏 lock，只有"在 npm 自己的目录里跑 npm ci"才用得到）。
+#     根上的 .npmrc 也不是 npm 的运行时配置源（它读的是 <npm 根>/npmrc，无点）。
+#   · 符号链接一律解引用（cp -RL）：assets 与 APK 都装不了符号链接。
+say "收敛 vendored npm CLI 素材到 $OUT/npm（deps/npm，剪裁 docs/man/点条目）..."
+NPM_SRC="$SRC/node-$NODE_VERSION/deps/npm"
+[ -f "$NPM_SRC/bin/npm-cli.js" ] || die "Node 源码树无 deps/npm/bin/npm-cli.js：$NPM_SRC（素材来源变了？见 VERSIONS.env 的 NPM_CLI_VERSION 段）"
+# 版本断言：Node 升级可能静默换掉携带的 npm（§10 的零 spawn 护栏口径随之变），钉住即红
+NPM_GOT_VERSION="$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["version"])' "$NPM_SRC/package.json")" \
+    || die "读不出 $NPM_SRC/package.json 的 version（素材形态变了）"
+[ "$NPM_GOT_VERSION" = "$NPM_CLI_VERSION" ] \
+    || die "vendored npm 版本漂移：源码树 = $NPM_GOT_VERSION，VERSIONS.env 钉的是 $NPM_CLI_VERSION（换版本 = 一件事一个提交 + 全链回归）"
+rm -rf "$OUT/npm"
+cp -RL "$NPM_SRC" "$OUT/npm"
+rm -rf "$OUT/npm/docs" "$OUT/npm/man"
+find "$OUT/npm" -name '.*' -prune -exec rm -rf {} +
+# 点条目清零的兜底断言（防未来 npm 版本又塞进新的点条目 —— 上面那条 find 是"删"，这条是"验"）
+[ -z "$(find "$OUT/npm" -name '.*' -print -quit)" ] \
+    || die "npm 素材仍有点条目（AssetManager 读不到，随包即静默差）"
+# 锚文件 + 安装引擎在场断言：npm-cli.js 在但 node_modules 空 = 设备上一跑就缺模块的**半瘫 CLI**，
+# 比没素材更糟（部署的锚校验只看 bin/，看不穿依赖树）。arborist 是 §10 反复点名的安装引擎本体。
+for anchor in bin/npm-cli.js bin/npx-cli.js node_modules/@npmcli/arborist/package.json; do
+    [ -f "$OUT/npm/$anchor" ] || die "npm 素材缺 $anchor（半瘫 CLI 不随包；Node 源码树的 deps/npm 是否带 node_modules？）"
+done
+NPM_FILES="$(find "$OUT/npm" -type f | wc -l)"
+NPM_BYTES="$(du -sb "$OUT/npm" | cut -f1)"
+say "npm 素材就位：$NPM_FILES 个文件 / $((NPM_BYTES / 1024 / 1024))MiB（npm $NPM_GOT_VERSION）"
+
+# ── 10) npm 素材基表（§8 同语义，逐文件 —— 出库 artifact 一并上传，供下载方核验）──
+(cd "$OUT/npm" && find . -type f | LC_ALL=C sort | sed 's|^\./||' | xargs -d '\n' sha256sum) > "$OUT/npm-manifest.sha256"
+say "npm 素材基表：$(wc -l < "$OUT/npm-manifest.sha256") 行 → $OUT/npm-manifest.sha256"
+
+say "完成。产物：$OUT/node + $OUT/libnode.so.* + $OUT/libc++_shared.so + $OUT/npm（vendored npm CLI，垂直切片见设计 §844）"
