@@ -33,6 +33,8 @@ class AppShellBootRecoverTest {
             intentLog = log,
             runArchive = archive,
             heartbeatMillis = { 100L },
+            // 假 /proc：pid 4242 在 CI runner 上是真实进程，裁决输入不能借宿主环境（见 fakeProcMonitor）
+            monitor = fakeProcMonitor(),
         )
 
     @Test

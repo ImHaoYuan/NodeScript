@@ -72,6 +72,8 @@ class AppShellKitTest {
         schedulerProvider = provider,
         screenGate = screenGate,
         a11yHandler = a11yHandler,
+        // 假 /proc：pid 4242 在 CI runner 上是真实进程，裁决输入不能借宿主环境（见 fakeProcMonitor）
+        monitor = fakeProcMonitor(),
         screenHandler = screenHandler,
         systemHandlers = systemHandlers,
         scriptSources = scriptSources,
@@ -175,6 +177,8 @@ class AppShellKitTest {
             schedulerProvider = RecordingProvider(),
             screenGate = ScreenGate.AllowAll,
             engineFactory = { id -> FakeEngineForDispatcher(id, pid = 4242, autoExitAfterMillis = 20) },
+            // 假 /proc：pid 4242 在 CI runner 上是真实进程，裁决输入不能借宿主环境（见 fakeProcMonitor）
+        monitor = fakeProcMonitor(),
         )
         s.use { assembled ->
             val shell = assembled.shell

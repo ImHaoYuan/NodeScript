@@ -83,6 +83,7 @@ class AppShellTest {
             schedulerProvider = provider,
             intentLog = log,
             heartbeatMillis = heartbeatMillis,
+            monitor = fakeProcMonitor(),
         )
         return Triple(s, engines, provider)
     }

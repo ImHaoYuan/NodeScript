@@ -56,6 +56,8 @@ class AppShellTaskOpsTest {
         cacheDir = cache,
         schedulerProvider = provider,
         screenGate = screenGate,
+        // 假 /proc：pid 4242 在 CI runner 上是真实进程，裁决输入不能借宿主环境（见 fakeProcMonitor）
+        monitor = fakeProcMonitor(),
     )
 
     private fun reg(
@@ -189,6 +191,8 @@ class AppShellTaskOpsTest {
                 FakeEngineForDispatcher(id, pid = 4242, autoExitAfterMillis = null)
                     .also { engines += it }
             },
+            // 假 /proc：pid 4242 在 CI runner 上是真实进程，裁决输入不能借宿主环境（见 fakeProcMonitor）
+        monitor = fakeProcMonitor(),
         )
         k.use { s ->
             s.registerTask(reg(id = "t1", schedule = ScheduleSpec.Daily(7, 5)))
