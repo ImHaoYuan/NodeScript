@@ -162,7 +162,10 @@ class NpmCacheSeedDeployerTest {
      * 用它的 sha512 当 lock 里的 integrity（内容寻址：文件名无关，只认摘要）。
      */
     private fun realTarball(): ByteArray? {
-        val roots = sequenceOf(dir.resolve("real-cache"), Path.of("/root/.npm/_cacache/content-v2"))
+        // 本机 npm 的 cacache 从 user.home 拼（不写死机器路径：同一个病灶见 C2 ——
+        // `~/.npm` 在哪台机器上都不是常量，HOME 不是 /root 时同样能命中）。
+        val hostCacache = Path.of(System.getProperty("user.home"), ".npm/_cacache/content-v2")
+        val roots = sequenceOf(dir.resolve("real-cache"), hostCacache)
         for (root in roots) {
             if (!Files.isDirectory(root)) continue
             // 懒扫：walk 惰性 + findFirst 命中即停，每文件只读头两字节判魔数，
