@@ -6,8 +6,8 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
-import com.autoscript.platform.system.WakeLockLedger
-import com.autoscript.platform.system.WakeLockOps
+import com.autoscript.platform.system.power.WakeLockLedger
+import com.autoscript.platform.system.power.WakeLockOps
 
 /**
  * 屏幕门禁验证（§8.6 守时契约 / §9.5 三态门禁的降级路径）：

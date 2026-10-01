@@ -2,11 +2,38 @@ package com.autoscript.platform.system
 
 import android.content.Context
 import com.autoscript.domain.storage.DataStore
+import com.autoscript.platform.system.app.AndroidAppLauncher
+import com.autoscript.platform.system.app.AppLauncher
+import com.autoscript.platform.system.app.PackageManagerOps
+import com.autoscript.platform.system.app.UsageStatsEvents
+import com.autoscript.platform.system.clipboard.AndroidClipboard
+import com.autoscript.platform.system.clipboard.Clipboard
+import com.autoscript.platform.system.clipboard.ClipboardOps
+import com.autoscript.platform.system.datastore.AndroidDataStore
+import com.autoscript.platform.system.datastore.SqliteKvOps
+import com.autoscript.platform.system.device.AndroidDeviceInfoProvider
+import com.autoscript.platform.system.device.DeviceInfoProvider
+import com.autoscript.platform.system.floatingWindow.AndroidFloatingWindowHost
+import com.autoscript.platform.system.floatingWindow.FloatingWindowHost
+import com.autoscript.platform.system.floatingWindow.WindowManagerOps
+import com.autoscript.platform.system.notification.AndroidNotificationPoster
+import com.autoscript.platform.system.notification.NotificationOps
+import com.autoscript.platform.system.notification.NotificationPoster
+import com.autoscript.platform.system.sensors.AndroidSensorSource
+import com.autoscript.platform.system.sensors.SensorOps
+import com.autoscript.platform.system.sensors.SensorSource
+import com.autoscript.platform.system.settings.AndroidSystemSettings
+import com.autoscript.platform.system.settings.SettingsSystemOps
+import com.autoscript.platform.system.settings.SystemSettings
+import com.autoscript.platform.system.shell.AndroidShellExecutor
+import com.autoscript.platform.system.shell.ShellExecutor
+import com.autoscript.platform.system.zip.JdkZipArchiver
+import com.autoscript.platform.system.zip.ZipArchiver
 
 /**
  * `:platform:system` 的实现入口（docs §12.2「分两层」的**下面那层**）：
  * 系统面十个 SPI 的 Android 实现一次性造齐（SPI 契约本身
- * 也随迁本模块同包 —— 判据见 `SystemHostContracts.kt` KDoc），交装配层组合。
+ * 也随各命名空间子包 —— 判据见各方 `*Contracts.kt` KDoc），交装配层组合。
  *
  * **本类与 [SystemNamespaces] 的分工（同模块内仍两对象）**：本类负责「拿 `Context`
  * 造 Android 实现」（构造签名要 Android 类型），`SystemNamespaces` 负责「SPI →

@@ -2,7 +2,7 @@ package com.autoscript.shell
 
 import android.content.Context
 import com.autoscript.appservice.scheduler.core.ScreenGuarantee
-import com.autoscript.platform.system.WakeLockLedger
+import com.autoscript.platform.system.power.WakeLockLedger
 
 /**
  * 屏幕门禁的 Android 实现（docs §8.6 守时契约：亮屏 + 解锁是保底）。

@@ -67,7 +67,7 @@
 - **语义层**（handler）住 `:platform:system` 的 `SystemNamespaces.kt`（2026-09-30 步骤 6 与实现同模块；`dialogs` 例外住 `:platform:capabilities` 的 `DialogsNamespaceHandler` —— `DialogHost` 实现按约定在同模块，
   见下一条），纯 JVM 可测（假 SPI 注入即可跑）：参数校验（spec 守卫、必填字段、`timeout > 0`）、枚举字面量解析（`ShellMode`/`DialogMode`，拼错即报错不静默套默认）、
   默认值（shell 超时 30s）、错误分类**透传**（`AutojsException.error` 原码回桥）、响应形状编码（与 `extras.ts` 逐字对齐）；
-- **Android 实现层**住 `:platform:system` —— 契约 `SystemHostContracts.kt` 的 `ShellExecutor`/`DeviceInfoProvider`/`AppLauncher`/`FloatingWindowHost` 四件（步骤 6a 自 `:domain` 迁入，
+- **Android 实现层**住 `:platform:system` —— 契约四件 `ShellExecutor`/`DeviceInfoProvider`/`AppLauncher`/`FloatingWindowHost`（`shell/ShellContracts.kt`、`device/DeviceContracts.kt`、`app/AppContracts.kt`、`floatingWindow/FloatingWindowContracts.kt` 各一份；2026-10-01 D3 前是同名的 `SystemHostContracts.kt` 一份四面）（步骤 6a 自 `:domain` 迁入，
   grep 判据仅 handler+impl 消费）+ 实现四件**已落地**（`AndroidShellExecutor`/`AndroidDeviceInfoProvider`/`AndroidAppLauncher`/`AndroidFloatingWindowHost`，入口 `SystemSpis.of(context)`；
   各自只碰一小块 Android，其余在可注入的 ops 缝后面，本机无 SDK 也能跑契约测试），`DialogHost` **住 :platform:capabilities 而非本模块**（domain KDoc 约定 + 平台模块间无依赖边；
   编排 `AndroidDialogHost` 纯 JVM 可测，设备面在 `…capabilities.device` 子包）。**有状态的判断归实现层**：句柄记账与 generation、`close` 幂等、`ERR_STALE_HANDLE`/`ERR_PERMISSION_DENIED` 的起源、

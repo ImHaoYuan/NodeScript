@@ -120,7 +120,7 @@ addon 落位 2026-09-24 均已落 —— assets 构建拷贝 → `BridgeDistDepl
 纯 JVM 可测：全量枚举 + 逐项现问三态 + 同一份 `guideText` + 降级任务账）→ `:ui` 的 `CapabilityScreen`（纯状态 DTO，JVM 可测）：三态各自的中文说法、引导文案原样透传、
 降级任务单列一段（§8.6「可能偏差」）、**没读到 ≠ 一个能力都没有**（`NOT_LOADED` 与 `failed` 分开且保留原异常文案）；刷新走「回前台/切页签」重问一次（授完权回来看到的是刚问过的结论，
 不是离开时的缓存；读失败不自激重读）。§9.4/§9.6 的五个系统命名空间（`dialogs`/`shell`/`device`/`app`/`floatingWindow`）已落地到**语义层**（2026-09-30 步骤 6 重排：
-契约 `:platform:system` `SystemHostContracts.kt` —— `DialogHost` 六型留 `:domain`；handler `:platform:system` `SystemNamespaces.kt` 四内 + `:platform:capabilities` `DialogsNamespaceHandler` 一件；
+契约 `:platform:system`（2026-10-01 D3 起按命名空间拆子包：`shell/ShellContracts.kt`、`device/DeviceContracts.kt`、`app/AppContracts.kt`、`floatingWindow/FloatingWindowContracts.kt`；此前是同名的 `SystemHostContracts.kt` 一份四面）—— `DialogHost` 六型留 `:domain`；handler `:platform:system` 十一件各住自己子包（`Shell`/`Device`/`App`/`FloatingWindow` 原为 `SystemNamespaces.kt` 的「四内」，D3 拆出）+ `:platform:capabilities` `DialogsNamespaceHandler` 一件；
 原「`:domain` SystemContracts + capabilities SystemNamespaces」口径见 design-decisions）、`AppShell.assemble` 的 `systemHandlers` 束 + `AppShellKit.assemble` 的透传（五个字段各自可空，
 未注入即如实 `ERR_NOT_IMPLEMENTED`）与 `bridge/js` 的 `extras.test.cjs` 双侧契约测试，三者串成一条线且都有单测；SPI 的 Android 实现**已落四件**（`:platform:system` 的 `AndroidShellExecutor`/
 `AndroidDeviceInfoProvider`/`AndroidAppLauncher`/`AndroidFloatingWindowHost`，入口 `SystemSpis.of(context)`，27 契约测试并进了 CI 测试任务表），`dialogs` 的 `DialogHost` 亦已落地（`AndroidDialogHost` 编排 + `…capabilities.device` 设备面，

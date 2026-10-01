@@ -6,6 +6,14 @@ import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
 import com.autoscript.domain.bridge.HandleRef
+import com.autoscript.platform.system.app.AppLauncher
+import com.autoscript.platform.system.device.DeviceInfoProvider
+import com.autoscript.platform.system.device.DeviceProfile
+import com.autoscript.platform.system.floatingWindow.FloatingWindowHost
+import com.autoscript.platform.system.floatingWindow.FloatingWindowSpec
+import com.autoscript.platform.system.shell.ShellExecutor
+import com.autoscript.platform.system.shell.ShellMode
+import com.autoscript.platform.system.shell.ShellResult
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse

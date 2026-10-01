@@ -3,7 +3,7 @@ package com.autoscript.shell
 import com.autoscript.domain.core.Clock
 import com.autoscript.domain.core.KeepAliveRenew
 import com.autoscript.domain.core.SystemClock
-import com.autoscript.platform.system.WakeLockLedger
+import com.autoscript.platform.system.power.WakeLockLedger
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ScheduledFuture

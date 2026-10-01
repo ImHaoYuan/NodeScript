@@ -5,8 +5,8 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
-import com.autoscript.platform.system.WakeLockLedger
-import com.autoscript.platform.system.WakeLockOps
+import com.autoscript.platform.system.power.WakeLockLedger
+import com.autoscript.platform.system.power.WakeLockOps
 
 /**
  * 保活编排验证（§8.7 保活与电源）。

@@ -56,7 +56,7 @@ extern "C" {
 // ── decode：文件 → 一帧。回 jlong[3]{nativeRef, width, height}；
 // 失败回 null + *outStatus 状态码（Kotlin 侧折 ErrorCode，见伴生对象）。
 JNIEXPORT jlongArray JNICALL
-Java_com_autoscript_platform_system_JniOps_decodeNative(
+Java_com_autoscript_platform_system_images_JniOps_decodeNative(
     JNIEnv* env, jobject /*thiz*/, jstring path, jobject out_status) {
     jintArray status_arr = static_cast<jintArray>(out_status);
     jint status = 0;
@@ -88,7 +88,7 @@ Java_com_autoscript_platform_system_JniOps_decodeNative(
 // 字节数在这一层核（Kotlin 侧也核过一次 —— 两处判据必须一致，否则"谁在撒谎"分不清）：
 // 长度 < width*height*4 = 参数错（不越读调用方的数组）。
 JNIEXPORT jlongArray JNICALL
-Java_com_autoscript_platform_system_JniOps_ingestNative(
+Java_com_autoscript_platform_system_images_JniOps_ingestNative(
     JNIEnv* env, jobject /*thiz*/, jbyteArray rgba, jint width, jint height,
     jobject out_status) {
     jintArray status_arr = static_cast<jintArray>(out_status);
@@ -137,7 +137,7 @@ Java_com_autoscript_platform_system_JniOps_ingestNative(
 // 长度 <4 的数组按参数错 —— 转换口径与 colorNative 逐字同款（GetIntArrayRegion
 // 的异常在边界内就地清掉，不让它穿 JNI）。
 JNIEXPORT jdoubleArray JNICALL
-Java_com_autoscript_platform_system_JniOps_matchNative(
+Java_com_autoscript_platform_system_images_JniOps_matchNative(
     JNIEnv* env, jobject /*thiz*/, jlong haystack, jlong needle, jdouble threshold,
     jintArray region, jobject out_status) {
     jintArray status_arr = static_cast<jintArray>(out_status);
@@ -180,7 +180,7 @@ Java_com_autoscript_platform_system_JniOps_matchNative(
 // ── release：放掉一帧。回状态码直出（0 = OK，1 = STALE）—— 语义足够简单，
 // 不值得为它再开一个 out 数组；Kotlin 侧同样按对表折 ErrorCode。
 JNIEXPORT jint JNICALL
-Java_com_autoscript_platform_system_JniOps_releaseNative(
+Java_com_autoscript_platform_system_images_JniOps_releaseNative(
     JNIEnv* /*env*/, jobject /*thiz*/, jlong native_ref) {
     return static_cast<jint>(imgnative_release(static_cast<int64_t>(native_ref)));
 }
@@ -193,7 +193,7 @@ Java_com_autoscript_platform_system_JniOps_releaseNative(
 // 数组直达，不经过 JSON：分量是原生侧的域（0..255），在装载面多绕一层字符串
 // 往返只会多一个漂移面。
 JNIEXPORT jlongArray JNICALL
-Java_com_autoscript_platform_system_JniOps_colorNative(
+Java_com_autoscript_platform_system_images_JniOps_colorNative(
     JNIEnv* env, jobject /*thiz*/, jlong frame,
     jintArray color, jint tolerance, jintArray region, jobject out_status) {
     jintArray status_arr = static_cast<jintArray>(out_status);
@@ -255,7 +255,7 @@ Java_com_autoscript_platform_system_JniOps_colorNative(
 // 回包形状与 decodeNative 完全同形：decoded 帧在脚本眼里与 decode 帧没有任何
 // 区别（同一个 ref 信封 + 宽高真值，release 同一条路）。
 JNIEXPORT jlongArray JNICALL
-Java_com_autoscript_platform_system_JniOps_grayNative(
+Java_com_autoscript_platform_system_images_JniOps_grayNative(
     JNIEnv* env, jobject /*thiz*/, jlong frame, jobject out_status) {
     jintArray status_arr = static_cast<jintArray>(out_status);
     jint status = 0;
@@ -280,7 +280,7 @@ Java_com_autoscript_platform_system_JniOps_grayNative(
 // 不走 JSON 字符串往返）。四元组形状由 Kotlin 侧先核（缺/错 → 4），本层只转发；
 // region 越帧界由计算核 resolve_region 判（4），**不在此层解释**。
 JNIEXPORT jlongArray JNICALL
-Java_com_autoscript_platform_system_JniOps_cropNative(
+Java_com_autoscript_platform_system_images_JniOps_cropNative(
     JNIEnv* env, jobject /*thiz*/, jlong frame, jintArray region, jobject out_status) {
     jintArray status_arr = static_cast<jintArray>(out_status);
     jint status = 0;
@@ -315,7 +315,7 @@ Java_com_autoscript_platform_system_JniOps_cropNative(
 // ── resize：目标尺寸直达（非整数的宽高由 Kotlin 侧 requiredDouble→toInt 截走，
 // 本层拿到的已是整数，不再代理"1.5 该算尺寸还是参数错"）。
 JNIEXPORT jlongArray JNICALL
-Java_com_autoscript_platform_system_JniOps_resizeNative(
+Java_com_autoscript_platform_system_images_JniOps_resizeNative(
     JNIEnv* env, jobject /*thiz*/, jlong frame, jint width, jint height, jobject out_status) {
     jintArray status_arr = static_cast<jintArray>(out_status);
     jint status = 0;
@@ -341,7 +341,7 @@ Java_com_autoscript_platform_system_JniOps_resizeNative(
 // ── rotate：角度（度，逆时针）直达。NaN/Inf 由 Kotlin 侧先拒；JNI jdouble 本就
 // 能表示 NaN，计算核有 isfinite 兜底（4），本层不重复判。
 JNIEXPORT jlongArray JNICALL
-Java_com_autoscript_platform_system_JniOps_rotateNative(
+Java_com_autoscript_platform_system_images_JniOps_rotateNative(
     JNIEnv* env, jobject /*thiz*/, jlong frame, jdouble degrees, jobject out_status) {
     jintArray status_arr = static_cast<jintArray>(out_status);
     jint status = 0;
@@ -368,7 +368,7 @@ Java_com_autoscript_platform_system_JniOps_rotateNative(
 // **未命中回空数组**（同 matchNative 的未命中纪律：比"写一个会误导的坐标"难误读）；
 // 失败回 null + *outStatus。
 JNIEXPORT jdoubleArray JNICALL
-Java_com_autoscript_platform_system_JniOps_featureNative(
+Java_com_autoscript_platform_system_images_JniOps_featureNative(
     JNIEnv* env, jobject /*thiz*/, jlong scene, jlong template_ref, jobject out_status) {
     jintArray status_arr = static_cast<jintArray>(out_status);
     jint status = 0;

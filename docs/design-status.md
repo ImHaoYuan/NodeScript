@@ -1117,7 +1117,7 @@ addon 的 JS 消费面亦已落（facade `attachNative()`，§7.8）。**设备�
 ### §8.7 （自 `08-execution.md` 外迁）
 
 - **P0 已落地（`:main` 侧 FGS + 真唤醒锁，2026-09-23）**：三个可分离的缝，判断全在 JVM 可测面，系统接触面各收在一个类里。
-  - **`WakeLockOps` / `WakeLockLedger`**（`platform/system/.../system/WakeLock.kt`，步骤 6d 自 `:app` 迁入；`:app` 经 `ForegroundKeeper`/`lockHeld()` 读）：`AndroidWakeLockOps` = 真 `PARTIAL_WAKE_LOCK`（`setReferenceCounted(false)`，
+  - **`WakeLockOps` / `WakeLockLedger`**（`platform/system/.../system/power/WakeLock.kt`，步骤 6d 自 `:app` 迁入，2026-10-01 D3 随子包对齐移入 `power/`；`:app` 经 `ForegroundKeeper`/`lockHeld()` 读）：`AndroidWakeLockOps` = 真 `PARTIAL_WAKE_LOCK`（`setReferenceCounted(false)`，
     acquire/release 异常一律吞成 `false` + 日志）；`WakeLockLedger` = **token 引用计数 + 超时自动释放**——`hold(token, timeoutMillis)` 只在**首次**（账本为空）时真取锁，
     **取锁失败不记账**（"记了账却没锁"是假绿之源）；`release(token)` 用"先查存在再删"（超时 token 的值为 null，照样能释放）；`sweep()` 释放到期项并返回名单；
     `isHeld()` = **账本非空 ∧ `ops.held`**——两侧任一说"没有"就一律算没锁。token/超时的形状就是给 P1 `power_manager` 预留的插口（引擎进程请求 → FGS 加锁走同一账本）—
