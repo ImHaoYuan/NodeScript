@@ -1,8 +1,14 @@
 package com.autoscript.appservice.npm
 
+import com.autoscript.domain.core.AutojsException
+import com.autoscript.domain.core.ErrorCode
+import java.io.IOException
+import java.nio.ByteBuffer
+import java.nio.channels.FileChannel
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
 import java.security.MessageDigest
 import javax.crypto.Mac
@@ -15,13 +21,21 @@ import javax.crypto.spec.SecretKeySpec
  * 「这份 lock 是不是本机认可的」——第三方/市场项目塞一份把包名指到别处的 lock，
  * integrity 照样成立。故 App 侧对 lock 做 HMAC 签名，`npm ci` 前验签。
  *
- * 私钥来源是接缝（[KeyProvider]）：生产注入 Android Keystore 包装的应用密钥
+ * 私钥来源是接缝（[KeyProvider]）：设计口径是 Android Keystore 包装的应用密钥
  * （密钥丢失 = 显式「安全降级」**失败**，不静默放行）；本类纯 JVM 可单测。
+ * **注意：本仓当前没有任何 [KeyProvider] 实现，生产装配传 `null`（`NpmShellKit`），
+ * 即这套签名在生产路径上还没生效** —— 见 `docs/design/11-security.md` §11.3 第 8 条。
  * 算法 HMAC-SHA256（§10.5 允许 HMAC/ECDSA 二选一，P0 取可实现且可离线验证的）。
  *
  * 验签失败语义（诚实优先）：抛 [AutojsException] 且错误码 ERR_PERMISSION_DENIED ——
  * 调用方（InstallCoordinator.ci）据此拒绝「按这份 lock 重建」。缺失签名文件
  * 同样视为失败（TOFU 自签正是被批判的形态），首次签名由 [sign] 显式完成。
+ *
+ * **落盘格式是严格的**：只认 `v1 <64 位小写 hex>` 这一种写法（[FILE_FORMAT]）。
+ * 前缀不识、大小写混写、裸 hex（没有版本标签）一律拒 —— 「版本前缀」是将来换
+ * ECDSA 的兼容开关，宽松解析会把这个开关悄悄废掉（裸 hex 恰好等于正确 HMAC 时，
+ * 宽松写法会放行一份没有版本语义的文件）。写侧同理：先写 `lock.sig.tmp` 再原子
+ * rename，避免「写到一半崩溃留下半截签名」这种既非旧态也非新态的文件。
  */
 class LockSigner(
     private val dir: Path,
@@ -36,13 +50,25 @@ class LockSigner(
         fun keyBytes(): ByteArray
     }
 
-    /** 对项目 lockfile 签名（覆盖内容 + projectId，防跨项目搬锁）。 */
+    /**
+     * 对项目 lockfile 签名（覆盖内容 + projectId，防跨项目搬锁）。
+     *
+     * 落位是**原子**的：写临时文件 → `force(true)` → `ATOMIC_MOVE` 覆盖。崩溃只可能落在
+     * 「新内容还没 rename」或「已 rename」两态之一，不会读到半截签名（半截签名验不过，
+     * 会让用户面对一个无法解释的 `ERR_PERMISSION_DENIED`）。
+     */
     fun sign(projectId: String, lockfile: Path) {
         val body = bodyOf(projectId, lockfile)
         val sig = hmac(body)
         Files.createDirectories(dir)
-        Files.write(file, ("v1 " + sig + "\n").toByteArray(StandardCharsets.UTF_8), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)
-        java.nio.channels.FileChannel.open(file, StandardOpenOption.WRITE).use { it.force(true) }
+        val tmp = dir.resolve(TMP_NAME)
+        FileChannel.open(tmp, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE).use { ch ->
+            ch.write(ByteBuffer.wrap((PREFIX + " " + sig + "\n").toByteArray(StandardCharsets.UTF_8)))
+            // rename 之前先把内容钉到盘上：否则崩溃后可能 rename 成功而内容还在页缓存里。
+            ch.force(true)
+        }
+        Files.move(tmp, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        fsyncDir()
     }
 
     /**
@@ -51,22 +77,26 @@ class LockSigner(
      */
     fun verifyOrThrow(projectId: String, lockfile: Path) {
         if (!Files.exists(lockfile)) {
-            throw com.autoscript.domain.core.AutojsException(
-                com.autoscript.domain.core.ErrorCode.ERR_FILE_NOT_FOUND, "lockfile 不存在，无法验签重建: $lockfile",
+            throw AutojsException(
+                ErrorCode.ERR_FILE_NOT_FOUND, "lockfile 不存在，无法验签重建: $lockfile",
             )
         }
         if (!Files.exists(file)) {
-            throw com.autoscript.domain.core.AutojsException(
-                com.autoscript.domain.core.ErrorCode.ERR_PERMISSION_DENIED,
+            throw AutojsException(
+                ErrorCode.ERR_PERMISSION_DENIED,
                 "lock.sig 缺失：该项目的 lockfile 未经本机签名，npm ci 拒绝执行（§10.5-1 带外信任锚）",
             )
         }
         val stored = String(Files.readAllBytes(file), StandardCharsets.UTF_8).trim()
-        val hex = stored.removePrefix("v1").trim()
+        val hex = FILE_FORMAT.matchEntire(stored)?.groupValues?.get(1)
+            ?: throw AutojsException(
+                ErrorCode.ERR_PERMISSION_DENIED,
+                "lock.sig 格式不认识（只认 `$PREFIX <64 位小写 hex>`）：拒绝按这份 lock 重建",
+            )
         val expect = hmac(bodyOf(projectId, lockfile))
-        if (hex.isEmpty() || !constantTimeEquals(hex, expect)) {
-            throw com.autoscript.domain.core.AutojsException(
-                com.autoscript.domain.core.ErrorCode.ERR_PERMISSION_DENIED,
+        if (!constantTimeEquals(hex, expect)) {
+            throw AutojsException(
+                ErrorCode.ERR_PERMISSION_DENIED,
                 "lock.sig 验签失败：lockfile 与签名不匹配（被改过/换过/跨项目搬运）",
             )
         }
@@ -92,5 +122,26 @@ class LockSigner(
         var diff = 0
         for (i in a.indices) diff = diff or (a[i].code xor b[i].code)
         return diff == 0
+    }
+
+    /**
+     * 目录 fsync：把「目录项已指向新文件」这件事也钉到盘上（rename 本身的持久化边界）。
+     * 打不开目录 fd 时（非 POSIX 文件系统）不致命：最坏情形是崩溃后仍看到**旧的**签名，
+     * 而旧签名对不上新 lock → 验签失败 → fail-closed，不会静默放行。
+     */
+    private fun fsyncDir() {
+        try {
+            FileChannel.open(dir, StandardOpenOption.READ).use { it.force(true) }
+        } catch (_: IOException) {
+            // 见 KDoc：失败方向是 fail-closed，不静默放行。
+        }
+    }
+
+    private companion object {
+        const val PREFIX = "v1"
+        const val TMP_NAME = "lock.sig.tmp"
+
+        /** 唯一认可的落盘形态：`v1 ` + 64 位小写 hex（HMAC-SHA256 的 hex 长度固定）。 */
+        val FILE_FORMAT = Regex("""v1 ([0-9a-f]{64})""")
     }
 }
