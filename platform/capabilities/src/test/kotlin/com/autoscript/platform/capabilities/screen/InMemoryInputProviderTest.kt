@@ -1,4 +1,4 @@
-package com.autoscript.platform.capabilities
+package com.autoscript.platform.capabilities.screen
 
 import com.autoscript.domain.automation.GestureInput
 import com.autoscript.domain.automation.GesturePoint
@@ -7,7 +7,6 @@ import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
-import com.autoscript.platform.capabilities.screen.InMemoryInputProvider
 
 class InMemoryInputProviderTest {
 

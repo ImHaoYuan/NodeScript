@@ -1,4 +1,4 @@
-package com.autoscript.platform.capabilities
+package com.autoscript.platform.capabilities.dialogs
 
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
@@ -11,6 +11,7 @@ import com.autoscript.domain.system.DialogPromptRequest
 import com.autoscript.domain.system.DialogChooseRequest
 import com.autoscript.domain.system.DialogChoice
 import com.autoscript.domain.json.DomainJson
+import com.autoscript.platform.capabilities.CapabilityNamespaces
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse

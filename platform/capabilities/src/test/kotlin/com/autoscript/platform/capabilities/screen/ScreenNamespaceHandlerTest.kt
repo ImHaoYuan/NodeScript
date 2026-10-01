@@ -1,4 +1,4 @@
-package com.autoscript.platform.capabilities
+package com.autoscript.platform.capabilities.screen
 
 import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.json.DomainJson
@@ -9,9 +9,6 @@ import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import com.autoscript.platform.capabilities.screen.ProducedFrame
-import com.autoscript.platform.capabilities.screen.ScreenNamespaceHandler
-import com.autoscript.platform.capabilities.screen.ScreenshotSource
 
 class ScreenNamespaceHandlerTest {
 

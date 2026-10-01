@@ -1,4 +1,4 @@
-package com.autoscript.platform.capabilities
+package com.autoscript.platform.capabilities.screen
 
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
@@ -8,8 +8,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 import com.autoscript.platform.capabilities.a11y.A11yBridge
-import com.autoscript.platform.capabilities.screen.AndroidFrameProducer
-import com.autoscript.platform.capabilities.screen.ScreenshotSource
+import com.autoscript.platform.capabilities.a11y.FakeA11yBridge
 
 /**
  * [AndroidFrameProducer] 经假 [A11yBridge] 的采集链（语义面 = 真 [ScreenshotSource]，

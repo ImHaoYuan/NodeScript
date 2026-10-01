@@ -1,4 +1,4 @@
-package com.autoscript.platform.capabilities
+package com.autoscript.platform.capabilities.a11y
 
 import com.autoscript.domain.automation.GestureInput
 import com.autoscript.domain.automation.ScreenSnapshot
@@ -6,9 +6,6 @@ import com.autoscript.domain.automation.ScrollDirection
 import com.autoscript.domain.automation.WindowScope
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
-import com.autoscript.platform.capabilities.a11y.A11yBridge
-import com.autoscript.platform.capabilities.a11y.A11yNode
-import com.autoscript.platform.capabilities.a11y.A11yNodeSnap
 import com.autoscript.platform.capabilities.screen.ProducedFrame
 
 /**

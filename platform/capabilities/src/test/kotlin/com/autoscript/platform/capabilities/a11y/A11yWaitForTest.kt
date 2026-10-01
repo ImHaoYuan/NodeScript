@@ -1,4 +1,4 @@
-package com.autoscript.platform.capabilities
+package com.autoscript.platform.capabilities.a11y
 
 import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.json.DomainJson
@@ -7,8 +7,6 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import com.autoscript.platform.capabilities.a11y.A11yNamespaceHandler
-import com.autoscript.platform.capabilities.a11y.InMemoryUiTree
 import com.autoscript.platform.capabilities.screen.InMemoryInputProvider
 
 /**

@@ -1,4 +1,4 @@
-package com.autoscript.platform.capabilities
+package com.autoscript.platform.capabilities.a11y
 
 import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.automation.GestureInput
@@ -19,11 +19,6 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
-import com.autoscript.platform.capabilities.a11y.A11yEventRing
-import com.autoscript.platform.capabilities.a11y.A11yNamespaceHandler
-import com.autoscript.platform.capabilities.a11y.A11yNodeSnap
-import com.autoscript.platform.capabilities.a11y.AndroidUiTree
-import com.autoscript.platform.capabilities.a11y.InMemoryUiTree
 import com.autoscript.platform.capabilities.device.AutoScriptAccessibilityService
 import com.autoscript.platform.capabilities.screen.AndroidGestureInput
 

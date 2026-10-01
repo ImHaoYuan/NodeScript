@@ -59,6 +59,16 @@ Android 真实现 ── :platform:system（SystemSpis.of）与 `device/` 的无
 
 > 图像面这道门不替代 JVM/JS 双侧契约：前者证**像素判读对**，后者证**wire 形状与错误码**。
 
+## 测试树（与 main 逐包镜像）
+
+测试包**逐包镜像** main（`a11y/` `screen/` `dialogs/`；2026-10-01 D5 对齐，此前是扁平一层）：
+用例与它测的实现同包，测试夹具（`FakeA11yBridge`、`a11y/HandlerRequests.kt` 的 `a11yReq`）
+跟着它服务的子包走 —— 同包引用不入 import，跨子包引用才显式写。**`device/` 是例外**：那里的类
+是 Android 接触面本体（`AutoScriptAccessibilityService` / `SystemDialogOps`），本机 JVM 跑不了，
+所以没有 `device/` 测试包 —— 它们的语义面由 `a11y/`、`dialogs/` 的用例经假 SPI 覆盖，
+真设备面归真机红测。测试根只留模块级两份：`ArchitectureTest`（依赖方向 + `android..` 按包豁免）、
+`CapabilityNamespacesTest`（装配工厂束）。
+
 ## 尚未实现（别在文档里写成「差不多能用」）
 
 MediaProjection 高清会话真实现、root/Shizuku 输入通道（§9.3 P1）、

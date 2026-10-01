@@ -1,4 +1,4 @@
-package com.autoscript.platform.capabilities
+package com.autoscript.platform.capabilities.screen
 
 import com.autoscript.domain.automation.ImageFrame
 import com.autoscript.domain.automation.ScreenSnapshot
@@ -11,8 +11,6 @@ import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
-import com.autoscript.platform.capabilities.screen.ProducedFrame
-import com.autoscript.platform.capabilities.screen.ScreenshotSource
 
 private fun producerOf(
     snapshot: ScreenSnapshot = ScreenSnapshot(locked = false, secureForeground = false, hasWindows = true),
