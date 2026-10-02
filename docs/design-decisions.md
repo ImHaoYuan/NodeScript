@@ -250,6 +250,38 @@
     - **代价（明写）**：放宽后的 100ms 红线仍能抓「退化回精确路径级」的巨幅回归
       （882ms 的 1/9），但抓不到 100~120ms 的小劣化 —— 换掉的是这类灵敏度，如实认账。
 
+2026-10-02 拍板并落地（backlog A6 + E4 合批；node-runtime-build 素材线，非 §18 编号项）：
+
+26. **vendored npm 素材来源换 registry 发布态 tarball（`npm@12.2.0`）；E4 随换源天然达成**：
+    - **A6 要解决的**：素材取自 Node 源码树 `deps/npm` = npm 11.19.0 ≠ §10.1 脊梁的
+      「npm 12.x 系」；「等 Node 线携带」已实测否掉（868 条官方发布无一携带 12.x）。
+      **先核实后动手**（backlog 标的两个「未核实」当天查完）：① npm 12 **存在** ——
+      registry 索引 latest = **12.2.0**（sha1 `9b58e3ad…`，2026-10-02 实抓）；
+      ② `allowScripts` 默认语义 —— **半对**：host node 22.23.1 直跑解包产物实测，
+      npm 12.2.0 **依赖** lifecycle 默认拒绝（`allow-scripts` 白名单缺省为空，拦时带
+      `npm warn install-scripts` 播报 + `install-scripts approve` 放行通道 —— 禁静默
+      达标），`allow-git=none`、`allow-remote=none` 逐字吻合；**项目自身** lifecycle
+      仍执行（历代如此）。契约 §10.1「拒绝全部 lifecycle」措辞同批精化为「依赖
+      lifecycle」，旧「现状是 11.19.0」注标作废。
+    - **口径**：换源 —— `VERSIONS.env` 钉 `NPM_CLI_VERSION=12.2.0` + `NPM_CLI_SHA1`，
+      `fetch-and-build.sh` §9 下载（落 `$DL`，随工作流下载层缓存）+ sha1 校验 + 解包，
+      原有剪裁 / 点条目清零 / 三锚在场 / 版本断言 / 基表**全部照旧**。原「不另下
+      registry tarball」的理由（版本必须与 libnode 同一条「钉死 + 全链回归」纪律）
+      **没有丢**：改这两个值即命中 node-slice 的 paths 触发面 → 全链回归，§9 还有
+      sha1 + 版本双闸。
+    - **E4 随换源天然达成**：registry 发布态没有 `test/`（1.9MB 表观）与
+      `tap-snapshots/`（816K）—— 不是剪掉的，是**发布形态本来就不带**；§9 干跑实测
+      素材 1846 文件/11MiB 表观 → **1674 文件/9MiB**、占盘 18M → 16M（净差 −172 文件 /
+      −2MiB 表观，与 E4 登记的 2.7MB 两目录毛估同量级，净差略小属正常 —— registry 形态
+      与源码树互有增减）。剪裁清单 docs/man 保留（发布态仍带
+      176+89 个文件）。
+    - **验证**：§9 段落本地干跑（假 `$DL`/`$SRC`/`$OUT`）两轮通过 —— 下载/校验/解包/
+      剪裁/点条目清零/三锚在场/版本断言/基表全绿；**node-slice 全链回归在 CI 跑**
+      （本机禁编 Node，CLAUDE.md 口径），出库数字与旧值对比记进当天流水。
+    - **代价（明写）**：素材与 Node 源码树**版本解耦** —— 以后升 Node 不再自动带
+      npm 升级（各自钉、各自回归）；换来的是脊梁可兑现。§10.12 残余不变：
+      child_process 拦截 shim 仍未落（P0 未排），硬编码 `--ignore-scripts` 主控不撤。
+
 2026-09-30 拍板（外部审查整改步骤 7；非 §18 编号项，原口径不涉）：
 
 13. **`images` 匹配链路提速方案**（2026-09-30 评审拍板；A2–A4 实测 ❌ 后的出路裁决）：
@@ -551,7 +583,7 @@
 | 外审 C5：「无 `CHANGELOG`」 | `docs/backlog.md` C5 | **不设 `CHANGELOG`**（2026-10-01 拍板）：变更流水已经在 `docs/design-status.md` 的「流水」段（只追加、按日期、带 § 锚），再开一份 `CHANGELOG` 必然漂成第二个事实来源 —— 本仓对「同一事实写两遍」的代价有明确判据（`ModuleGraphTest` 的派生计数就是为此立的门）。外审同一行的另外两项**已采纳**：`CONTRIBUTING.md` 与 PR / issue 模板已建（批 3）。发版流程真立起来那天再谈（口径随 §18 第 3 项「不发行」） | 2026-10-01 |
 | 外审 C5：`versionName` 硬编码 `"0.1.0"` | `app/build.gradle.kts` | **保留硬编码占位**（2026-10-01 拍板）：本仓不发行正式版（§18 第 3 项），没有发版流程 —— 此刻把版本号接到 `gradle.properties` / 版本目录只会**多出一个会漂的事实来源**，换不来任何东西。改为在该行上方写明：这是占位、为什么不引第二个来源、真要发版时该怎么改（两数同改、`versionCode` 单调递增、同步 §13/§14 交付轨） | 2026-10-01 |
 | `LockSigner.KeyProvider.keyBytes(): ByteArray`（应用密钥接缝的原始形状） | `LockSigner.kt`（`:app-service:npm`） | **改 `secretKey(): SecretKey`**（2026-10-01 拍板，backlog A1c）：Keystore 里的密钥材料**不出库**，`getEncoded()` 拿不到字节 ⇒ 原形状**接不上** Keystore，而 Keystore 正是设计口径的密钥存放处。给句柄则两边都成立（Keystore HMAC 密钥与测试用 `SecretKeySpec` 都能喂 `Mac.init(SecretKey)`），语义一字不变（仍 HMAC-SHA256、落盘仍 `v1 <hex>`）。**同时拍板实现落点：Keystore 版住 `:app` 装配层**（Composition Root 已依赖 `:app-service:npm`，零契约变更；`:app-service:npm` 保持零 `android.*`）。**注意：这是接缝形状，不是接线** —— 生产装配的 `lockKey` 仍是 `null`（`SECURITY.md` / §11.3 第 8 条口径不变） | 2026-10-01 |
-| **「vendored npm CLI 素材从哪来」**（backlog A1 的卡点：CI 产 / 入库 / 取本机 npm 目录三选一，2026-10-01 之前未定） | `docs/backlog.md` A1、§10.1 脊梁 | **取 Node 源码树自带的 `deps/npm`，随 libnode 同批出库**（第四选项）：`fetch-and-build.sh` §9 收敛到 `OUT/npm` → `node-slice.yml` artifact → gradle `prepareNpmCliAssets` 随包 `assets/npm/` → 启动期幂等落位 `files/npm/`。**选它的理由**：素材与 `NODE_VERSION` 同一把锁（换 Node 版本时 npm 跟着走，`NPM_CLI_VERSION` 与素材 `package.json` 逐字比对，漂移当场红 —— 逼一次显式决策），不引入第二条下载源与第二套校验，且与 libnode 同批出库（同一个 artifact、同一次构建、同一份基表纪律）。**代价（明写，不当已办）**：Node 24.21.0 携带的是 **npm 11.19.0**，**低于 §10.1 脊梁写的「npm 12.x 系」** —— npm 12 的「拒绝全部 lifecycle + allow-git=none + allow-remote=none」这层**官方默认语义当前不在位**。护栏并没有因此静默消失，但**只剩一层**：`HostNodeExecutor` 对每条命令硬编码 `--ignore-scripts`（§11.1 T1 的零 spawn 主路径），它与 npm 版本无关；而**非脚本** spawn 路径的第二层兜底（§10.12 末行的 child_process 拦截 shim）本就未落。升级到 12.x 是**独立一件事**，已登记 backlog；**同日追加实测**：`nodejs.org/dist/index.json` 的 868 条官方发布里**没有任何一条携带 npm 12.x**（最新 v26.10.0 / 2026-09-21 带的是 npm 11.19.1）→「等 Node 线携带」这条升级路径**原理上不成立**，要 12.x 只能另找素材来源；改 `NPM_CLI_VERSION` 即触发全链回归 | 2026-10-01 |
+| **「vendored npm CLI 素材从哪来」**（backlog A1 的卡点：CI 产 / 入库 / 取本机 npm 目录三选一，2026-10-01 之前未定） | `docs/backlog.md` A1、§10.1 脊梁 | **取 Node 源码树自带的 `deps/npm`，随 libnode 同批出库**（第四选项）：`fetch-and-build.sh` §9 收敛到 `OUT/npm` → `node-slice.yml` artifact → gradle `prepareNpmCliAssets` 随包 `assets/npm/` → 启动期幂等落位 `files/npm/`。**选它的理由**：素材与 `NODE_VERSION` 同一把锁（换 Node 版本时 npm 跟着走，`NPM_CLI_VERSION` 与素材 `package.json` 逐字比对，漂移当场红 —— 逼一次显式决策），不引入第二条下载源与第二套校验，且与 libnode 同批出库（同一个 artifact、同一次构建、同一份基表纪律）。**代价（明写，不当已办）**：Node 24.21.0 携带的是 **npm 11.19.0**，**低于 §10.1 脊梁写的「npm 12.x 系」** —— npm 12 的「拒绝全部 lifecycle + allow-git=none + allow-remote=none」这层**官方默认语义当前不在位**。护栏并没有因此静默消失，但**只剩一层**：`HostNodeExecutor` 对每条命令硬编码 `--ignore-scripts`（§11.1 T1 的零 spawn 主路径），它与 npm 版本无关；而**非脚本** spawn 路径的第二层兜底（§10.12 末行的 child_process 拦截 shim）本就未落。升级到 12.x 是**独立一件事**，已登记 backlog；**同日追加实测**：`nodejs.org/dist/index.json` 的 868 条官方发布里**没有任何一条携带 npm 12.x**（最新 v26.10.0 / 2026-09-21 带的是 npm 11.19.1）→「等 Node 线携带」这条升级路径**原理上不成立**，要 12.x 只能另找素材来源；改 `NPM_CLI_VERSION` 即触发全链回归。**→ 2026-10-02 改口径（第 26 项）**：素材来源换 **registry 发布态 tarball `npm@12.2.0`** —— 「与 `NODE_VERSION` 同一把锁」解除，版本纪律改由 `VERSIONS.env` 的 `NPM_CLI_VERSION` + `NPM_CLI_SHA1` 承担（改钉仍触发全链回归，§9 sha1+版本双闸）；上文原结论保留 | 2026-10-01（→ 2026-10-02 改） |
 ### 附：§12.2 被反转口径原文照抄（2026-09-30 步骤 6 摘录前的原文）
 
 > - **语义层**（handler）住 `:platform:capabilities` 的 `SystemNamespaces.kt`，纯 JVM 可测（假 SPI 注入即可跑）：参数校验（spec 守卫、必填字段、`timeout > 0`）、枚举字面量解析（`ShellMode`/`DialogMode`，拼错即报错不静默套默认）、默认值（shell 超时 30s）、错误分类**透传**（`AutojsException.error` 原码回桥）、响应形状编码（与 `extras.ts` 逐字对齐）；
