@@ -84,11 +84,46 @@ jobs:
         run: |
           node node-runtime-build/licenses/gen-notices.mjs
           git diff --exit-code
-      - name: facade 单元测试
+      - name: 安装 facade 依赖（npm ci，供单测与 typedoc 用）
+        working-directory: bridge/js
+        run: npm ci
+      - name: 用户向 API 参考同步门（typedoc → docs/api/，漂移即红）
+        # 与上面两条生成物门同一条纪律：`docs/api/**` 是 **typedoc 生成物**，
+        # 手改它没意义（下次生成即被覆盖），改了 facade 注释不重跑生成器 = 这里红。
+        # 放本 job 的理由同 gen-notices：这里已有 node 24 + npm ci 过的 node_modules
+        # （typedoc 是 devDependency，装了就位）。生成器版本钉在 package-lock 里，
+        # 输出因此可复现；--emit none 之外不必再设，漂移由 git diff 判。
         working-directory: bridge/js
         run: |
-          npm ci
-          npm test
+          npm run docs:api
+          git -C ../.. diff --exit-code
+      - name: facade 单元测试
+        working-directory: bridge/js
+        run: npm test
+      # ── 供应链面（backlog B4，2026-10-02 批 10）────────────────────────────
+      # 两条都**不**依赖 GitHub 的 Dependency graph（那条 API 本仓未开、实测 404/403）：
+      #   · audit 打的是 registry 的实时漏洞库（本 job 有网、npm ci 已装树）；
+      #   · sbom 从已装的 node_modules + lock 出 CycloneDX，artifact 供下载核验。
+      # 原本这里放的是 actions/dependency-review-action —— 实测红在
+      # 「Dependency review is not supported on this repository. Please ensure that
+      # Dependency graph is enabled」：开依赖图是**维护者侧的仓库开关**（admin 权限，
+      # 本仓令牌 403），与 C4 那类「只剩维护者动作」同型，登记在 backlog B4 行。
+      - name: 依赖漏洞扫描（npm audit，对 registry 实时漏洞库）
+        working-directory: bridge/js
+        # low 就挡：依赖面很小（facade 的 devDependencies），挡得住才有意义。
+        run: npm audit --audit-level=low
+      # 落 $RUNNER_TEMP 不落仓库：生成物进工作区会变成未跟踪文件，与「生成物必须入库或
+      # 被忽略」的纪律打架（且本 job 里前后都有 git diff 类门，少一个脏文件少一类误红）。
+      - name: 生成 SBOM（CycloneDX，从已装的 node_modules + lock）
+        working-directory: bridge/js
+        run: npm sbom --sbom-format cyclonedx > "$RUNNER_TEMP/bridge-js-sbom.cdx.json"
+      - name: 上传 SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bridge-js-sbom
+          path: ${{ runner.temp }}/bridge-js-sbom.cdx.json
+          if-no-files-found: error
+
   docs-check:
     name: 文档链接门（*.md 的相对链接必须存在）
     runs-on: ubuntu-latest

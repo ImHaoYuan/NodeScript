@@ -1,0 +1,163 @@
+# Enumeration: ErrCode
+
+机器可判错误码（与 :domain:core.ErrorCode.code 逐字一致）。
+
+## Enumeration Members
+
+### BLACK\_FRAME
+
+```ts
+BLACK_FRAME: "ERR_BLACK_FRAME";
+```
+
+***
+
+### CAPTURE\_DENIED
+
+```ts
+CAPTURE_DENIED: "ERR_CAPTURE_DENIED";
+```
+
+***
+
+### DISK\_FULL
+
+```ts
+DISK_FULL: "ERR_DISK_FULL";
+```
+
+***
+
+### ENGINE\_CRASHED
+
+```ts
+ENGINE_CRASHED: "ERR_ENGINE_CRASHED";
+```
+
+***
+
+### ENGINE\_STOPPED
+
+```ts
+ENGINE_STOPPED: "ERR_ENGINE_STOPPED";
+```
+
+***
+
+### FILE\_EXISTS
+
+```ts
+FILE_EXISTS: "ERR_FILE_EXISTS";
+```
+
+***
+
+### FILE\_NOT\_FOUND
+
+```ts
+FILE_NOT_FOUND: "ERR_FILE_NOT_FOUND";
+```
+
+***
+
+### INVALID\_PARAM
+
+```ts
+INVALID_PARAM: "ERR_INVALID_PARAM";
+```
+
+***
+
+### IO
+
+```ts
+IO: "ERR_IO";
+```
+
+***
+
+### NOT\_FOUND
+
+```ts
+NOT_FOUND: "ERR_NOT_FOUND";
+```
+
+***
+
+### NOT\_IMPLEMENTED
+
+```ts
+NOT_IMPLEMENTED: "ERR_NOT_IMPLEMENTED";
+```
+
+***
+
+### NOT\_SUPPORTED
+
+```ts
+NOT_SUPPORTED: "ERR_NOT_SUPPORTED";
+```
+
+***
+
+### NPM\_LOWMEM
+
+```ts
+NPM_LOWMEM: "ERR_NPM_LOWMEM";
+```
+
+***
+
+### NPM\_SPAWN\_BLOCKED
+
+```ts
+NPM_SPAWN_BLOCKED: "ERR_NPM_SPAWN_BLOCKED";
+```
+
+***
+
+### PERMISSION\_DENIED
+
+```ts
+PERMISSION_DENIED: "ERR_PERMISSION_DENIED";
+```
+
+***
+
+### REGISTRY\_UNAVAILABLE
+
+```ts
+REGISTRY_UNAVAILABLE: "ERR_REGISTRY_UNAVAILABLE";
+```
+
+***
+
+### SCREEN\_LOCKED
+
+```ts
+SCREEN_LOCKED: "ERR_SCREEN_LOCKED";
+```
+
+***
+
+### SERVICE\_DISABLED
+
+```ts
+SERVICE_DISABLED: "ERR_SERVICE_DISABLED";
+```
+
+***
+
+### STALE\_HANDLE
+
+```ts
+STALE_HANDLE: "ERR_STALE_HANDLE";
+```
+
+***
+
+### TIMEOUT
+
+```ts
+TIMEOUT: "ERR_TIMEOUT";
+```
