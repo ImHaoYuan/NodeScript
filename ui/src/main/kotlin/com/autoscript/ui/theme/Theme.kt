@@ -65,17 +65,117 @@ data class Colors(
     /** 未读计数字（`chats_unreadCounterText` = 白）。 */
     val onBadge: Color,
     /**
-     * 底页签**未选中**那一档的前景色（图标与文字同色）。
+     * 底页签**未选中**档的前景（`glass_tabUnselected`）：图标与文字**共用**这个起点。
+     *
+     * **取值要连回退链一起看**（`Theme.java` 的 `fallbackKeys`）：这个键在
+     * `day.attheme` 与 `night.attheme` 里**都没设**，所以两套主题走的都是回退 ——
+     * 浅色 → `ThemeColors.java` 的默认值 `0xFF1A1D21`（≈ 主文字色）；
+     * 深色 → `windowBackgroundWhiteBlackText`（night = **纯白**）。
+     * 拿一套主题的数当"TG 的未选中色"抄进另一套，就是下面那个 [tabSelected] 踩过的坑。
      *
      * 这里刻意**没有**「选中线」这个 token：TG 那条 2dp 线是**顶栏**文件夹页签的下划线，
-     * 底栏的选中语法是**整格染色**（用 [accent]），2026-10-02 重做底栏时一并删掉了
-     * 照抄过来的 `tabIndicator` —— 留一个没有调用方的颜色只会让下一个人以为底栏该有线。
+     * 底栏的选中语法是**整格染色**，2026-10-02 重做底栏时一并删掉了照抄过来的
+     * `tabIndicator` —— 留一个没有调用方的颜色只会让下一个人以为底栏该有线。
      */
-    val tabIdle: Color,
+    val tabUnselected: Color,
+    /**
+     * 底页签**选中**档的**图标**色（`glass_tabSelected`），也是选中格背后那块高亮块的
+     * **唯一**取色（`multAlpha(colorSelected, 0.09f * alpha)`）。
+     *
+     * 图标与文字**不是一个值**（见下条）：`GlassTabView.updateColors` 是两条独立的
+     * blend，合成一个 tint 会让文字比图标暗或亮一档 —— 那是抄错，不是简化。
+     *
+     * **别把浅色的值当成"TG 的选中蓝"往深色里搬**：这个键两套 attheme 都没设，
+     * 浅色走 `ThemeColors.java` 默认值 `0xFF1A91E6`，深色走回退键
+     * `chat_messagePanelSend` = **`0xFF229AF0`**（night.attheme 实测值）。
+     * 两者差得不小（hue 202° vs 205°、明度差一档），搬过去会让深色底栏偏暗。
+     */
+    val tabSelected: Color,
+    /**
+     * 底页签**选中**档的**文字**色（`glass_tabSelectedText`）。
+     *
+     * 浅色下比 [tabSelected] 深一档（0xFF0D7FCF vs 0xFF1A91E6）；深色下两者**同值**
+     * —— 因为 night 主题两个键都没设，一起回退到 `chat_messagePanelSend`。
+     */
+    val tabSelectedText: Color,
     /** 按下态遮罩（`actionBarDefaultSelector` 那种半透明压暗）。 */
     val pressedOverlay: Color,
-    /** 输入框/搜索底：比 [surface] 略深一档，浅色下用灰、深色下用黑。 */
+    /**
+     * 输入框/搜索底（TG `FragmentSearchField.updateColors` 的配方：把
+     * `windowBackgroundWhiteBlackText` 按**浅色 5% / 深色 7%** 压上去）。
+     *
+     * 存的是**合成本屏底之后的实色**（TG 那边是 alpha 色叠在顶栏上，本仓的搜索栏不在
+     * 顶栏里，叠的是屏底）：浅色 = 5% 的 `0xFF1A1D21` 叠白 → `0xFFF4F4F4`；
+     * 深色 = 7% 的白叠 [background]（`0xFF181819`）→ `0xFF282829`。
+     * **深色下它比屏底亮**，浅色下才比屏底暗一档 —— 原先两套都写成"比 [surface] 深"
+     * 是把深色那半抄反了（TG 的 tint 是白，叠上去只会更亮）。
+     */
     val fieldBackground: Color,
+    /** 弹出菜单底（`actionBarDefaultSubmenuBackground`）。 */
+    val menuBackground: Color,
+    /** 弹出菜单的分组间隙（`actionBarDefaultSubmenuSeparator`，TG `GapView` 的底色）。 */
+    val menuSeparator: Color,
+    /** 底部操作面板底（`dialogBackground`，TG `sheet_shadow_round` 被它 color-filter）。 */
+    val sheetBackground: Color,
+    /** 主按钮/胶囊底（`featuredStickers_addButton`，TG 的"动作蓝"，与 [accent] 不是一个键）。 */
+    val featuredButton: Color,
+    /** 带后果的文字（`text_RedRegular`，TG 菜单里的"删除/停止"那一档）。 */
+    val dangerText: Color,
+    /** 输入光标（`groupcreate_cursor`）。 */
+    val cursor: Color,
+    /** 悬浮圆钮底（`chat_messagePanelBackground`，TG 回底那颗圆钮的 blur 背板取色）。 */
+    val roundButtonBackground: Color,
+    /** 悬浮圆钮的图标（`glass_defaultIcon`，**半透明**：浅色 60% 黑、深色 63% 白）。 */
+    val roundButtonIcon: Color,
+    /**
+     * 列表行**选中**遮罩（`chats_tabletSelectedOverlay`，TG `DialogCell` 的
+     * `dialogs_tabletSeletedPaint`）：中性黑/白 6%，**不是**强调色淡底。
+     */
+    val rowSelectedOverlay: Color,
+    /**
+     * 常规图标色（`actionBarDefaultIcon`）：顶栏图标、FAB 子钮字形都取它。
+     *
+     * 浅色不是主文字色而是一档偏冷的深灰（`0xFF404E56`）—— TG 的图标比正文**轻**
+     * 半档，把它写成 [text] 会让图标跟标题一样重。
+     */
+    val barIcon: Color,
+    /**
+     * **实心强调底上的前景**（`windowBackgroundCheckText`，缺省 `0xFFFFFFFF`）。
+     *
+     * 一个键盖两处 TG 键：FAB 图标（`chats_actionIcon`）与选中 chip 的字
+     * （`windowBackgroundCheckText`）—— 两个键在两套 attheme 里**都没被覆盖**，
+     * 走的都是 `ThemeColors.java` 的白，故合成一个语义位「压在 [featuredButton] 上」。
+     */
+    val featuredButtonText: Color,
+    /**
+     * 未选中 chip 的字（`windowBackgroundWhiteGrayText2`）。
+     *
+     * 深色下是**半透明白**（night.attheme `#6EFDFDFF`）而不是实色灰：TG 的 chip 未选中
+     * 态没有底，字直接叠在屏底上，半透明才读得出"它比选中那格轻"。
+     */
+    val chipText: Color,
+    /** 底部面板标题（`dialogTextGray2`，TG 非 bigTitle 那档：16dp 常规字重）。 */
+    val sheetTitleText: Color,
+    /** 底部面板条目文字（`dialogTextBlack`，TG `BottomSheetCell` type 0）。 */
+    val sheetItemText: Color,
+    /**
+     * 菜单项的按下态（`dialogButtonSelector`，TG `ActionBarMenuSubItem` 的选择器色）。
+     *
+     * 与 [pressedOverlay]（`actionBarDefaultSelector`）**不是一个键**：TG 的列表行用前者、
+     * 菜单/对话框按钮用后者，深浅两套都差一档（浅 6% vs 8% 黑、深 10% vs 10% 白）。
+     */
+    val menuSelector: Color,
+    /**
+     * 勾选框的填充（`checkbox` = `0xFF5EC245`）。
+     *
+     * **深浅两套同值**：这个键在 `day.attheme` 与 `night.attheme` 里**都没设**，
+     * 两份走的都是 `ThemeColors.java` 的默认值 —— 所以它不是"浅色的绿"，没有第二档可抄。
+     * TG 的勾选框本体（`CheckBox2`）不带描边，环是"未选中"态才画的（`drawUnchecked`），
+     * 而列表里的选择框一律 `setDrawUnchecked(false)`：选中就是**一颗实心绿圆 + 白勾**。
+     */
+    val checkboxFill: Color,
+    /** 勾选框的勾（`checkboxCheck` = 白；两套 attheme 都没覆盖）。 */
+    val checkboxCheck: Color,
 
     /**
      * 文件类型头像的底色表（TG `AvatarDrawable` 的 `avatar_background*` 色序）：
@@ -100,9 +200,37 @@ val LightColors = Colors(
     success = Color(0xFF4BCB1C),
     badge = Color(0xFF24AEF7),
     onBadge = Color(0xFFFFFFFF),
-    tabIdle = Color(0xFF777C7F),
+    // 底页签三键（`glass_tab*`）：day.attheme 里**一个都没设**，走 ThemeColors.java
+    // 的默认值（0xFF1a91e6 / 0xFF0d7fcf / 0xFF1A1D21）。
+    tabUnselected = Color(0xFF1A1D21),
+    tabSelected = Color(0xFF1A91E6),
+    tabSelectedText = Color(0xFF0D7FCF),
     pressedOverlay = Color(0x14000000),
-    fieldBackground = Color(0xFFF1F1F3),
+    // `windowBackgroundWhiteBlackText`(0xFF1A1D21) 5% 叠白（TG 的 5%）。
+    fieldBackground = Color(0xFFF4F4F4),
+    // 这三个键 day.attheme **都没设** → 走 ThemeColors.java 的默认值。
+    menuBackground = Color(0xFFFFFFFF),
+    menuSeparator = Color(0xFFF5F5F5),
+    sheetBackground = Color(0xFFFFFFFF),
+    // day.attheme 设了 `featuredStickers_addButton`；night 没设 → TELEGRAM_COLOR。
+    featuredButton = Color(0xFF4DA0EB),
+    // `text_RedRegular` / `groupcreate_cursor` 两个键 day.attheme 都设了。
+    dangerText = Color(0xFFCC2929),
+    cursor = Color(0xFF329FED),
+    // `chat_messagePanelBackground` / `glass_defaultIcon` / `chats_tabletSelectedOverlay`
+    // day.attheme 都没设 → ThemeColors.java 默认值。
+    roundButtonBackground = Color(0xFFFFFFFF),
+    roundButtonIcon = Color(0x991B2227),
+    rowSelectedOverlay = Color(0x0F000000),
+    barIcon = Color(0xFF404E56),
+    featuredButtonText = Color(0xFFFFFFFF),
+    chipText = Color(0xFF82868A),
+    sheetTitleText = Color(0xFF757575),
+    sheetItemText = Color(0xFF1A1D21),
+    menuSelector = Color(0x0F000000),
+    // `checkbox` / `checkboxCheck`：两套 attheme 都没设 → ThemeColors.java 的默认值。
+    checkboxFill = Color(0xFF5EC245),
+    checkboxCheck = Color(0xFFFFFFFF),
     // avatar_background{Red,Orange,Violet,Cyan,Blue,Pink} + Green（ThemeColors.java 默认值）。
     fileAvatarColors = listOf(
         Color(0xFFFF845E),
@@ -133,9 +261,36 @@ val DarkColors = Colors(
     success = Color(0xFF71D756),
     badge = Color(0xFF399EF3),
     onBadge = Color(0xFFFFFFFF),
-    tabIdle = Color(0xFF8E8E8F),
+    // night.attheme 只设了 glass_defaultIcon / glass_defaultText / glass_targetMainTabs，
+    // 底页签这三个键**一个都没设**，于是全部走 fallbackKeys：
+    // tabUnselected → windowBackgroundWhiteBlackText（night = 白）、
+    // tabSelected / tabSelectedText → chat_messagePanelSend（night = 0xFF229AF0）。
+    tabUnselected = Color(0xFFFFFFFF),
+    tabSelected = Color(0xFF229AF0),
+    tabSelectedText = Color(0xFF229AF0),
     pressedOverlay = Color(0x1AFFFFFF),
-    fieldBackground = Color(0xFF0F0F11),
+    // 白 7% 叠 [background](0xFF181819) —— 与下面 menuBackground 同值纯属巧合（TG 的
+    // 深色子菜单底也是"比底亮一档的深灰"），两个键在 TG 里各是各的，别合并。
+    fieldBackground = Color(0xFF282829),
+    // 这三个键 night.attheme 都设了。
+    menuBackground = Color(0xFF282829),
+    menuSeparator = Color(0xFF1E1E1F),
+    sheetBackground = Color(0xFF1E1E1E),
+    // night.attheme 没设 → ThemeColors.java 默认值 TELEGRAM_COLOR。
+    featuredButton = Color(0xFF229AF0),
+    dangerText = Color(0xFFEE686F),
+    cursor = Color(0xFF64B5EF),
+    roundButtonBackground = Color(0xFF1E1E1F),
+    roundButtonIcon = Color(0xA0FFFFFF),
+    rowSelectedOverlay = Color(0x0FFFFFFF),
+    barIcon = Color(0xFFFFFFFF),
+    featuredButtonText = Color(0xFFFFFFFF),
+    chipText = Color(0x6EFDFDFF),
+    sheetTitleText = Color(0xFF7D7D7D),
+    sheetItemText = Color(0xFFF6F6F6),
+    menuSelector = Color(0x19FFFFFF),
+    checkboxFill = Color(0xFF5EC245),
+    checkboxCheck = Color(0xFFFFFFFF),
     fileAvatarColors = listOf(
         Color(0xFFFF845E),
         Color(0xFFFEBB5B),

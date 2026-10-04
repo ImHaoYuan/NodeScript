@@ -68,7 +68,8 @@ import kotlinx.coroutines.launch
  * **外壳（Telegram 式）**：四屏装进 pager 横划切页，各自的顶栏由 `ActionBar` / `ScaffoldScreen`
  * 统一（四屏顶栏长得一样靠的是同一种排版组件被同一个约定调用），最下面的页签条由外壳
  * 一处画（`MainShell`）—— 页签条是全局唯一的一条，不能跟着页里的内容一起滑走。
- * 主题档位（跟随系统/浅/深）挂在各屏顶栏右侧的同一格（[LocalBarAction] 下发）。
+ * 主题档位（跟随系统/浅/深）**不挂顶栏**（批 24 起）：TG 顶栏右侧没有全局开关格，
+ * 它收在项目页 ⋮ 菜单里（`themeSwitchLabel` 下发那一格的目标模式文案）。
  *
  * 这里也是本模块唯一直接持有 [HostSummary] 的类：各屏只收纯状态 DTO，
  * 因此它们各自可 JVM 测（见 `HomeStateTest`/`CapabilityCenterStateTest` 等）。
@@ -152,8 +153,10 @@ class MainActivity : ComponentActivity() {
                             when (Tab.entries[current]) {
                                 Tab.HOME -> ProjectScreen(
                                     state = projectState,
-                                    onRefresh = { reloadProjectFiles() },
-                                    onSwitchTheme = { themeMode = themeMode.next() },
+                                    onSwitchTheme = { themeMode = themeMode.next(dark) },
+                                    // 菜单项写**目标模式**（TG 的日夜项同款）：
+                                    // 冷启缺省跟随系统，此时按"当下是不是深色"定文案。
+                                    themeSwitchLabel = themeSwitchLabel(dark),
                                     onCreate = { projectId, name, isFolder ->
                                         scope.launch { createEntryOp(projectId, name, isFolder) }
                                     },
@@ -466,32 +469,27 @@ class MainActivity : ComponentActivity() {
 /**
  * 主题档位切换（TG 的日/夜同款：两态对翻 —— 再点一次回原档）。
  * [ThemeMode.SYSTEM] 只在**冷启**当缺省（跟随系统），用户一切换就落 LIGHT/DARK 两档。
+ *
+ * **判据取"当下实际明暗"而不是枚举名**：冷启缺省是 [ThemeMode.SYSTEM]，它本身不含明暗。
+ * 按枚举名写（`SYSTEM -> DARK`）会在"系统是深色"时让菜单写着"日间模式"、点下去却仍是深色
+ * —— 一次点了没反应的切换。按 [isDark] 取反则三档归一：SYSTEM 时切到系统明暗的对面，
+ * LIGHT/DARK 时就是两态对翻。
  */
-private fun ThemeMode.next(): ThemeMode = when (this) {
-    ThemeMode.SYSTEM -> ThemeMode.DARK
-    ThemeMode.LIGHT -> ThemeMode.DARK
-    ThemeMode.DARK -> ThemeMode.LIGHT
-}
+private fun ThemeMode.next(isDark: Boolean): ThemeMode =
+    if (isDark) ThemeMode.LIGHT else ThemeMode.DARK
 
 /**
- * 当前档位在顶栏上的那一句（用户看得懂，不说枚举名）。
+ * ⋮ 菜单那一格的文案 = **点它切到的那一档**，不是当前档。
  *
- * 措辞只留档位本身、不带"主题："前缀：它现在挂在**四屏顶栏的右侧**，那里一格的位置
- * 有限（任务中心的顶栏还有「登记/刷新」两颗），而且四屏都有 = 它本身就是"全局设置"的
- * 提示，不必再自我说明。三个档位**各自可读**（不是同一个图标猜明暗）：系统档与浅色档
- * 在浅色系统下观感相同，只有文字分得开它们。
+ * TG 的日夜项就是这个口径（`DialogsActivity`：`isCurrentThemeDark ? SwitchThemeToDay
+ * : SwitchThemeToNight`，`strings.xml` 里两句分别是 "Day Mode" / "Night Mode"）——
+ * 菜单项写"点了会变成什么"，比写"现在是什么"少一次心算。
+ *
+ * 判据取**当下实际明暗**（[isDark]）而不是枚举名：冷启缺省是 [ThemeMode.SYSTEM]，
+ * 它本身不含明暗，只有问过系统才知道该写哪句。
  */
-private fun ThemeMode.label(): String = when (this) {
-    ThemeMode.SYSTEM -> "跟随系统"
-    ThemeMode.LIGHT -> "日间模式"
-    ThemeMode.DARK -> "夜间模式"
-}
-
-/** 菜单项文案 = **点它切到的那一档**（TG ⋮ 里写的是目标模式，不是当前模式）。 */
-private fun ThemeMode.targetLabel(): String = when (this) {
-    ThemeMode.DARK -> "夜间模式"
-    else -> "日间模式"
-}
+private fun themeSwitchLabel(isDark: Boolean): String =
+    if (isDark) "日间模式" else "夜间模式"
 
 /**
  * 外壳：内容（四屏的 pager）+ 底部页签条。
@@ -502,7 +500,7 @@ private fun ThemeMode.targetLabel(): String = when (this) {
  *
  * **本函数不读 pager 的滚动位置**（这一点是硬约束，不是风格）：`pagerState` 只往下
  * 传给页签条。这里若读一次 `currentPageOffsetFraction`，横划的每一帧都会把本函数
- * 连同它下面的 pager 子树重组一遍 —— 四个屏各自带着 LazyColumn / 下拉刷新容器，
+ * 连同它下面的 pager 子树重组一遍 —— 四个屏各自带着自己的列表子树，
  * 那是"切页卡死"的根因（2026-10-02 实测）。页签条自己在**它那一层**读
  * `currentPage`（每翻一页变一次），跟手的观感由颜色动画补完。
  *
@@ -526,11 +524,12 @@ private fun MainShell(
             // 胶囊盖在内容之上：后画的在上层。它自己的 8dp 外边距让四周露出内容。
             TabBar(
                 modifier = Modifier.align(Alignment.BottomCenter),
+                // 四格恒为「项目 / 任务 / 管理 / 设置」（`MainActivity.Tab`）。**不挂徽标**：
+                // 徽标在 TG 里是"未读"语义，与本仓的"在途 / 漏投 / 未结算"三种账都不是
+                // 一回事，混上去等于造出第四种读法 —— 计数一律在各自屏内说。`TabItem`
+                // 因此只有 label + glyph 两个字段，没有"留着将来用"的空槽位。
                 tabs = MainActivity.Tab.entries.map {
-                    // 刻意**不挂页签徽标**：徽标在 TG 里是"未读"语义，
-                    // 与本仓的"在途 / 漏投 / 未结算"三种账都不是一回事 ——
-                    // 混上去等于造出第四种读法。计数一律在各自屏内说。
-                    TabItem(label = it.short, glyph = it.glyph, badge = null)
+                    TabItem(label = it.short, glyph = it.glyph)
                 },
                 pagerState = pagerState,
                 onSelect = onSelectTab,
