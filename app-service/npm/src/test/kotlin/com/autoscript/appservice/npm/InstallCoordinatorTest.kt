@@ -304,6 +304,69 @@ class InstallCoordinatorTest {
     }
 
     @Test
+    fun `外层取消安装仍清理事务和句柄并原样传播`() = runBlocking {
+        val cancel = kotlinx.coroutines.CancellationException("cancel install")
+        val c = coordinator(executor = FakeExecutor { throw cancel })
+        val thrown = assertThrows(kotlinx.coroutines.CancellationException::class.java) {
+            runBlocking { c.install("p1", listOf(PackageSpec("axios"))) }
+        }
+        assertEquals(cancel.message, thrown.message)
+        assertTrue(cHandles(c).isEmpty())
+        assertTrue(cProjectLocks(c).isEmpty())
+        assertTrue(journal.unfinished().isEmpty())
+        val finals = c.drainEvents("p1", 0, 32).events.map { it.event }.filterIsInstance<InstallEvent.Finished>()
+        assertEquals(1, finals.size)
+        assertEquals("已取消", finals.single().detail)
+    }
+
+    @Test
+    fun `外层取消 T1 不造事务且句柄清理完成`() = runBlocking {
+        val cancel = kotlinx.coroutines.CancellationException("cancel script")
+        val led = ApprovalLedger()
+        writeManifest("p1", """{"name":"p1","version":"1.0.0","scripts":{"build":"tsc"}}""")
+        approveRunScript(led, "p1", "build")
+        val c = coordinator(ledger = led, script = object : ScriptOpExecutor {
+            override suspend fun execute(op: ScriptOp, sink: ProgressSink): String { throw cancel }
+        })
+        val thrown = assertThrows(kotlinx.coroutines.CancellationException::class.java) {
+            runBlocking { c.runScript("p1", "build") }
+        }
+        assertEquals(cancel.message, thrown.message)
+        assertTrue(cHandles(c).isEmpty())
+        assertTrue(cProjectLocks(c).isEmpty())
+        assertTrue(journal.all().isEmpty())
+        val finals = c.drainEvents("p1", 0, 32).events.map { it.event }.filterIsInstance<InstallEvent.Finished>()
+        assertEquals(1, finals.size)
+        assertEquals("已取消", finals.single().detail)
+    }
+
+    @Test
+    fun `等待项目锁时取消不造无起点事务`() = runBlocking {
+        val gate = CompletableDeferred<Unit>()
+        val firstEntered = CompletableDeferred<Unit>()
+        val c = coordinator(executor = FakeExecutor {
+            firstEntered.complete(Unit)
+            gate.await()
+        })
+        val first = async { c.install("p1", listOf(PackageSpec("axios"))) }
+        withTimeout(5_000) { firstEntered.await() }
+        val waiting = async { c.install("p1", listOf(PackageSpec("dayjs"))) }
+        withTimeout(5_000) { while (cHandles(c).size < 2) yield() }
+        waiting.cancel()
+        waiting.join()
+        assertTrue(waiting.isCancelled)
+        gate.complete(Unit)
+        first.await()
+
+        assertTrue(cHandles(c).isEmpty())
+        assertTrue(cProjectLocks(c).isEmpty())
+        assertEquals(listOf(InstallJournal.State.BEGIN, InstallJournal.State.COMMIT), journal.all().map { it.state })
+        val terminal = c.drainEvents("p1", 0, 32).events.map { it.event }.filterIsInstance<InstallEvent.Finished>()
+        assertEquals(2, terminal.size)
+        assertEquals(1, terminal.count { !it.success && it.detail == "已取消" })
+    }
+
+    @Test
     fun `同一项目的并发安装不重入（per-project 锁原子入表）`() = runBlocking {
         val inflight = java.util.concurrent.atomic.AtomicInteger()
         val peak = java.util.concurrent.atomic.AtomicInteger()

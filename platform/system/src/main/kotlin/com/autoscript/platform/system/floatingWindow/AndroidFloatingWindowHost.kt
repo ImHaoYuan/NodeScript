@@ -45,6 +45,8 @@ class AndroidFloatingWindowHost(
             ops.add(spec, overlay = overlayTypeAvailable())
         } catch (e: AutojsException) {
             throw e
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             // 现场拒绝（未授予 SYSTEM_ALERT_WINDOW / 窗口类型不可用）→ 分类错误，绝不返回假句柄。
             throw AutojsException(
@@ -80,6 +82,8 @@ class AndroidFloatingWindowHost(
         try {
             ops.remove(token)
         } catch (e: AutojsException) {
+            throw e
+        } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
             // 窗口已被系统收走（如 a11y 服务被关）：**目标状态已达成**，不把它变成失败。

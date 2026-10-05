@@ -20,6 +20,25 @@ import org.junit.jupiter.api.Test
 
 class NewlineFrameServerTest {
 
+    @Test
+    fun `读取帧时取消不会被当作 EOF`() = runBlocking {
+        val entered = CompletableDeferred<Unit>()
+        val input = object : java.io.InputStream() {
+            override fun read(): Int {
+                entered.complete(Unit)
+                throw kotlinx.coroutines.CancellationException("read cancelled")
+            }
+        }
+        val server = NewlineFrameServer(router())
+        try {
+            val connection = server.serveConnection(input, ByteArrayOutputStream())
+            withTimeout(5_000) { entered.await(); connection.join() }
+            assertTrue(connection.isCancelled, "读取取消必须使连接 Job 以取消结束")
+        } finally {
+            server.close()
+        }
+    }
+
     private val transport = JsonTransport()
     private fun router() = BridgeRouter(RequestRegistry()).also { r ->
         r.register("echo") { req -> BridgeResponse.Ok(req.id, req.payload) }

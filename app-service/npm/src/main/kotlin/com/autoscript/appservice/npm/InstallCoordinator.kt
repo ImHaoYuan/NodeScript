@@ -21,6 +21,7 @@ import com.autoscript.domain.npm.PkgNode
 import com.autoscript.domain.npm.SnapshotRef
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.filter
@@ -172,6 +173,7 @@ class InstallCoordinator(
          * 「从未 begin 却已 fail」的记录（§10.4 的 journal 决定残骸清扫，状态机不容无源之记）。
          */
         val journaled: Boolean = true,
+        @Volatile var journalStarted: Boolean = false,
         @Volatile var cancelled: Boolean = false,
         @Volatile var done: Boolean = false,
     )
@@ -329,7 +331,7 @@ class InstallCoordinator(
         handles[handle.id]?.let {
             it.cancelled = true
             if (!it.done) {
-                if (it.journaled) {
+                if (it.journaled && it.journalStarted) {
                     journal.fail(
                         it.nonce, handle.projectId,
                         staging.stagePath(handle.projectId, it.nonce).fileName.toString(), "用户取消",
@@ -548,41 +550,49 @@ class InstallCoordinator(
         )
         val tracked = TrackedOp(handle, "script-${handle.id}", journaled = false)
         handles[handle.id] = tracked
-        withProjectLock(projectId) {
-            globalSession.withLock {
-                emit(InstallEvent.Progress(projectId, handle.id, InstallEvent.Phase.QUEUED))
-                try {
-                    if (tracked.cancelled) throw AutojsException(ErrorCode.ERR_ENGINE_STOPPED, "脚本执行已取消")
-                    val summary = withTimeoutOrNull(op.timeoutMillis) {
-                        scriptExecutor.execute(op) { ev -> events.tryEmit(ev) }
-                    } ?: throw AutojsException(
-                        ErrorCode.ERR_TIMEOUT,
-                        "脚本执行超时（${op.timeoutMillis}ms）：${what}（执行体未在 TTL 内收尾）",
-                    )
-                    // 取消与执行是竞态：cancel() 可能在本执行体挂起期间已发过
-                    // Finished(success=false,「已取消」)。若此处不查，脚本跑完还会再发一条
-                    // Finished(success=true) —— 同一句柄两个终态事件，订阅方无从裁决。
-                    if (tracked.cancelled) {
-                        throw AutojsException(ErrorCode.ERR_ENGINE_STOPPED, "脚本执行已取消（执行体已收尾，结果不采纳）")
+        try {
+            withProjectLock(projectId) {
+                globalSession.withLock {
+                    emit(InstallEvent.Progress(projectId, handle.id, InstallEvent.Phase.QUEUED))
+                    try {
+                        if (tracked.cancelled) throw AutojsException(ErrorCode.ERR_ENGINE_STOPPED, "脚本执行已取消")
+                        val summary = withTimeoutOrNull(op.timeoutMillis) {
+                            scriptExecutor.execute(op) { ev -> events.tryEmit(ev) }
+                        } ?: throw AutojsException(
+                            ErrorCode.ERR_TIMEOUT,
+                            "脚本执行超时（${op.timeoutMillis}ms）：${what}（执行体未在 TTL 内收尾）",
+                        )
+                        // 取消与执行是竞态：cancel() 可能在本执行体挂起期间已发过
+                        // Finished(success=false,「已取消」)。若此处不查，脚本跑完还会再发一条
+                        // Finished(success=true) —— 同一句柄两个终态事件，订阅方无从裁决。
+                        if (tracked.cancelled) {
+                            throw AutojsException(ErrorCode.ERR_ENGINE_STOPPED, "脚本执行已取消（执行体已收尾，结果不采纳）")
+                        }
+                        tracked.finish()
+                        history?.record(action.name.lowercase(), projectId, true, summary)
+                        emit(InstallEvent.Finished(projectId, handle.id, success = true, detail = summary))
+                    } catch (e: CancellationException) {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { cancel(handle) }
+                        throw e
+                    } catch (e: Exception) {
+                        // cancel() 可能已就地把 done 置位并发过终态（见上面那段竞态说明）。
+                        // 一个句柄只能有一个终态事件 —— 两条会让订阅方无从裁决「那次到底成没成」。
+                        val firstTerminal = !tracked.done
+                        tracked.finish()
+                        if (firstTerminal) {
+                            history?.record(action.name.lowercase(), projectId, false, e.message)
+                            emit(InstallEvent.Finished(projectId, handle.id, success = false, detail = e.message))
+                        } else {
+                            // 终态已发过：只把这次失败入史（审计要看到），不再重复发事件。
+                            history?.record(action.name.lowercase(), projectId, false, "取消后收尾失败: ${e.message}")
+                        }
+                        throw e
                     }
-                    tracked.finish()
-                    history?.record(action.name.lowercase(), projectId, true, summary)
-                    emit(InstallEvent.Finished(projectId, handle.id, success = true, detail = summary))
-                } catch (e: Exception) {
-                    // cancel() 可能已就地把 done 置位并发过终态（见上面那段竞态说明）。
-                    // 一个句柄只能有一个终态事件 —— 两条会让订阅方无从裁决「那次到底成没成」。
-                    val firstTerminal = !tracked.done
-                    tracked.finish()
-                    if (firstTerminal) {
-                        history?.record(action.name.lowercase(), projectId, false, e.message)
-                        emit(InstallEvent.Finished(projectId, handle.id, success = false, detail = e.message))
-                    } else {
-                        // 终态已发过：只把这次失败入史（审计要看到），不再重复发事件。
-                        history?.record(action.name.lowercase(), projectId, false, "取消后收尾失败: ${e.message}")
-                    }
-                    throw e
                 }
             }
+        } catch (e: CancellationException) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { cancel(handle) }
+            throw e
         }
         return handle
     }
@@ -634,6 +644,8 @@ class InstallCoordinator(
         } catch (e: AutojsException) {
             history?.record(InstallHistory.Op.EXPORT, projectId, false, e.message)
             throw e
+        } catch (e: CancellationException) {
+            throw e        // 取消不是"快照导出失败"：不记历史、不折成 ERR_IO
         } catch (e: Exception) {
             history?.record(InstallHistory.Op.EXPORT, projectId, false, e.message)
             throw AutojsException(ErrorCode.ERR_IO, "快照导出失败：${e.message}", e)
@@ -682,20 +694,25 @@ class InstallCoordinator(
         handles[handle.id] = tracked
 
         // 协程内联执行（挂起语义 = 排队；调用方要 fire-and-forget 可自行 launch）
-        withProjectLock(projectId) {
-            globalSession.withLock {
-                if (quotaWarned) {
-                    emit(
-                        InstallEvent.Warning(
-                            projectId = projectId,
-                            handleId = handle.id,
-                            kind = InstallEvent.Kind.DISK_QUOTA,
-                            message = "项目 node_modules 已用 ${used / 1024 / 1024}MB ≥ 配额 80%（${config.projectQuotaBytes / 1024 / 1024}MB）",
-                        ),
-                    )
+        try {
+            withProjectLock(projectId) {
+                globalSession.withLock {
+                    if (quotaWarned) {
+                        emit(
+                            InstallEvent.Warning(
+                                projectId = projectId,
+                                handleId = handle.id,
+                                kind = InstallEvent.Kind.DISK_QUOTA,
+                                message = "项目 node_modules 已用 ${used / 1024 / 1024}MB ≥ 配额 80%（${config.projectQuotaBytes / 1024 / 1024}MB）",
+                            ),
+                        )
+                    }
+                    runHeavy(tracked, args, timeoutMillis)
                 }
-                runHeavy(tracked, args, timeoutMillis)
             }
+        } catch (e: CancellationException) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { cancel(handle) }
+            throw e
         }
         return handle
     }
@@ -711,6 +728,7 @@ class InstallCoordinator(
 
         emit(InstallEvent.Progress(projectId, handle.id, InstallEvent.Phase.QUEUED))
         journal.begin(nonce, projectId, stageDir.fileName.toString())
+        tracked.journalStarted = true
         staging.begin(projectId, nonce)
         try {
             if (tracked.cancelled) throw AutojsException(ErrorCode.ERR_ENGINE_STOPPED, "安装已取消")
@@ -750,6 +768,10 @@ class InstallCoordinator(
             }
             history?.record(opName(args), projectId, true, summary)
             emit(InstallEvent.Finished(projectId, handle.id, success = true, detail = summary))
+        } catch (e: CancellationException) {
+            // 事务与句柄须先收尾，再原样传播调用方取消。
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { cancel(handle) }
+            throw e
         } catch (e: Exception) {
             journal.fail(nonce, projectId, stageDir.fileName.toString(), e.message)
             staging.sweep(projectId, setOf(nonce))

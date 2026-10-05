@@ -317,6 +317,30 @@ class SchedulerTest {
     }
 
     @Test
+    fun `quiesceThenStop 不吞停止协程的取消`() = runBlocking {
+        val cancel = kotlinx.coroutines.CancellationException("cancel stop")
+        val scheduler = Scheduler(
+            provider = RecordingProvider(),
+            log = InMemoryIntentLog(),
+            dispatcher = object : RunDispatcher {
+                override suspend fun dispatch(pending: PendingRun) = RunOutcome.Succeeded
+                override suspend fun dispatchToReport(pending: PendingRun) = DispatchReport(
+                    RunOutcome.Succeeded,
+                    com.autoscript.domain.scripts.EngineRunLink(1, 2),
+                    stop = { throw cancel },
+                )
+            },
+        )
+        scheduler.schedule(ScheduledTask("t1", "once", "p", "a.js", TimedSchedule.Once(60)))
+        scheduler.onTrigger("t1")
+        val thrown = org.junit.jupiter.api.Assertions.assertThrows(kotlinx.coroutines.CancellationException::class.java) {
+            runBlocking { scheduler.quiesceThenStop() }
+        }
+        org.junit.jupiter.api.Assertions.assertSame(cancel, thrown)
+        assertTrue(scheduler.sinking)
+    }
+
+    @Test
     fun `link 为 null 的投递不产假句柄`() = runBlocking {
         val scheduler = testScheduler()
         scheduler.schedule(ScheduledTask("t1", "定时", "p", "a.js", TimedSchedule.Once(60)))

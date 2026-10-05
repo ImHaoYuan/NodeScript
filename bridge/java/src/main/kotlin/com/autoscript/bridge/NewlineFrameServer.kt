@@ -82,6 +82,8 @@ class NewlineFrameServer(
             } catch (e: FrameTooLargeException) {
                 onProtocolError("帧超过上限 ${maxFrameBytes} 字节")
                 break // 关连接，防内存吞噬
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
                 break
             } ?: break // EOF：对端正常关闭

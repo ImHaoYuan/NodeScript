@@ -350,6 +350,8 @@ class AppShellApplication : Application(), HostSummary {
         appScope.launch {
             val snapshot = try {
                 bootRecovery.recoverOnce(shell)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (t: Throwable) {
                 // BootRecovery 自己兜住异常，这里是双保险：调度器抛出的任何东西
                 // 都不该把开机流程变成崩溃。
@@ -618,6 +620,8 @@ class AppShellApplication : Application(), HostSummary {
             try {
                 val delivered = alarmDispatch.fire(taskId)
                 if (!delivered) Log.w(TAG, "闹钟回投无路线：taskId=$taskId（已计入漏投）")
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (t: Throwable) {
                 Log.e(TAG, "闹钟回投失败：taskId=$taskId", t)
             }

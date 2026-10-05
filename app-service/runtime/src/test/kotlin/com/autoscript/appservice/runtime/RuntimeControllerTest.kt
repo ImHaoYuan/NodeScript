@@ -411,3 +411,68 @@ class RuntimeControllerTest {
         assertNull(c.heartbeatMillis(b.runId))
     }
 }
+
+/**
+ * A7「取消必须穿透」判据（backlog A7）：宿主探针抛 CancellationException 时，
+ * [RuntimeController] 的三条观测路径**不得**把它折成业务结论 ——
+ * 折了就等于"桥 TTL 到点取消协程"被谎报成"引擎已死 / 查不到状态"，
+ * 超时语义在观测面上失真（这正是 A7 点名的病灶）。
+ */
+class RuntimeControllerCancellationTest {
+
+    private val cancel = kotlinx.coroutines.CancellationException("宿主探针被取消")
+
+    private fun controllerWithBlownProbe(): Pair<RuntimeController, FakeEngine> {
+        val engine = FakeEngine(EngineId(0)).apply { statusThrowable = cancel }
+        val pool = FixedEnginePool({ engine }, 1)
+        return RuntimeController(pool, WatchdogPolicy()) to engine
+    }
+
+    @Test
+    fun `awaitCompletion 不被取消折成 Killed`() = runBlocking {
+        val (c, _) = controllerWithBlownProbe()
+        val started = assertInstanceOf(
+            RuntimeController.StartOutcome.Started::class.java,
+            c.start(PoolAcquireRequest("p1", "a.js", runNonce = "n1")),
+        )
+        val thrown = try {
+            c.awaitCompletion(started.runId, timeoutMillis = 1_000)
+            null
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            e
+        }
+        assertTrue(thrown === cancel, "取消必须原样穿透，而不是被 settleKilled 折成业务结论")
+    }
+
+    @Test
+    fun `probeStatus 不被取消折成 null`() = runBlocking {
+        val (c, _) = controllerWithBlownProbe()
+        val started = assertInstanceOf(
+            RuntimeController.StartOutcome.Started::class.java,
+            c.start(PoolAcquireRequest("p1", "a.js", runNonce = "n1")),
+        )
+        var leaked = false
+        try {
+            c.probeStatus(started.runId)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            leaked = e === cancel
+        }
+        assertTrue(leaked, "取消不得被折成 null（那会让调用方以为\"查不到状态\"）")
+    }
+
+    @Test
+    fun `statusOf 不被取消折成 host=null 的假对照`() = runBlocking {
+        val (c, _) = controllerWithBlownProbe()
+        val started = assertInstanceOf(
+            RuntimeController.StartOutcome.Started::class.java,
+            c.start(PoolAcquireRequest("p1", "a.js", runNonce = "n1")),
+        )
+        var leaked = false
+        try {
+            c.statusOf(started.runId)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            leaked = e === cancel
+        }
+        assertTrue(leaked, "取消不得被折成 host=null（那会造出一条假的\"宿主无状态\"对照）")
+    }
+}

@@ -31,6 +31,13 @@ class FakeEngine(
     /** status() 抛错开关：模拟宿主已死/实现未接线（探针读不到，不是"没状态"）。 */
     var blowStatus = false
 
+    /**
+     * status() 改抛这个（非 null 优先于 [blowStatus]）：给"取消必须穿透"那条判据用 ——
+     * 宿主探针在协程取消时抛 [kotlinx.coroutines.CancellationException]，
+     * 控制器不得把它折成"引擎已死/查不到状态"。
+     */
+    var statusThrowable: Throwable? = null
+
     override suspend fun execute(run: EngineRunRequest): EngineRunReceipt {
         if (failOnExecute) throw IllegalStateException("fake boot failure")
         executed += run
@@ -56,6 +63,7 @@ class FakeEngine(
 
 
     override suspend fun status(): EngineStatus {
+        statusThrowable?.let { throw it }
         if (blowStatus) throw IllegalStateException("模拟宿主探针失败")
         return statusToReturn
     }

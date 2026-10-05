@@ -28,6 +28,22 @@ class AndroidAppLauncherTest {
     }
 
     @Test
+    fun `启动取消原样穿透不回 false`() {
+        val cancel = kotlinx.coroutines.CancellationException("cancel launch")
+        val launcher = AndroidAppLauncher(
+            object : AndroidAppLauncher.AppOps {
+                override fun hasLaunchEntry(packageName: String) = true
+                override suspend fun start(packageName: String) { throw cancel }
+            },
+            AndroidAppLauncher.ForegroundEvents { emptyList() },
+        )
+        val thrown = org.junit.jupiter.api.Assertions.assertThrows(kotlinx.coroutines.CancellationException::class.java) {
+            runBlocking { launcher.launch("com.demo") }
+        }
+        org.junit.jupiter.api.Assertions.assertSame(cancel, thrown)
+    }
+
+    @Test
     fun `启动成功回 true`() = runBlocking {
         val ops = FakeOps(hasEntry = true)
         val launcher = AndroidAppLauncher(ops, AndroidAppLauncher.ForegroundEvents { emptyList() })
