@@ -87,6 +87,22 @@ class AndroidFloatingWindowHostTest {
     }
 
     @Test
+    fun `建窗和撤窗取消原样穿透`() = runBlocking {
+        val cancel = kotlinx.coroutines.CancellationException("cancel window")
+        val failingAdd = AndroidFloatingWindowHost(FakeOps(failAdd = cancel))
+        val add = assertThrows(kotlinx.coroutines.CancellationException::class.java) {
+            runBlocking { failingAdd.create(FloatingWindowSpec.DEFAULT) }
+        }
+        org.junit.jupiter.api.Assertions.assertSame(cancel, add)
+        val failingRemove = AndroidFloatingWindowHost(FakeOps(failRemove = cancel))
+        val ref = failingRemove.create(FloatingWindowSpec.DEFAULT)
+        val remove = assertThrows(kotlinx.coroutines.CancellationException::class.java) {
+            runBlocking { failingRemove.close(ref) }
+        }
+        org.junit.jupiter.api.Assertions.assertSame(cancel, remove)
+    }
+
+    @Test
     fun `撤窗抛异常不改变"已关闭"的结论（窗口已被系统收走）`() = runBlocking {
         val ops = FakeOps(failRemove = IllegalStateException("view not attached"))
         val host = AndroidFloatingWindowHost(ops)

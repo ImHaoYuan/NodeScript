@@ -344,8 +344,11 @@ class Scheduler(
         val stop = stopped.stop ?: return emptyList()
         try {
             stop()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            // 取消不是"停止已完成"：原注释说的"不吞取消语义"，靠的就是这一条（此前是漏的）。
+            throw e
         } catch (_: Exception) {
-            // 停止失败不吞取消语义：真实失败原因由 controller/池侧归档反映（§8.4 诚实原则）
+            // 真实失败原因由 controller/池侧归档反映（§8.4 诚实原则）
         }
         return listOf(stopped)
     }

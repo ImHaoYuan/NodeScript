@@ -29,6 +29,8 @@ class AndroidAppLauncher(
         return try {
             ops.start(packageName)
             true
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             // 包在但起不来（被禁用/权限拒绝/厂商拦截）：如实 false，不假装成功。
             false

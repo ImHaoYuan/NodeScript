@@ -71,6 +71,23 @@ class BootRecoveryTest {
     }
 
     @Test
+    fun `取消恢复原样穿透且同壳下次可重试`() = runBlocking {
+        val cancel = kotlinx.coroutines.CancellationException("cancel recovery")
+        var calls = 0
+        val current = shell()
+        val boot = BootRecovery(recover = {
+            if (++calls == 1) throw cancel
+            listOf(recovery(1, 2))
+        })
+        val thrown = org.junit.jupiter.api.Assertions.assertThrows(kotlinx.coroutines.CancellationException::class.java) {
+            runBlocking { boot.recoverOnce(current) }
+        }
+        org.junit.jupiter.api.Assertions.assertSame(cancel, thrown)
+        assertEquals(1, boot.recoverOnce(current).total)
+        assertEquals(2, calls)
+    }
+
+    @Test
     fun `恢复失败不外抛 —— 装壳流程不能被它打断`() = runBlocking {
         val boot = BootRecovery(recover = { throw IllegalStateException("意图日志读不出来") })
 

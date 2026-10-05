@@ -52,6 +52,22 @@ class PermissionCenterTest {
     }
 
     @Test
+    fun `state 取消原样穿透而非 DEGRADED`() {
+        val cancel = kotlinx.coroutines.CancellationException("cancel probe")
+        val c = PermissionCenter(
+            reader = SystemStateReader { throw cancel },
+            launcher = object : GrantLauncher {
+                override suspend fun launchGrant(ability: Capability) = GrantResult.Granted
+                override fun openSettings(ability: Capability) = Unit
+            },
+        )
+        val thrown = assertThrows(kotlinx.coroutines.CancellationException::class.java) {
+            runBlocking { c.state(Capability.ACCESSIBILITY) }
+        }
+        assertSame(cancel, thrown)
+    }
+
+    @Test
     fun `ensure DENIED 抛 ERR_PERMISSION_DENIED 且 detail 带引导文案`() = runBlocking {
         val c = center()
         val e = assertThrows(AutojsException::class.java) {

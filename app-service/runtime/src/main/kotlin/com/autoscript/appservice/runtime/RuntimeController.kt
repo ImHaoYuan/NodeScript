@@ -4,6 +4,7 @@ import com.autoscript.domain.bridge.HandleRef
 import com.autoscript.domain.engine.EngineStatus
 import com.autoscript.domain.engine.KillCause
 import com.autoscript.domain.engine.StopResult
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -254,6 +255,8 @@ class RuntimeController(
         while (true) {
             val status = try {
                 handle.slot.engine.status()
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
                 return settleKilled(runId)
             }
@@ -275,6 +278,8 @@ class RuntimeController(
         val handle = guard.withLock { active[runId] } ?: return null
         return try {
             handle.slot.engine.status()
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             null
         }
@@ -294,6 +299,8 @@ class RuntimeController(
         val handle = guard.withLock { active[runId] } ?: return null
         val host = try {
             handle.slot.engine.status()
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) {
             null
         }

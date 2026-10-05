@@ -7,6 +7,7 @@ import com.autoscript.domain.permission.CapabilityLifecycle
 import com.autoscript.domain.permission.CapabilityState
 import com.autoscript.domain.permission.GrantResult
 import com.autoscript.domain.permission.PermissionFacade
+import kotlinx.coroutines.CancellationException
 
 /**
  * 系统状态读取（Android 实现由 :app 装配：Settings/AccessibilityManager/MediaProjection
@@ -44,6 +45,8 @@ class PermissionCenter(
     override suspend fun state(ability: Capability): CapabilityState {
         return try {
             reader.readSystemState(ability)
+        } catch (e: CancellationException) {
+            throw e        // 取消不是"读不到状态"：折成 DEGRADED 会把取消谎报成三态之一
         } catch (e: Exception) {
             CapabilityState.DEGRADED
         }

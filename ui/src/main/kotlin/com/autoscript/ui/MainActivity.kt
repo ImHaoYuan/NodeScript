@@ -276,7 +276,9 @@ class MainActivity : ComponentActivity() {
                 // （回执在刷新**之后**盖上去会自相矛盾，见 performTaskOp 同一条）。
                 previous = projectState.takeIf { it.load is LoadState.Loaded },
             )
-        } catch (t: Throwable) {
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (t: Exception) {
             ProjectState.failed(t)
         }
     }
@@ -299,7 +301,9 @@ class MainActivity : ComponentActivity() {
         }
         try {
             host.createEntry(projectId, name, isFolder)
-        } catch (t: Throwable) {
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (t: Exception) {
             projectState = projectState.copy(
                 creating = null,
                 opError = t.message ?: t.javaClass.simpleName,
@@ -322,7 +326,9 @@ class MainActivity : ComponentActivity() {
         }
         capabilityState = try {
             CapabilityCenterState.of(host.capabilityCenter())
-        } catch (t: Throwable) {
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (t: Exception) {
             CapabilityCenterState.failed(t)
         }
     }
@@ -345,7 +351,9 @@ class MainActivity : ComponentActivity() {
         }
         taskState = try {
             TaskCenterState.of(host.taskCenter(), nowMillis = System.currentTimeMillis())
-        } catch (t: Throwable) {
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (t: Exception) {
             TaskCenterState.failed(t)
         }
     }
@@ -377,7 +385,10 @@ class MainActivity : ComponentActivity() {
         taskState = taskState.copy(opInFlight = true, opError = null, opNotice = null)
         val notice = try {
             op(host)
-        } catch (t: Throwable) {
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            taskState = taskState.copy(opInFlight = false)
+            throw e
+        } catch (t: Exception) {
             taskState = taskState.copy(
                 opInFlight = false,
                 opError = t.message ?: t.javaClass.simpleName,
@@ -445,7 +456,9 @@ class MainActivity : ComponentActivity() {
                 added = host.console(sinceSeq = previous.nextSeq, maxLines = CONSOLE_PAGE),
                 nowMillis = System.currentTimeMillis(),
             )
-        } catch (t: Throwable) {
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (t: Exception) {
             ConsoleState.failed(t, previous)
         }
     }
@@ -475,7 +488,10 @@ class MainActivity : ComponentActivity() {
             val stopped = host.stopRun(run.runId)
             if (stopped) "已请求停止 #${run.runId}（停止成败见控制台与在途表）"
             else "#${run.runId} 已不在途（此前已结算或从未存在）"
-        } catch (t: Throwable) {
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            consoleState = consoleState.copy(stopInFlight = false)
+            throw e
+        } catch (t: Exception) {
             consoleState = consoleState.copy(
                 stopInFlight = false,
                 stopError = t.message ?: t.javaClass.simpleName,

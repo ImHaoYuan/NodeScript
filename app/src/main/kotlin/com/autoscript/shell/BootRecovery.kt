@@ -57,7 +57,10 @@ class BootRecovery(
             recovered.clear()
             recovered += try {
                 recover(shell)
-            } catch (t: Throwable) {
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                recoveredShell = null // 未完成恢复：同一壳下次仍须重试
+                throw e
+            } catch (t: Exception) {
                 failure = t
                 emptyList()
             }
