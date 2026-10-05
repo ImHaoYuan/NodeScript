@@ -38,6 +38,7 @@ import androidx.compose.material3.Text
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
@@ -69,11 +70,11 @@ import com.autoscript.ui.components.EaseOutQuint
 import com.autoscript.ui.components.OvershootEasing
 import com.autoscript.ui.components.rememberPressIndication
 import com.autoscript.ui.theme.isDarkTheme
-import com.autoscript.ui.components.CopyNotice
 import com.autoscript.ui.components.MenuAction
 import com.autoscript.ui.components.MenuGap
 import com.autoscript.ui.components.Glyph
 import com.autoscript.ui.components.GlyphKind
+import com.autoscript.ui.components.LocalToast
 import com.autoscript.ui.components.RefreshableBox
 import com.autoscript.ui.components.ScrollToTopButton
 import com.autoscript.ui.components.TabBarBottomClearance
@@ -84,6 +85,7 @@ import com.autoscript.ui.components.rememberCopyAction
 import com.autoscript.ui.components.rememberLongPressFeedback
 import com.autoscript.ui.state.FileSort
 import com.autoscript.ui.state.LoadState
+import com.autoscript.ui.state.opToastMessage
 import com.autoscript.ui.state.ProjectState
 import com.autoscript.ui.state.ScriptFileRowUi
 import com.autoscript.ui.state.StatusTone
@@ -96,8 +98,10 @@ import kotlinx.coroutines.launch
  * - **顶栏**：品牌标题「NodeScript」—— 20sp 粗体 + TG 主页那格蓝（`createTitleTextView`
  *   的 bold 20dp + `key_telegram_color_dialogsLogo` = #168BDB 的口径；全仓唯一一个
  *   覆盖 [ActionBar] 缺省标题样式的屏），右上角 `⋮`（本屏菜单，缺省只有"日间/夜间模式"）；
- * - **搜索栏**：灰底圆框（`FragmentSearchField`：圆角 20dp、左右图标 12dp 内缩、
- *   提示词半透明）+ 放大镜 + 「搜索文件」提示词（TG 的 hint 位）；
+ * - **搜索栏**：灰底圆框（`FragmentSearchField` 的 `DialogsActivity` 档：白底上
+ *   `key_windowBackgroundWhiteBlackText @5%` 的灰、**无投影**、圆角 20dp 落在 40dp
+ *   高上 = 两端全圆；批 43 按 TG 源码逐值对齐 —— 高 40dp、距屏边 12dp（= 屏宽 −24dp）、
+ *   槽位 52dp、放大镜 [GlyphKind.SEARCH_FIELD]）+ 「搜索文件」提示词（TG 的 hint 位）；
  * - **文件列表 = 会话列表**：一行 = 52dp 圆形头像（TG `DialogCell` 的 avatar 52dp）
  *   + 文件名 16sp 粗体（`nameTextView`）+ 次行"大小 · 时刻"13sp（`dateTextView`），
  *   头像即文件类型图标（扩展名取色取字，`getThumbForNameOrMime` 的哈希取色 + `extTextView`
@@ -143,6 +147,13 @@ fun ProjectScreen(
     ) { mutableStateOf(emptySet<String>()) }
     var sheetTarget by remember { mutableStateOf<ScriptFileRowUi?>(null) }
     val copy = rememberCopyAction()
+    // 操作回执（新建的成败）走外壳浮层（批 44）：此前是列表里的一行，弹一条就把
+    // 首行往下推一次。文案一个字没动（判读见 [opToastMessage]，纯层可测）；
+    // 「刷新/换排序把上一次的回执清掉」仍由 MainActivity 的写路径负责。
+    val toast = LocalToast.current
+    val opToast = opToastMessage(state.opError, state.opNotice, inFlight = false)
+    // 键是**解析出的那一句**：同一句连着出现不重弹（键没变），换了一句才弹。
+    LaunchedEffect(opToast) { opToast?.let { toast?.show(it) } }
     val longPressFeedback = rememberLongPressFeedback()
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -258,11 +269,6 @@ fun ProjectScreen(
                     state = listState,
                     contentPadding = PaddingValues(top = 4.dp, bottom = TabBarBottomClearance()),
                 ) {
-                    item { CopyNotice(copy) }
-                    // 操作回执（新建的成败）在这里说：失败**带原文**（区分"名字非法"与
-                    // "项目不存在"的唯一线索），成功只说"已新建"。
-                    state.opError?.let { item { FeedbackLine("操作失败：$it", StatusTone.PROBLEM) } }
-                    state.opNotice?.let { item { FeedbackLine(it, StatusTone.OK) } }
                     items(visible, key = { ProjectState.keyOf(it) }) { file ->
                         val key = ProjectState.keyOf(file)
                         FileRow(
@@ -433,10 +439,14 @@ private fun ProjectMenu(
 }
 
 /**
- * 圆角搜索栏（`FragmentSearchField` 的逐字版式）：高 48dp、圆角 20dp、灰底、
- * 放大镜 24dp 距左 12dp、提示词 15sp 半透明、输入文字 15sp（`editText.setTextSize(15)`）。
+ * 圆角搜索栏（`FragmentSearchField` 的 `DialogsActivity` 档逐值版式）：**52dp 槽位、
+ * 槽内水平 12dp / 垂直 6dp → 高 40dp、宽 = 屏宽 −24dp、圆角 20dp**（40dp 高上 20dp 圆角
+ * = 两端全圆）、灰底（白底压 5% 黑 —— 与任务中心那颗白药丸不是一个键）、**无投影**
+ * （`createRoundRectDrawable`，不是 `…Shadowed`）、放大镜 24dp 距左 12dp
+ * （[GlyphKind.SEARCH_FIELD]，`outline_search_1_24` 实测几何 —— 批 43 换掉旧的 SEARCH）、
+ * 提示词 15sp 半透明、输入文字 15sp（`editText.setTextSize(15)`）。
  *
- * 不用 M3 `TextField`：它自带的 56dp 最小高与大内边距塞不进 48dp 的行高里
+ * 不用 M3 `TextField`：它自带的 56dp 最小高与大内边距塞不进 40dp 的行高里
  * （批 25 实机：hint 文字被上下裁掉一截），而这页搜索框用不上它的 label/indicator
  * 那套装饰 —— 直接 `BasicTextField` + 自己摆 `Row`，内边距就是版式要的那几个 dp。
  */
@@ -449,13 +459,13 @@ private fun SearchField(
     Row(
         Modifier
             .fillMaxWidth()
-            .padding(horizontal = 7.dp, vertical = 4.dp)
-            .height(48.dp)
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .height(40.dp)
             .background(palette.fieldBackground, RoundedCornerShape(20.dp)),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Spacer(Modifier.width(12.dp))
-        Glyph(kind = GlyphKind.SEARCH, tint = palette.text.copy(alpha = 0.6f))
+        Glyph(kind = GlyphKind.SEARCH_FIELD, tint = palette.text.copy(alpha = 0.6f))
         Spacer(Modifier.width(12.dp))
         Box(Modifier.weight(1f)) {
             if (query.isEmpty()) {
@@ -658,17 +668,6 @@ private fun EmptyFilesHint(filtered: Boolean, inFolder: Boolean) {
         tone = StatusTone.MUTED,
         style = MaterialTheme.typography.bodyMedium,
         modifier = Modifier.fillMaxWidth().padding(vertical = 40.dp),
-    )
-}
-
-/** 操作回执行（与任务中心同一条分寸：失败带原文、成功只说做了什么）。 */
-@Composable
-private fun FeedbackLine(text: String, tone: StatusTone) {
-    ToneText(
-        text = text,
-        tone = tone,
-        style = MaterialTheme.typography.bodySmall,
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
     )
 }
 

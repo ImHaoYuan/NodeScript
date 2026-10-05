@@ -111,6 +111,14 @@ data class Colors(
      * 是把深色那半抄反了（TG 的 tint 是白，叠上去只会更亮）。
      */
     val fieldBackground: Color,
+    /**
+     * 分组头底（TG `graySection`：GraySectionCell 那条 32dp 的分组条底色）。
+     * 浅色在白卡上比卡底浅一档灰、深色比屏底微亮（`0xFF0B0B0C` vs `0xFF181819` 有意更暗 ——
+     * 深色下 TG 的 graySection 本来就是"近黑的条"，`Theme.java` 深色缺省即 `0xff0b0b0c`）。
+     */
+    val graySection: Color,
+    /** 分组头文字（TG `graySectionText`，14sp Medium 的分组标签色）。 */
+    val graySectionText: Color,
     /** 弹出菜单底（`actionBarDefaultSubmenuBackground`）。 */
     val menuBackground: Color,
     /** 弹出菜单的分组间隙（`actionBarDefaultSubmenuSeparator`，TG `GapView` 的底色）。 */
@@ -178,6 +186,18 @@ data class Colors(
     val checkboxCheck: Color,
 
     /**
+     * 浮层提示（toast）底（TG `key_undo_background` → 回退 `key_chat_gifSaveHintBackground`）。
+     *
+     * 浅色取 TG 的 `0xE21F2B38`（深蓝灰、89% 不透明）；**深色不照抄**：TG night 的
+     * `undo_background` = `0xF5181818`，与本仓深色屏底 [background]（`0xFF181819`）几乎
+     * 同值 —— 原样贴上去就是"深灰浮层压深灰页"，等于看不见，故取 [surface]（`0xFF232326`）
+     * 这一档，明度差与 TG night 里 `0xFF181818` 压在 `windowBackgroundWhite` 上的关系一致。
+     */
+    val toastBackground: Color,
+    /** 浮层提示的字（`key_undo_infoColor` → 回退 `key_chat_gifSaveHintText` = 白；深浅同值）。 */
+    val toastText: Color,
+
+    /**
      * 文件类型头像的底色表（TG `AvatarDrawable` 的 `avatar_background*` 色序）：
      * 扩展名哈希取槽位（`getColorIndex(id)` 的读法），同一扩展名恒同色。
      */
@@ -208,6 +228,8 @@ val LightColors = Colors(
     pressedOverlay = Color(0x14000000),
     // `windowBackgroundWhiteBlackText`(0xFF1A1D21) 5% 叠白（TG 的 5%）。
     fieldBackground = Color(0xFFF4F4F4),
+    graySection = Color(0xFFF6F6F6),
+    graySectionText = Color(0xFF84878A),
     // 这三个键 day.attheme **都没设** → 走 ThemeColors.java 的默认值。
     menuBackground = Color(0xFFFFFFFF),
     menuSeparator = Color(0xFFF5F5F5),
@@ -231,6 +253,8 @@ val LightColors = Colors(
     // `checkbox` / `checkboxCheck`：两套 attheme 都没设 → ThemeColors.java 的默认值。
     checkboxFill = Color(0xFF5EC245),
     checkboxCheck = Color(0xFFFFFFFF),
+    toastBackground = Color(0xE21F2B38),
+    toastText = Color(0xFFFFFFFF),
     // avatar_background{Red,Orange,Violet,Cyan,Blue,Pink} + Green（ThemeColors.java 默认值）。
     fileAvatarColors = listOf(
         Color(0xFFFF845E),
@@ -272,6 +296,8 @@ val DarkColors = Colors(
     // 白 7% 叠 [background](0xFF181819) —— 与下面 menuBackground 同值纯属巧合（TG 的
     // 深色子菜单底也是"比底亮一档的深灰"），两个键在 TG 里各是各的，别合并。
     fieldBackground = Color(0xFF282829),
+    graySection = Color(0xFF0B0B0C),
+    graySectionText = Color(0xFF838384),
     // 这三个键 night.attheme 都设了。
     menuBackground = Color(0xFF282829),
     menuSeparator = Color(0xFF1E1E1F),
@@ -291,6 +317,10 @@ val DarkColors = Colors(
     menuSelector = Color(0x19FFFFFF),
     checkboxFill = Color(0xFF5EC245),
     checkboxCheck = Color(0xFFFFFFFF),
+    // TG night 的 `undo_background`（0xF5181818）与本仓深色屏底同值 → 会看不见，
+    // 上抬到 [surface] 那一档（见 [Colors.toastBackground] 的说明）。
+    toastBackground = Color(0xF5232326),
+    toastText = Color(0xFFFFFFFF),
     fileAvatarColors = listOf(
         Color(0xFFFF845E),
         Color(0xFFFEBB5B),

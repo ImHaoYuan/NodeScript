@@ -11,6 +11,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -81,6 +82,24 @@ enum class GlyphKind {
 
     /** 新建（FAB 主按钮）：铅笔。 */
     PENCIL,
+
+    /** 立即执行（任务行尾的实心播放三角）。 */
+    PLAY,
+
+    /** 排序切换钮——切到**按字母**（三条横杠 + 字母 A；TG `msg_contacts_name`）。 */
+    SORT_NAME,
+
+    /** 排序切换钮——切到**按时间**（三条横杠 + 时钟；TG `msg_contacts_time`）。 */
+    SORT_TIME,
+
+    /** 搜索框放大镜（TG `FragmentSearchField` 用的 `outline_search_1_24`：粗环短柄）。 */
+    SEARCH_FIELD,
+
+    /** 展开/收起三角（TG `arrow_more`：CollapseTextCell 右侧的下尖 chevron）。 */
+    CHEVRON,
+
+    /** 使用情况访问权限（批 48）：三根高低不同的柱子 —— 「哪个应用用了多久」就是这么读的。 */
+    CHART,
 }
 
 /** 线宽 ÷ 图标边长。四个字形共用一条，粗细才不会一格一个样。 */
@@ -319,6 +338,65 @@ fun Glyph(
                 )
                 drawPath(path(0.24f to 0.76f, 0.38f to 0.76f, 0.24f to 0.62f), tint, style = stroke)
                 drawPath(path(0.62f to 0.24f, 0.76f to 0.38f), tint, style = stroke)
+            }
+
+            // 播放三角（任务行尾「立即执行」）：实心（TG 这颗是填充形，线性描边读不出"按了会跑"）。
+            GlyphKind.PLAY -> {
+                drawPath(
+                    path(0.30f to 0.20f, 0.30f to 0.80f, 0.80f to 0.50f).apply { close() },
+                    tint,
+                    style = Fill,
+                )
+            }
+
+            // 排序切换（TG msg_contacts_name/time 的 webp 实测几何：三条圆头横杠
+            // y≈0.23/0.45/0.67，长度递减 x→0.75/0.58/0.44；尾缀 = 切过去的那一档——
+            // 按时间排序时显示字母 A（切到字母），按字母时显示时钟（切到时间），与 TG 同款）。
+            GlyphKind.SORT_NAME -> {
+                drawPath(path(0.11f to 0.23f, 0.75f to 0.23f), tint, style = stroke)
+                drawPath(path(0.11f to 0.45f, 0.58f to 0.45f), tint, style = stroke)
+                drawPath(path(0.11f to 0.67f, 0.44f to 0.67f), tint, style = stroke)
+                drawPath(path(0.62f to 0.80f, 0.74f to 0.50f, 0.86f to 0.80f), tint, style = stroke)
+                drawPath(path(0.655f to 0.70f, 0.825f to 0.70f), tint, style = stroke)
+            }
+
+            GlyphKind.SORT_TIME -> {
+                drawPath(path(0.11f to 0.23f, 0.75f to 0.23f), tint, style = stroke)
+                drawPath(path(0.11f to 0.45f, 0.58f to 0.45f), tint, style = stroke)
+                drawPath(path(0.11f to 0.67f, 0.44f to 0.67f), tint, style = stroke)
+                drawCircle(tint, radius = 0.165f * u, center = at(0.755f, 0.655f), style = stroke)
+                drawPath(path(0.755f to 0.655f, 0.755f to 0.545f), tint, style = stroke)
+                drawPath(path(0.755f to 0.655f, 0.83f to 0.655f), tint, style = stroke)
+            }
+
+            // 搜索框放大镜（outline_search_1_24 的 72 视口实测：环心 (0.44, 0.427)、
+            // 外半径 16.02/72≈0.222、环宽 4.6/72≈0.064（≈StrokeRatio 的 0.75 倍 ——
+            // 这颗比底栏那颗 SEARCH 粗一档），柄 (0.62,0.56)→(0.786,0.728)）。
+            // 与 [SEARCH] 不是同一颗：那颗环更细、柄更长，是菜单项的放大镜。
+            GlyphKind.SEARCH_FIELD -> {
+                drawCircle(
+                    tint,
+                    radius = (0.222f - 0.032f) * u,
+                    center = at(0.44f, 0.427f),
+                    style = Stroke(width = 0.064f * u, cap = StrokeCap.Round),
+                )
+                drawPath(path(0.62f to 0.56f, 0.786f to 0.728f), tint, style = stroke)
+            }
+
+            // 展开/收起三角（arrow_more 的 webp 实测：下尖 chevron，三控制点
+            // (0.19,0.36)→(0.50,0.70)→(0.81,0.36)，笔画 6/72≈0.083 ≈ StrokeRatio）。
+            // 收起 = 尖朝下（原样），展开 = 转 180° 尖朝上（CollapseTextCell 的
+            // `rotation(collapsed ? 0 : 180)` 同语义）。
+            GlyphKind.CHEVRON -> {
+                drawPath(path(0.19f to 0.36f, 0.50f to 0.70f, 0.81f to 0.36f), tint, style = stroke)
+            }
+
+            // 柱状图：三根圆头柱子（中柱最高）。不画坐标轴 —— 24dp 里轴线与柱子
+            // 共用同一份 StrokeRatio 笔画，会糊成一张表格。
+            GlyphKind.CHART -> {
+                drawPath(path(0.17f to 0.84f, 0.17f to 0.52f), tint, style = stroke)
+                drawPath(path(0.50f to 0.84f, 0.50f to 0.24f), tint, style = stroke)
+                drawPath(path(0.83f to 0.84f, 0.83f to 0.42f), tint, style = stroke)
             }
         }
     }

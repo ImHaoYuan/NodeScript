@@ -27,13 +27,13 @@ import androidx.compose.ui.unit.dp
 import com.autoscript.ui.components.ActionBarAction
 import com.autoscript.ui.components.CountBadge
 import com.autoscript.ui.components.EmptyHint
+import com.autoscript.ui.components.LocalToast
 import com.autoscript.ui.components.PillButton
 import com.autoscript.ui.components.SectionHeader
 import com.autoscript.ui.components.ActionBar
 import com.autoscript.ui.components.Separator
 import com.autoscript.ui.components.Cell
 import com.autoscript.ui.components.ContextMenu
-import com.autoscript.ui.components.CopyNotice
 import com.autoscript.ui.components.MenuAction
 import com.autoscript.ui.components.RefreshableBox
 import com.autoscript.ui.components.ScrollToTopButton
@@ -49,13 +49,15 @@ import com.autoscript.ui.state.ActiveRunState
 import com.autoscript.ui.state.ConsoleLineState
 import com.autoscript.ui.state.ConsoleState
 import com.autoscript.ui.state.LoadState
+import com.autoscript.ui.state.stopToastMessage
 import com.autoscript.ui.state.Status
 import com.autoscript.ui.state.StatusTone
 import com.autoscript.ui.theme.ThemeColors
 import kotlinx.coroutines.launch
 
 /**
- * 控制台（§7.3 数据面游标拉取 + §8.3 在途执行两端对照）。
+ * 管理面板内的控制台子页（§7.3 数据面游标拉取 + §8.3 在途执行两端对照）。
+ * 顶栏返回交回外壳，外壳同时守系统返回与页签可见性；关闭子页不清日志。
  *
  * 版式照 TG 的日志观感：**行是密的**（13sp、通栏单行、无行间大留白），
  * 前缀 `[HH:mm:ss] 级别 [#runId]` 一律用弱化色，只有 `error` 通栏标红 ——
@@ -71,12 +73,15 @@ import kotlinx.coroutines.launch
  *   每行一个「停止」按钮（按 runId 精确停 → 池四步 quiesce，已结算再点如实说"已不在途"，
  *   不抛 —— 那是 `AlreadyGone` 的诚实投影，不是失败）。
  * - 停止回执与读账分开 —— 停失败不清已读到的行（同任务屏 opError 不清清单一条理）；
- *   挂起中按钮禁用防连点。
+ *   挂起中按钮禁用防连点。**停止三态（挂起/失败原文/回执）走外壳浮层（批 44）**：
+ *   此前是列表顶上插的一行，插进来会把日志整体往下推。判读在 [stopToastMessage]
+ *   （纯层、可 JVM 测）—— 拉满/丢包那两行留在列表里（那两行说的是"列表本身不全"的账，
+ *   跟一次性回执不是一回事）。
  *
  * 游标与累积在 [ConsoleState]（MainActivity 经 `reloadConsole` 驱动），本屏只画。
  *
  * **交互**（TG 的日志观感之外，借的是它的手势读法）：
- * - **点一下日志行 = 复制该行**（原文进剪贴板，顶部回执一句"已复制该行"）——
+ * - **点一下日志行 = 复制该行**（原文进剪贴板，浮层弹一句"已复制该行"）——
  *   控制台的用处一半在"把这行贴给别人看"，而文字本身不可选（密排单行）；
  * - **长按在途执行行 = 菜单**（停止该执行 / 复制摘要）：停止按钮照旧留在行尾；
  * - **停止后那一行会消失**（在途表刷新后不再有它），消失处炸一簇粒子（同任务中心）。
@@ -89,6 +94,7 @@ fun ConsoleScreen(
     state: ConsoleState,
     onRefresh: suspend () -> Unit,
     onStopRun: (ActiveRunState) -> Unit,
+    onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val status = Status.of(
@@ -98,6 +104,13 @@ fun ConsoleScreen(
     )
     val refresh = rememberRefreshAction(onRefresh)
     val copy = rememberCopyAction()
+    // 停止三态走外壳浮层（批 44）：此前插在列表顶上，弹一条就把日志整体往下推一次。
+    // 文案一个字没动（判读见 [stopToastMessage]）。拉满/丢包那两行**留在列表里** ——
+    // 它们说的是"这列表不全"，是持续为真的事实，不是会自己消失的回执。
+    val toast = LocalToast.current
+    val stopToast = stopToastMessage(state.stopError, state.stopNotice, state.stopInFlight)
+    // 键是**解析出的那一句**：同一句连着出现不重弹（键没变），换了一句才弹。
+    LaunchedEffect(stopToast) { stopToast?.let { toast?.show(it) } }
     val particles = rememberDeletionParticles()
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -110,6 +123,7 @@ fun ConsoleScreen(
     Column(modifier.fillMaxWidth().background(ThemeColors.background)) {
         ActionBar(
             title = "控制台",
+            onBack = onBack,
             subtitle = status.text,
             subtitleTone = status.tone,
             actions = { ActionBarAction("刷新", refresh::trigger) },
@@ -120,7 +134,6 @@ fun ConsoleScreen(
                     state = listState,
                     contentPadding = PaddingValues(bottom = TabBarBottomClearance()),
                 ) {
-                    item { CopyNotice(copy) }
                     if (state.pageFull && state.load.isLoaded) {
                         item {
                             // 措辞是「可能还有」：拉满不等于确实还有。
@@ -142,17 +155,6 @@ fun ConsoleScreen(
                                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                             )
                         }
-                    }
-                    if (state.stopInFlight) {
-                        item { FeedbackLine("正在停止…（挂起期间按钮停用）", StatusTone.MUTED) }
-                    }
-                    state.stopError?.let {
-                        // 失败红字原文透传（区分"壳未装配"与"读崩了"的唯一线索是原文）
-                        item { FeedbackLine("停止失败：$it", StatusTone.PROBLEM) }
-                    }
-                    state.stopNotice?.let {
-                        // 成功只说"已请求停止"，以刷新后的在途表为准（停走是异步 quiesce，不赌停没停）
-                        item { FeedbackLine(it, StatusTone.OK) }
                     }
                     if (state.activeRuns.isNotEmpty()) {
                         item {
@@ -213,17 +215,6 @@ fun ConsoleScreen(
 /** 读失败时那一行（原文在 [ConsoleState.loadError] 里；此函数只在有失败时调用）。 */
 private fun ConsoleState.loadErrorOrNull(): String? =
     (load as? LoadState.Failed)?.reason
-
-/** 顶栏/横幅式的一行反馈（挂起、成功回执、失败原文三态共用）。 */
-@Composable
-private fun FeedbackLine(text: String, tone: StatusTone) {
-    ToneText(
-        text = text,
-        tone = tone,
-        style = MaterialTheme.typography.bodySmall,
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-    )
-}
 
 /**
  * 一条在途执行：`#runId` + 池侧/宿主两态 + 停止。

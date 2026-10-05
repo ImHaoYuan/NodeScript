@@ -43,8 +43,8 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.platform.LocalDensity
@@ -62,16 +62,22 @@ import kotlin.math.min
 /**
  * Telegram 式顶栏（`ActionBar`）：56dp 高、标题左对齐、副标题小一号次级色、右侧动作区。
  *
+ * [title] 可空（批 47）：设置页的顶栏只留右上角菜单，`title = null` 即左侧不画标题 ——
+ * 其余屏照旧传标题，调用点不受影响。
  * 为什么顶栏自带 [subtitle] 这一档：TG 的 ActionBar 大量用副标题（在线人数、连接状态、
  * "正在输入…"），而副标题一多，"把状态塞进标题"的老写法就露馅了。这里给标题下方
  * 留一个固定位置，各屏爱用不用，但不用就得把 [subtitle] 传 null 而不是塞进标题。
  *
  * 高度固定 56dp 而非 `TopAppBar` 的自适应：四屏都不是可滚动标题，且固定高度让
  * "顶栏 → 内容" 的起点在四屏完全一致（滚动时内容整体位移不会顶穿标题）。
+ *
+ * **底色可换**（[background]）：TG 的 `actionBarDefault` 本来就是逐屏可覆盖的键
+ * （BaseFragment.createActionBar 统一上色，特殊页自己换底）—— 任务中心要跟
+ * 页面同灰（批 41），其余屏不传就是原样，互不影响。
  */
 @Composable
 fun ActionBar(
-    title: String,
+    title: String? = null,
     modifier: Modifier = Modifier,
     subtitle: String? = null,
     subtitleTone: StatusTone = StatusTone.MUTED,
@@ -89,6 +95,13 @@ fun ActionBar(
      * 蓝（createTitleTextView 的 bold 20dp 口径），只有它有权覆盖。
      */
     titleStyle: TextStyle? = null,
+    /**
+     * 顶栏底色覆盖（批 41：任务中心要跟页面同灰）。缺省 null = `actionBarDefault`
+     * （[ThemeColors.surface]，白/夜间 0xFF232326）；传色即整栏（含状态栏那一条）
+     * 换底。要"栏与内容连成一块"的屏用它，别去改 [ThemeColors.surface] —— 那是
+     * 四屏共用的键。
+     */
+    background: Color? = null,
 ) {
     val palette = ThemeColors
     val shellAction = LocalBarAction.current
@@ -102,7 +115,7 @@ fun ActionBar(
     Column(
         modifier
             .fillMaxWidth()
-            .background(palette.surface),
+            .background(background ?: palette.surface),
     ) {
         Row(
             Modifier
@@ -138,13 +151,18 @@ fun ActionBar(
                 Spacer(Modifier.width(4.dp))
             }
             Column(Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    color = titleStyle?.color ?: palette.text,
-                    style = MaterialTheme.typography.titleLarge.merge(titleStyle),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                // 标题可空（批 47 设置页：顶栏不挂标题，标识区在列表第 0 项里）。
+                // 空时整块文字不画，但这一列仍在（weight 占位）—— 右侧动作区的位置
+                // 因此与有标题的屏对齐，不因缺标题而挪动。
+                if (title != null) {
+                    Text(
+                        text = title,
+                        color = titleStyle?.color ?: palette.text,
+                        style = MaterialTheme.typography.titleLarge.merge(titleStyle),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 if (subtitle != null) {
                     Text(
                         text = subtitle,
