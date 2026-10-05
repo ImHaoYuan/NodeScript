@@ -3,8 +3,9 @@
 build:
   maxIssues: 0
 
-# A7 那一类「把取消/失败吞成正常返回」的规则：**不设 baseline 豁免**，
-# 由 A7 修复后的代码面直接满足（新增违规即红）。
+# A7 那一类「把取消/失败吞成正常返回」的规则。存量命中（多为有意降级：读系统属性失败即
+# 回 DEGRADED、幂等清理）已进各模块 baseline；**新增即红** —— 实测过：往 Error.kt 塞一个
+# 吞异常的 catch 后 :domain:detekt 当场红。
 exceptions:
   SwallowedException:
     active: true
