@@ -1,0 +1,23 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>ComplexCondition:DeployPath.kt$DeployPath$seg == ".." || seg == "." || seg.isEmpty() || seg.contains('\\')</ID>
+    <ID>LoopWithTooManyJumpStatements:AssetsWalk.kt$AssetsWalk$for</ID>
+    <ID>LoopWithTooManyJumpStatements:BridgeDistDeploy.kt$BridgeDistDeploy$for</ID>
+    <ID>NewLineAtEndOfFile:AtomicDeployer.kt$com.autoscript.appservice.scriptrepo.core.AtomicDeployer.kt</ID>
+    <ID>NewLineAtEndOfFile:AtomicDeployerTest.kt$com.autoscript.appservice.scriptrepo.core.AtomicDeployerTest.kt</ID>
+    <ID>NewLineAtEndOfFile:DeployPath.kt$com.autoscript.appservice.scriptrepo.core.DeployPath.kt</ID>
+    <ID>NewLineAtEndOfFile:DeployPathTest.kt$com.autoscript.appservice.scriptrepo.core.DeployPathTest.kt</ID>
+    <ID>NewLineAtEndOfFile:ProjectDeployer.kt$com.autoscript.appservice.scriptrepo.core.ProjectDeployer.kt</ID>
+    <ID>NewLineAtEndOfFile:ProjectDeployerTest.kt$com.autoscript.appservice.scriptrepo.core.ProjectDeployerTest.kt</ID>
+    <ID>NewLineAtEndOfFile:ProjectIndex.kt$com.autoscript.appservice.scriptrepo.core.ProjectIndex.kt</ID>
+    <ID>NewLineAtEndOfFile:ProjectIndexTest.kt$com.autoscript.appservice.scriptrepo.core.ProjectIndexTest.kt</ID>
+    <ID>NewLineAtEndOfFile:ProjectStore.kt$com.autoscript.appservice.scriptrepo.core.ProjectStore.kt</ID>
+    <ID>NewLineAtEndOfFile:ProjectStoreTest.kt$com.autoscript.appservice.scriptrepo.core.ProjectStoreTest.kt</ID>
+    <ID>TooGenericExceptionCaught:BridgeAddonDeploy.kt$BridgeAddonDeploy$t: Throwable</ID>
+    <ID>TooGenericExceptionCaught:BridgeDistDeploy.kt$BridgeDistDeploy$t: Throwable</ID>
+    <ID>TooGenericExceptionCaught:ProjectDeployer.kt$ProjectDeployer$t: Throwable</ID>
+    <ID>VariableNaming:DeployJournalTest.kt$DeployJournalTest$val US = '\u001F'</ID>
+  </CurrentIssues>
+</SmellBaseline>

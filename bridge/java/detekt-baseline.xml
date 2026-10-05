@@ -1,0 +1,26 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>LoopWithTooManyJumpStatements:NewlineFrameServer.kt$NewlineFrameServer$while</ID>
+    <ID>NewLineAtEndOfFile:ArchitectureTest.kt$com.autoscript.bridge.ArchitectureTest.kt</ID>
+    <ID>NewLineAtEndOfFile:BridgeRouter.kt$com.autoscript.bridge.BridgeRouter.kt</ID>
+    <ID>NewLineAtEndOfFile:BridgeRouterTest.kt$com.autoscript.bridge.BridgeRouterTest.kt</ID>
+    <ID>NewLineAtEndOfFile:BridgeTransport.kt$com.autoscript.bridge.BridgeTransport.kt</ID>
+    <ID>NewLineAtEndOfFile:EventBus.kt$com.autoscript.bridge.EventBus.kt</ID>
+    <ID>NewLineAtEndOfFile:EventBusTest.kt$com.autoscript.bridge.EventBusTest.kt</ID>
+    <ID>NewLineAtEndOfFile:HandleRegistry.kt$com.autoscript.bridge.HandleRegistry.kt</ID>
+    <ID>NewLineAtEndOfFile:RequestRegistry.kt$com.autoscript.bridge.RequestRegistry.kt</ID>
+    <ID>NewLineAtEndOfFile:RequestRegistryTest.kt$com.autoscript.bridge.RequestRegistryTest.kt</ID>
+    <ID>SwallowedException:BridgeRouter.kt$BridgeRouter$e: TimeoutCancellationException</ID>
+    <ID>SwallowedException:ConsoleCollector.kt$ConsoleCollector$e: IllegalArgumentException</ID>
+    <ID>SwallowedException:NewlineFrameServer.kt$NewlineFrameServer$e: FrameTooLargeException</ID>
+    <ID>ThrowsCount:ConsoleCollector.kt$ConsoleCollector$private fun parseLogParams(payload: String?): LogParams</ID>
+    <ID>TooGenericExceptionCaught:BridgeRouter.kt$BridgeRouter$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:NewlineFrameServer.kt$NewlineFrameServer$e: Exception</ID>
+    <ID>UseCheckOrError:NewlineFrameServerTest.kt$NewlineFrameServerTest$throw IllegalStateException("连接提前关闭（i=$i）")</ID>
+    <ID>UseRequire:ConsoleCollector.kt$ConsoleCollector$throw IllegalArgumentException("console.log 缺 payload")</ID>
+    <ID>UseRequire:ConsoleCollector.kt$ConsoleCollector$throw IllegalArgumentException("console.log 非法 level: $level")</ID>
+    <ID>UseRequire:JsonTransport.kt$throw IllegalArgumentException("未知字段: $k")</ID>
+  </CurrentIssues>
+</SmellBaseline>

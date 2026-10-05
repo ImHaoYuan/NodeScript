@@ -1,0 +1,62 @@
+# AutoScript detekt 公共配置（B8）。`buildUponDefaultConfig = true`：未列出的规则走 detekt 默认。
+# 改这里的规则 = 改全仓口径，改动必须同步 docs/design-decisions.md。
+build:
+  maxIssues: 0
+
+# A7 那一类「把取消/失败吞成正常返回」的规则：**不设 baseline 豁免**，
+# 由 A7 修复后的代码面直接满足（新增违规即红）。
+exceptions:
+  SwallowedException:
+    active: true
+  TooGenericExceptionCaught:
+    active: true
+  InstanceOfCheckForException:
+    active: true
+
+# 复杂度/长函数：存量偏多，先由 baseline 承载；新增即红。
+complexity:
+  LongMethod:
+    active: true
+    threshold: 120
+  LongParameterList:
+    active: true
+    functionThreshold: 10
+    constructorThreshold: 12
+  TooManyFunctions:
+    active: true
+    thresholdInFiles: 40
+    thresholdInClasses: 25
+  CyclomaticComplexMethod:
+    active: true
+    threshold: 30
+  NestedBlockDepth:
+    active: true
+    threshold: 6
+  LargeClass:
+    active: true
+    threshold: 800
+
+# 风格面交 ktlint（本仓不引 ktlint 插件，见 design-decisions）：detekt 只留明确正确的几条。
+style:
+  MagicNumber:
+    active: false        # 本仓大量协议常量（TTL/尺寸/端口），豁免噪声大于收益
+  MaxLineLength:
+    active: true
+    maxLineLength: 160
+  ReturnCount:
+    active: false
+  UnusedPrivateMember:
+    active: true
+  ForbiddenComment:
+    active: false
+
+naming:
+  FunctionNaming:
+    # 测试方法名是中文反引号短语（本仓惯例），允许。
+    active: true
+    ignoreAnnotated: ['Test']
+
+empty-blocks:
+  EmptyCatchBlock:
+    active: true
+    allowedExceptionNameRegex: '_|(ignore|expected).*'

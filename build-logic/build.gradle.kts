@@ -11,4 +11,6 @@ dependencies {
     implementation("org.jetbrains.kotlin.jvm:org.jetbrains.kotlin.jvm.gradle.plugin:${libs.versions.kotlin.get()}")
     implementation("org.jetbrains.kotlin.android:org.jetbrains.kotlin.android.gradle.plugin:${libs.versions.kotlin.get()}")
     implementation("com.android.library:com.android.library.gradle.plugin:${libs.versions.agp.get()}")
+    // B8 detekt 约定插件的 classpath：marker 坐标手拼（同上一段的理由）。
+    implementation("io.gitlab.arturbosch.detekt:detekt-gradle-plugin:1.23.8")
 }

@@ -1,0 +1,66 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>ComplexCondition:InstallCoordinator.kt$InstallCoordinator$sub == "install" &amp;&amp; args.any { it == "--from-bundle" || it.endsWith(".tgz") || it.endsWith(".tar.gz") }</ID>
+    <ID>ComplexCondition:NpmRegistryVerifier.kt$NpmRegistryVerifier.Companion$p &lt; text.length &amp;&amp; (text[p] == ' ' || text[p] == '\t' || text[p] == '\r' || text[p] == '\n')</ID>
+    <ID>CyclomaticComplexMethod:InstallHistory.kt$InstallHistory$private fun parse(line: String): Entry?</ID>
+    <ID>CyclomaticComplexMethod:InstallJournal.kt$InstallJournal$private fun parse(line: String): Entry?</ID>
+    <ID>CyclomaticComplexMethod:NpmBridgeHandler.kt$NpmBridgeHandler$private suspend fun payload(request: BridgeRequest): String?</ID>
+    <ID>DestructuringDeclarationWithTooManyEntries:NpmOfflineBundleImporter.kt$NpmOfflineBundleImporter$val (alg, a, b, rest) = seg</ID>
+    <ID>EmptyElseBlock:NpmRegistryVerifier.kt$NpmRegistryVerifier.Companion$if (p &gt;= text.length) return null</ID>
+    <ID>LargeClass:InstallCoordinatorTest.kt$InstallCoordinatorTest</ID>
+    <ID>LongMethod:NpmBridgeHandler.kt$NpmBridgeHandler$private suspend fun payload(request: BridgeRequest): String?</ID>
+    <ID>LongParameterList:InstallCoordinatorTest.kt$InstallCoordinatorTest$( executor: HeavyOpExecutor = FakeExecutor(), free: Long = 10L * 1024 * 1024 * 1024, cache: CacheIndex = CacheIndex { false }, ledger: ApprovalLedger = ApprovalLedger(), history: InstallHistory? = newHistory(), lockSigner: LockSigner? = null, snapshots: NpmSnapshot? = null, bundleImporter: NpmOfflineBundleImporter? = null, registryVerifier: RegistryVerifier? = null, /** * 真校验器接上装路径（`:app-service:npm`）：两镜像声明比对 → 三分裁决 → 处置。 * null = 走 InstallCoordinator 自己的缺省（读项目 npmrc 的 registry=）。 */ registryOf: ((String) -&gt; String?)? = null, /** T1 lifecycle 执行体（null = 缺省 [ScriptOpExecutor.Unavailable]，即"门禁过了也跑不起来"）。 */ script: ScriptOpExecutor? = null, /** 时钟（尺寸缓存的 TTL 判定读它；不注入则走真实时间）。 */ now: () -&gt; Long = { System.currentTimeMillis() }, )</ID>
+    <ID>LoopWithTooManyJumpStatements:AssetTreeCliSource.kt$AssetTreeCliSource$for</ID>
+    <ID>LoopWithTooManyJumpStatements:NpmCacheSeedDeployerTest.kt$NpmCacheSeedDeployerTest$for</ID>
+    <ID>LoopWithTooManyJumpStatements:NpmOfflineBundleImporter.kt$NpmOfflineBundleImporter$while</ID>
+    <ID>LoopWithTooManyJumpStatements:NpmProjectLayout.kt$LockfileReader$while</ID>
+    <ID>LoopWithTooManyJumpStatements:NpmSnapshot.kt$NpmSnapshot$while</ID>
+    <ID>LoopWithTooManyJumpStatements:NpmSnapshotTest.kt$NpmSnapshotTest$while</ID>
+    <ID>MaxLineLength:InstallCoordinatorTest.kt$InstallCoordinatorTest$"""{"dist-tags":{"latest":"$version"},"versions":{"$version":{"version":"$version","dist":{"tarball":"https://registry.example/axios/-/axios-$version.tgz","integrity":"$integrity"}}}}"""</ID>
+    <ID>MaxLineLength:InstallCoordinatorTest.kt$InstallCoordinatorTest$private</ID>
+    <ID>MaxLineLength:InstallCoordinatorTest.kt$InstallCoordinatorTest$val signer = LockSigner(dir.resolve(".autojs"), LockSigner.KeyProvider { SecretKeySpec("test-app-key-32bytes-aaaaaaaaaaaa".toByteArray(), "HmacSHA256") })</ID>
+    <ID>MaxLineLength:InstallCoordinatorTest.kt$InstallCoordinatorTest$writeLock("p1", """{"lockfileVersion":3,"packages":{"":{},"node_modules/a":{"version":"1.0.0","integrity":"sha512-hit"},"node_modules/b":{"version":"2.0.0","integrity":"sha512-miss"},"node_modules/c":{"version":"3.0.0"}}}""")</ID>
+    <ID>MaxLineLength:InstallCoordinatorTest.kt$InstallCoordinatorTest$writeLock("p1", """{"lockfileVersion":3,"packages":{"":{},"node_modules/axios":{"version":"1.7.0","integrity":"sha512-x"},"node_modules/dayjs":{"version":"1.11.0"}}}""")</ID>
+    <ID>MaxLineLength:NpmSnapshotTest.kt$NpmSnapshotTest$Files.write(layout.lockfile(projectId), ("""{"lockfileVersion":3,"packages":{"":{},"node_modules/lodash":{"version":"4.17.21","integrity":"sha512-x"}}}""").toByteArray())</ID>
+    <ID>MaxLineLength:NpmSnapshotTest.kt$NpmSnapshotTest$Files.write(ledgerDir.resolve("approve-ledger.jsonl"), ("""{"op":"submit","requestId":"apr-1","projectId":"p1","pkg":"esbuild","versionHash":"h","action":"INSTALL_SCRIPT","at":1}""" + "\n").toByteArray())</ID>
+    <ID>SwallowedException:CacacheIndex.kt$CacacheIndex$e: IllegalArgumentException</ID>
+    <ID>SwallowedException:InstallCoordinator.kt$InstallCoordinator$e: Exception</ID>
+    <ID>SwallowedException:NpmCacheSeedDeployer.kt$NpmCacheSeedDeployer$e: IllegalArgumentException</ID>
+    <ID>SwallowedException:NpmRegistryVerifier.kt$HttpRegistrySource$e: IOException</ID>
+    <ID>SwallowedException:NpmRegistryVerifier.kt$HttpRegistrySource$e: IllegalArgumentException</ID>
+    <ID>SwallowedException:NpmRegistryVerifier.kt$NpmRegistryVerifier.Companion$e: IllegalArgumentException</ID>
+    <ID>SwallowedException:NpmShellKit.kt$NpmShellKit$e: java.io.IOException</ID>
+    <ID>ThrowsCount:InstallCoordinator.kt$InstallCoordinator$private suspend fun enqueueHeavy( projectId: String, args: List&lt;String&gt;, timeoutMillis: Long = 120_000, ): InstallHandle</ID>
+    <ID>ThrowsCount:InstallCoordinator.kt$InstallCoordinator$private suspend fun runHeavy(tracked: TrackedOp, args: List&lt;String&gt;, timeoutMillis: Long)</ID>
+    <ID>ThrowsCount:InstallCoordinator.kt$InstallCoordinator$private suspend fun runScriptOps( projectId: String, action: ApprovalAction, what: String, args: List&lt;String&gt;, pkg: String, versionHash: String, npmArgs: List&lt;String&gt;, ): InstallHandle</ID>
+    <ID>ThrowsCount:LockSigner.kt$LockSigner$fun verifyOrThrow(projectId: String, lockfile: Path)</ID>
+    <ID>ThrowsCount:NpmBridgeHandler.kt$NpmBridgeHandler$private suspend fun payload(request: BridgeRequest): String?</ID>
+    <ID>ThrowsCount:NpmScriptResolver.kt$NpmScriptResolver$fun binTarget(projectRoot: Path, bin: String): BinTarget?</ID>
+    <ID>ThrowsCount:NpmSnapshot.kt$NpmSnapshot$fun verify(projectId: String, zipFile: Path): Manifest</ID>
+    <ID>TooGenericExceptionCaught:InstallCoordinator.kt$InstallCoordinator$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:NpmCliDeployer.kt$NpmCliDeployer$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:NpmScriptResolver.kt$NpmScriptResolver$e: Exception</ID>
+    <ID>TooGenericExceptionThrown:HostNodeExecutor.kt$HostNodeExecutor$throw RuntimeException("npm ${op.args.first()} 超时（${op.timeoutMillis}ms）")</ID>
+    <ID>TooGenericExceptionThrown:HostNodeExecutor.kt$HostNodeExecutor$throw RuntimeException("npm 退出码 ${proc.exitValue()}: ${output.takeLast(500)}")</ID>
+    <ID>TooGenericExceptionThrown:InstallCoordinatorTest.kt$InstallCoordinatorTest$throw RuntimeException("registry 502")</ID>
+    <ID>TooManyFunctions:InstallCoordinator.kt$InstallCoordinator : PackageManagerFacade</ID>
+    <ID>TooManyFunctions:NpmCacheSeedDeployer.kt$NpmCacheSeedDeployer</ID>
+    <ID>TooManyFunctions:NpmRegistryVerifier.kt$NpmRegistryVerifier$Companion</ID>
+    <ID>UnusedParameter:NpmRegistryVerifier.kt$NpmRegistryVerifier$name: String</ID>
+    <ID>UnusedPrivateMember:InstallCoordinatorTest.kt$InstallCoordinatorTest$private fun sha512Segments(payload: ByteArray): String</ID>
+    <ID>UnusedPrivateProperty:ApprovalLedgerStore.kt$FileApprovalStore$val e = line[p++]</ID>
+    <ID>UnusedPrivateProperty:HostNodeNpmE2ETest.kt$HostNodeNpmE2ETest$val handle = c.install("e2e", listOf(PackageSpec("lodash", "4.17.21")))</ID>
+    <ID>UnusedPrivateProperty:InstallHistory.kt$InstallHistory$val e = line[p++]</ID>
+    <ID>UseCheckOrError:NpmCacheSeedDeployer.kt$NpmCacheSeedDeployer$throw IllegalStateException( "缓存种子素材为空或不可信：无 &lt;tgz&gt;.sha512 侧车且无 manifest.json（拒绝播种不可校验内容）", )</ID>
+    <ID>UseCheckOrError:NpmCacheSeedDeployer.kt$NpmCacheSeedDeployer$throw IllegalStateException("缓存种子 manifest.json 形状非法：file/integrity 未成对（${files.size} vs ${ints.size}）")</ID>
+    <ID>UseCheckOrError:NpmCacheSeedDeployer.kt$NpmCacheSeedDeployer$throw IllegalStateException("缓存种子 manifest.json 未指向任何存在的 tarball")</ID>
+    <ID>UseRequire:NpmBridgeHandler.kt$NpmBridgeHandler$throw IllegalArgumentException("batch 必须 &gt; 0")</ID>
+    <ID>UseRequire:NpmOfflineBundleImporter.kt$NpmOfflineBundleImporter$throw IllegalArgumentException("离线 bundle 不存在：$zipFile")</ID>
+    <ID>VariableNaming:InstallCoordinator.kt$InstallCoordinator$/** lifecycle 脚本字段（§10.5-3 的扫描面）：出现任一即视为「装了但脚本没跑」。 */ private val LIFECYCLE_KEYS = listOf( "preinstall", "install", "postinstall", "preuninstall", "uninstall", "postuninstall", "prepare", "preprepare", "preparePack", )</ID>
+    <ID>VariableNaming:InstallCoordinatorTest.kt$InstallCoordinatorTest$/** 交叉校验断言里用的占位 integrity（真形状由 NpmRegistryVerifierTest 管）。 */ private val I = "sha512-" + "a".repeat(24)</ID>
+    <ID>VariableNaming:NpmRegistryVerifierTest.kt$NpmRegistryVerifierTest$private val I1 = "sha512-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"</ID>
+    <ID>VariableNaming:NpmRegistryVerifierTest.kt$NpmRegistryVerifierTest$private val I2 = "sha512-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"</ID>
+  </CurrentIssues>
+</SmellBaseline>

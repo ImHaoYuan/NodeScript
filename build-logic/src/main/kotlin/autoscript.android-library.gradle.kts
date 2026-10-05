@@ -9,6 +9,12 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// B6：覆盖率报告（只出报告不设门）。
+plugins.apply("autoscript.android-jacoco")
+
+// B8：静态分析（baseline + 新增即红）。
+plugins.apply("autoscript.detekt")
+
 android {
     compileSdk = Catalogs.int(project, "compileSdk")
     defaultConfig { minSdk = Catalogs.int(project, "minSdk") }

@@ -8,13 +8,16 @@
     "docs:api": "typedoc",
     "test": "npm run build && node --test",
     "gen:wire": "node ../schema/generate.mjs",
-    "gen:wire:check": "node ../schema/generate.mjs --check"
+    "gen:wire:check": "node ../schema/generate.mjs --check",
+    "lint": "eslint src"
   },
   "devDependencies": {
     "@types/node": "^24.19.0",
+    "eslint": "^10.12.0",
     "typedoc": "^0.28.20",
     "typedoc-plugin-markdown": "^4.13.1",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "typescript-eslint": "^8.71.1"
   },
   "engines": {
     "node": "^22.22.2 || ^24.15.0 || >=26.0.0"

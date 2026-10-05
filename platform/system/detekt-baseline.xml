@@ -1,0 +1,35 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>ComplexCondition:ImagesNamespaceHandler.kt$ImagesNamespaceHandler$width &lt;= 0 || height &lt;= 0 || width &gt; 16384 || height &gt; 16384</ID>
+    <ID>LoopWithTooManyJumpStatements:PackageManagerOps.kt$UsageStatsEvents$while</ID>
+    <ID>MatchingDeclarationName:AppContracts.kt$AppLauncher</ID>
+    <ID>MatchingDeclarationName:ClipboardContracts.kt$Clipboard</ID>
+    <ID>MatchingDeclarationName:SystemSettingsContracts.kt$SystemSettings</ID>
+    <ID>MatchingDeclarationName:ZipContracts.kt$ZipArchiver</ID>
+    <ID>MaxLineLength:ImagesNamespaceHandlerTest.kt$ImagesNamespaceHandlerTest$return """{"haystack":{"refId":${haystack.refId},"generation":${haystack.generation}},"needle":{"refId":${needle.refId},"generation":${needle.generation}},"threshold":$threshold$tail}"""</ID>
+    <ID>SwallowedException:AndroidAppLauncher.kt$AndroidAppLauncher$e: Exception</ID>
+    <ID>SwallowedException:AndroidFloatingWindowHost.kt$AndroidFloatingWindowHost$e: Exception</ID>
+    <ID>ThrowsCount:NotificationNamespaceHandler.kt$NotificationNamespaceHandler$private fun idOf(fields: Map&lt;String, DomainJson.Value&gt;): Int</ID>
+    <ID>ThrowsCount:PowerManagerNamespaceHandler.kt$PowerManagerNamespaceHandler$private fun acquire(f: Map&lt;String, DomainJson.Value&gt;): String</ID>
+    <ID>TooGenericExceptionCaught:AndroidAppLauncher.kt$AndroidAppLauncher$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:AndroidFloatingWindowHost.kt$AndroidFloatingWindowHost$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:AndroidSensorSource.kt$AndroidSensorSource$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:PackageManagerOps.kt$UsageStatsEvents$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:WakeLock.kt$AndroidWakeLockOps$t: Throwable</ID>
+    <ID>TooManyFunctions:SystemNamespaces.kt$SystemNamespaces</ID>
+    <ID>UnusedParameter:ImagesNamespaceHandler.kt$ImagesNamespaceHandler$methodName: String</ID>
+    <ID>UseCheckOrError:AndroidDataStoreTest.kt$AndroidDataStoreTest$throw IllegalStateException("block 半途炸了")</ID>
+    <ID>UseCheckOrError:KvRowCodec.kt$KvRowCodec$throw IllegalStateException("kv 行 kind 非法: \"$kind\"（表损坏？）")</ID>
+    <ID>UseCheckOrError:KvRowCodec.kt$KvRowCodec$throw IllegalStateException("kv 行 kind=$KIND_BYTES 但 value 为 NULL（表损坏？）")</ID>
+    <ID>UseCheckOrError:KvRowCodec.kt$KvRowCodec$throw IllegalStateException("kv 行 kind=$KIND_JSON 但 value 为 NULL（表损坏？）")</ID>
+    <ID>UseRequire:DatastoreNamespaceHandler.kt$DatastoreNamespaceHandler$throw IllegalArgumentException("key 不得为空白")</ID>
+    <ID>UseRequire:NotificationNamespaceHandler.kt$NotificationNamespaceHandler$throw IllegalArgumentException("id 超出 Int 范围: ${n.raw}")</ID>
+    <ID>UseRequire:NotificationNamespaceHandler.kt$NotificationNamespaceHandler$throw IllegalArgumentException("notification text 不得为空白")</ID>
+    <ID>UseRequire:PowerManagerNamespaceHandler.kt$PowerManagerNamespaceHandler$throw IllegalArgumentException("timeoutMillis 必须 &gt; 0（0/负数等于要求立刻过期，疑似漏配），实际 $timeoutMillis")</ID>
+    <ID>UseRequire:SensorsNamespaceHandler.kt$SensorsNamespaceHandler$throw IllegalArgumentException("sensors name 不得为空白")</ID>
+    <ID>UseRequire:SettingsNamespaceHandler.kt$SettingsNamespaceHandler$throw IllegalArgumentException("settings key 不得为空白")</ID>
+    <ID>UseRequire:ZipNamespaceHandler.kt$ZipNamespaceHandler$throw IllegalArgumentException("$key 不得为空白")</ID>
+  </CurrentIssues>
+</SmellBaseline>

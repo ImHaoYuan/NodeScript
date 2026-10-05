@@ -1,0 +1,55 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>ImplicitDefaultLocale:DomainJson.kt$DomainJson$String.format("%04x", c.code)</ID>
+    <ID>LoopWithTooManyJumpStatements:PackSpec.kt$BuildIgnore$for</ID>
+    <ID>MaxLineLength:SystemContracts.kt$*</ID>
+    <ID>NewLineAtEndOfFile:ArchitectureTest.kt$com.autoscript.domain.ArchitectureTest.kt</ID>
+    <ID>NewLineAtEndOfFile:CapabilityLifecycle.kt$com.autoscript.domain.permission.CapabilityLifecycle.kt</ID>
+    <ID>NewLineAtEndOfFile:CapabilityLifecycleTest.kt$com.autoscript.domain.permission.CapabilityLifecycleTest.kt</ID>
+    <ID>NewLineAtEndOfFile:EngineStateMachine.kt$com.autoscript.domain.engine.EngineStateMachine.kt</ID>
+    <ID>NewLineAtEndOfFile:EngineStateMachineTest.kt$com.autoscript.domain.engine.EngineStateMachineTest.kt</ID>
+    <ID>NewLineAtEndOfFile:Error.kt$com.autoscript.domain.core.Error.kt</ID>
+    <ID>NewLineAtEndOfFile:Permission.kt$com.autoscript.domain.permission.Permission.kt</ID>
+    <ID>NewLineAtEndOfFile:QuiescePlan.kt$com.autoscript.domain.engine.QuiescePlan.kt</ID>
+    <ID>NewLineAtEndOfFile:QuiescePlanTest.kt$com.autoscript.domain.engine.QuiescePlanTest.kt</ID>
+    <ID>NewLineAtEndOfFile:ScriptEngine.kt$com.autoscript.domain.engine.ScriptEngine.kt</ID>
+    <ID>NewLineAtEndOfFile:UiTree.kt$com.autoscript.domain.automation.UiTree.kt</ID>
+    <ID>SwallowedException:DomainJson.kt$DomainJson$e: IllegalArgumentException</ID>
+    <ID>ThrowsCount:Decode.kt$fun BridgeRequest.requiredIntList( o: Map&lt;String, DomainJson.Value&gt;, key: String, ): List&lt;Int&gt;</ID>
+    <ID>ThrowsCount:Decode.kt$fun BridgeRequest.requiredRef( o: Map&lt;String, DomainJson.Value&gt;, key: String, ): HandleRef</ID>
+    <ID>ThrowsCount:Decode.kt$fun BridgeRequest.requiredStrList( o: Map&lt;String, DomainJson.Value&gt;, key: String, ): List&lt;String&gt;</ID>
+    <ID>ThrowsCount:Decode.kt$private fun rawDouble(v: DomainJson.Value, key: String): Double</ID>
+    <ID>ThrowsCount:DomainJson.kt$DomainJson.Parser$private fun parseObject(): Value.Obj</ID>
+    <ID>ThrowsCount:DomainJson.kt$DomainJson.Parser$private fun parseString(): String</ID>
+    <ID>ThrowsCount:FrameSource.kt$ScreenPolicy$fun requireCapturable(snapshot: ScreenSnapshot)</ID>
+    <ID>TooManyFunctions:DomainJson.kt$DomainJson</ID>
+    <ID>TooManyFunctions:HostSummary.kt$HostSummary</ID>
+    <ID>TooManyFunctions:ImageAnalyzer.kt$ImageAnalyzer</ID>
+    <ID>TooManyFunctions:PackageManagerFacade.kt$PackageManagerFacade</ID>
+    <ID>TooManyFunctions:UiTree.kt$UiActionExecutor</ID>
+    <ID>UnusedParameter:QuiescePlan.kt$QuiescePlan$step: QuiesceStep</ID>
+    <ID>UnusedPrivateMember:DomainJsonTest.kt$DomainJsonTest$private fun s(v: DomainJson.Value): String</ID>
+    <ID>UseCheckOrError:DataStoreContractTest.kt$DataStoreContractTest$throw IllegalStateException("block 半途炸了")</ID>
+    <ID>UseRequire:Decode.kt$throw IllegalArgumentException("$key 必须是对象")</ID>
+    <ID>UseRequire:Decode.kt$throw IllegalArgumentException("$key 必须是数组")</ID>
+    <ID>UseRequire:Decode.kt$throw IllegalArgumentException("$method 缺 payload")</ID>
+    <ID>UseRequire:Decode.kt$throw IllegalArgumentException("字段 $key 必须是数字")</ID>
+    <ID>UseRequire:Decode.kt$throw IllegalArgumentException("字段 $key 必须是有限数字")</ID>
+    <ID>UseRequire:DomainJson.kt$DomainJson$throw IllegalArgumentException("对象键必须是字符串")</ID>
+    <ID>UseRequire:DomainJson.kt$DomainJson$throw IllegalArgumentException("尾部多余字符 @${p.pos}")</ID>
+    <ID>UseRequire:DomainJson.kt$DomainJson$throw IllegalArgumentException("载荷必须是 JSON 对象")</ID>
+    <ID>UseRequire:DomainJson.kt$DomainJson.Parser$throw IllegalArgumentException("\\u 转义截断")</ID>
+    <ID>UseRequire:DomainJson.kt$DomainJson.Parser$throw IllegalArgumentException("字符串意外结束")</ID>
+    <ID>UseRequire:DomainJson.kt$DomainJson.Parser$throw IllegalArgumentException("对象意外结束")</ID>
+    <ID>UseRequire:DomainJson.kt$DomainJson.Parser$throw IllegalArgumentException("对象键必须是字符串 @$pos")</ID>
+    <ID>UseRequire:DomainJson.kt$DomainJson.Parser$throw IllegalArgumentException("意外结束")</ID>
+    <ID>UseRequire:DomainJson.kt$DomainJson.Parser$throw IllegalArgumentException("数组意外结束")</ID>
+    <ID>UseRequire:DomainJson.kt$DomainJson.Parser$throw IllegalArgumentException("期望 ':' @$pos")</ID>
+    <ID>UseRequire:DomainJson.kt$DomainJson.Parser$throw IllegalArgumentException("未转义控制字符 @$pos")</ID>
+    <ID>UseRequire:DomainJson.kt$DomainJson.Parser$throw IllegalArgumentException("转义意外结束")</ID>
+    <ID>UseRequire:DomainJson.kt$DomainJson.Parser$throw IllegalArgumentException("非法字面量 @$pos（期望 $literal）")</ID>
+    <ID>UseRequire:DomainJson.kt$DomainJson.Parser$throw IllegalArgumentException("非法数字 @$start")</ID>
+  </CurrentIssues>
+</SmellBaseline>
