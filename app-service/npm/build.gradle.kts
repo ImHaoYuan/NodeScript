@@ -20,6 +20,7 @@ kotlin {
 
 dependencies {
     implementation(project(":domain"))
+    "testFixturesImplementation"(project(":domain"))
     implementation(libs.kotlinx.coroutines.core)
 }
 

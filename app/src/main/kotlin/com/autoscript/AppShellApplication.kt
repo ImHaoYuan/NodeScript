@@ -272,6 +272,7 @@ class AppShellApplication : Application(), HostSummary {
                 npmCliSource = AssetTreeCliSource(
                     root = "npm",
                     listDir = { dir -> appContext.assets.list(dir) },
+                    openManifest = { appContext.assets.open("npm-manifest.json") },
                     openFile = { path -> appContext.assets.open(path) },
                 ),
                 // npm 执行体的 Node 宿主 = 与脚本引擎同一个 noden（§19 交付位）：
