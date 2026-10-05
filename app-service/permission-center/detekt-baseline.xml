@@ -1,0 +1,9 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>SwallowedException:PermissionCenter.kt$PermissionCenter$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:PermissionCenter.kt$PermissionCenter$e: Exception</ID>
+    <ID>UseCheckOrError:PermissionCenterTest.kt$PermissionCenterTest$throw IllegalStateException("ROM 查询崩溃")</ID>
+  </CurrentIssues>
+</SmellBaseline>

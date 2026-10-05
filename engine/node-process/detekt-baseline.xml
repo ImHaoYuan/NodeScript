@@ -1,0 +1,7 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>UseCheckOrError:NodeProcessEngine.kt$NodeProcessEngine$throw IllegalStateException( "同引擎一次一脚本被破坏：上一执行体仍在运行（pid=$leaked），已强杀防泄漏后拒绝本次启动", )</ID>
+  </CurrentIssues>
+</SmellBaseline>

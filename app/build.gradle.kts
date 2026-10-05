@@ -6,6 +6,10 @@ plugins {
     id("autoscript.test-guard")
     // 引擎二进制 / facade dist 随包任务（§19/§12.4）+ preBuild wiring（审查步骤 1 迁入）。
     id("autoscript.engine-natives")
+    // B6/B8：application 不走 autoscript.android-library 约定，覆盖率与静态分析单独接
+    // （与 test-guard 同一条理由：本模块 android{} 里塞满装配特例，约定收编不了）。
+    id("autoscript.android-jacoco")
+    id("autoscript.detekt")
 }
 
 android {

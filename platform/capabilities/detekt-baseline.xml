@@ -1,0 +1,25 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>LongParameterList:AndroidUiTreeTest.kt$AndroidUiTreeTest$( text: String? = null, desc: String? = null, className: String? = null, packageName: String? = null, viewId: String? = null, clickable: Boolean = false, longClickable: Boolean = false, editable: Boolean = false, scrollable: Boolean = false, bounds: UiBounds? = null, )</ID>
+    <ID>MaxLineLength:A11yNamespaceHandler.kt$A11yNamespaceHandler$return</ID>
+    <ID>NewLineAtEndOfFile:ScreenshotSource.kt$com.autoscript.platform.capabilities.screen.ScreenshotSource.kt</ID>
+    <ID>ThrowsCount:A11yNamespaceHandler.kt$A11yNamespaceHandler$private fun gestureOf(v: DomainJson.Value?): GestureInput</ID>
+    <ID>ThrowsCount:A11yNamespaceHandler.kt$A11yNamespaceHandler$private fun requiredRef(o: Map&lt;String, DomainJson.Value&gt;): HandleRef</ID>
+    <ID>ThrowsCount:AutoScriptAccessibilityService.kt$ServiceBridge$@TargetApi(Build.VERSION_CODES.R) private fun frameOf(result: AccessibilityService.ScreenshotResult): ProducedFrame</ID>
+    <ID>ThrowsCount:ScreenNamespaceHandler.kt$ScreenNamespaceHandler$private fun requiredRef(o: Map&lt;String, DomainJson.Value&gt;, key: String): HandleRef</ID>
+    <ID>TooGenericExceptionCaught:SystemDialogOps.kt$SystemDialogOps$e: Exception</ID>
+    <ID>TooManyFunctions:A11yNamespaceHandler.kt$A11yNamespaceHandler : RpcNamespaceHandler</ID>
+    <ID>UnusedParameter:A11yNamespaceHandler.kt$A11yNamespaceHandler$extra: Map&lt;String, Any?&gt;?</ID>
+    <ID>UnusedPrivateProperty:AndroidUiTreeTest.kt$AndroidUiTreeTest$val modal = b.modalRoots.let { FakeA11yBridge.Blue(snap(className = "modal-root")).also(it::add) }</ID>
+    <ID>UseRequire:A11yNamespaceHandler.kt$A11yNamespaceHandler$throw IllegalArgumentException("conditions 必须是对象")</ID>
+    <ID>UseRequire:A11yNamespaceHandler.kt$A11yNamespaceHandler$throw IllegalArgumentException("ref 必须是对象")</ID>
+    <ID>UseRequire:A11yNamespaceHandler.kt$A11yNamespaceHandler$throw IllegalArgumentException("strokes 必须是数组")</ID>
+    <ID>UseRequire:A11yNamespaceHandler.kt$A11yNamespaceHandler$throw IllegalArgumentException("未知选择器条件 $k")</ID>
+    <ID>UseRequire:A11yNamespaceHandler.kt$A11yNamespaceHandler$throw IllegalArgumentException("缺 payload")</ID>
+    <ID>UseRequire:ScreenNamespaceHandler.kt$ScreenNamespaceHandler$throw IllegalArgumentException("$key 必须是对象")</ID>
+    <ID>UseRequire:ScreenNamespaceHandler.kt$ScreenNamespaceHandler$throw IllegalArgumentException("字段 $key 必须 &gt; 0，实际 $n")</ID>
+    <ID>UseRequire:ScreenNamespaceHandler.kt$ScreenNamespaceHandler$throw IllegalArgumentException("缺 payload")</ID>
+  </CurrentIssues>
+</SmellBaseline>

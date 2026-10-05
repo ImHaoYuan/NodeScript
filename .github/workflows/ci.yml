@@ -52,6 +52,14 @@ jobs:
       - name: JVM 单元测试
         run: |
           ./gradlew :domain:test :bridge:java:test :app-service:runtime:test :app-service:scheduler:test :app-service:script-repo:testDebugUnitTest :app-service:permission-center:test :app-service:packager:test :app-service:npm:test :platform:capabilities:testDebugUnitTest :platform:system:testDebugUnitTest :engine:node-process:testDebugUnitTest :ui:testDebugUnitTest :app:testDebugUnitTest --stacktrace -PskipNpmE2E
+      # B6：覆盖率报告（只出报告不设阈值 —— 存量覆盖率未知，设门必红；本批只让盲区看得见）。
+      # 与测试同 job：报告读的是上一步刚写出的 .exec，换 job 就得把执行数据当 artifact 搬运。
+      - name: 覆盖率报告（jacoco，不设阈值）
+        if: always()
+        run: ./gradlew jacocoTestReport -PskipNpmE2E
+      # B8：静态分析（baseline + 新增即红）。detekt 任务与测试无依赖，放同一 job 省一次冷启动。
+      - name: 静态分析（detekt，baseline 之外的违规即红）
+        run: ./gradlew detekt
       - name: 上传测试报告
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -60,6 +68,7 @@ jobs:
           path: |
             **/build/reports/tests/**
             **/build/test-results/**
+            **/build/reports/jacoco/**
   js-tests:
     name: bridge/js facade 单测（tsc + node --test）
     runs-on: ubuntu-latest
@@ -97,6 +106,10 @@ jobs:
         run: |
           npm run docs:api
           git -C ../.. diff --exit-code
+      # B8：facade 静态分析（flat config，规则集首日即绿 = 此后新增违规即红）。
+      - name: facade ESLint
+        working-directory: bridge/js
+        run: npm run lint
       - name: facade 单元测试
         working-directory: bridge/js
         run: npm test

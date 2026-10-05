@@ -236,7 +236,7 @@ export class NativeBootstrap {
         detail: '缺 AUTOSCRIPT_BRIDGE_ADDON（宿主未预载 addon：离线/未接线，快速拒绝不悬挂）',
       })
     }
-    // eslint-disable-next-line @typescript-eslint/no-var-requires -- 动态路径 require N-API 模块（CJS 产物）
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- 动态路径 require N-API 模块（CJS 产物）
     this.addon = require(p) as BridgeNativeAddon
   }
 

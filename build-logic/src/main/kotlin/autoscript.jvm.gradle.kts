@@ -7,6 +7,12 @@ plugins {
     id("org.jetbrains.kotlin.jvm")
 }
 
+// B6：覆盖率报告（只出报告不设门）。
+plugins.apply("autoscript.jvm-jacoco")
+
+// B8：静态分析（baseline + 新增即红）。
+plugins.apply("autoscript.detekt")
+
 kotlin {
     jvmToolchain(17)
     // 共享架构门（ArchGate）：各模块 ArchitectureTest 只留"本模块黑名单"。

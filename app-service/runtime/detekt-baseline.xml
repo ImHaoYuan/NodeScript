@@ -1,0 +1,26 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>LoopWithTooManyJumpStatements:EngineWatchdog.kt$EngineWatchdog$for</ID>
+    <ID>MaxLineLength:EnginePool.kt$PoolHandle$/** 已获槽位的执行句柄（池内身份：请求 + 槽位 + 收据 + 代次；无跨层包装——会话面在桥两侧各一边：Kotlin 侧是 `EnginesNamespaceHandler` 的 exec/stop/status/channel* 方法，JS 侧是 `EngineSessionImpl`/`EngineChannel`）。 */</ID>
+    <ID>MayBeConst:ProcessMonitor.kt$ProcessMonitor.Companion$/** Linux/Android 用户态 `SC_CLK_TCK` 恒为 100（每 jiffy 10ms）；可覆盖便于测试。 */ val SC_CLK_TCK_FALLBACK: Long = 100L</ID>
+    <ID>NewLineAtEndOfFile:EnginePool.kt$com.autoscript.appservice.runtime.EnginePool.kt</ID>
+    <ID>NewLineAtEndOfFile:FakeEngine.kt$com.autoscript.appservice.runtime.FakeEngine.kt</ID>
+    <ID>NewLineAtEndOfFile:FixedEnginePool.kt$com.autoscript.appservice.runtime.FixedEnginePool.kt</ID>
+    <ID>NewLineAtEndOfFile:FixedEnginePoolTest.kt$com.autoscript.appservice.runtime.FixedEnginePoolTest.kt</ID>
+    <ID>NewLineAtEndOfFile:PoolSlot.kt$com.autoscript.appservice.runtime.PoolSlot.kt</ID>
+    <ID>NewLineAtEndOfFile:WatchdogPolicy.kt$com.autoscript.appservice.runtime.WatchdogPolicy.kt</ID>
+    <ID>NewLineAtEndOfFile:WatchdogPolicyTest.kt$com.autoscript.appservice.runtime.WatchdogPolicyTest.kt</ID>
+    <ID>ThrowsCount:EnginesNamespaceHandler.kt$EnginesNamespaceHandler$private fun parseExec(payload: String?): PoolAcquireRequest</ID>
+    <ID>TooGenericExceptionCaught:FixedEnginePool.kt$FixedEnginePool$e: Exception</ID>
+    <ID>UnusedPrivateProperty:PoolSlot.kt$PoolSlot$private val clock: Clock</ID>
+    <ID>UseCheckOrError:FakeEngine.kt$FakeEngine$throw IllegalStateException("fake boot failure")</ID>
+    <ID>UseCheckOrError:FakeEngine.kt$FakeEngine$throw IllegalStateException("模拟宿主探针失败")</ID>
+    <ID>UseRequire:EnginesNamespaceHandler.kt$EnginesNamespaceHandler$throw IllegalArgumentException("projectId 不得为空")</ID>
+    <ID>UseRequire:EnginesNamespaceHandler.kt$EnginesNamespaceHandler$throw IllegalArgumentException("scriptPath 不得为空")</ID>
+    <ID>UseRequire:EnginesNamespaceHandler.kt$EnginesNamespaceHandler$throw IllegalArgumentException("timeoutMillis 必须 &gt; 0：$timeout")</ID>
+    <ID>UseRequire:EnginesNamespaceHandler.kt$EnginesNamespaceHandler$throw IllegalArgumentException("字段 $key 必须是数组")</ID>
+    <ID>UseRequire:EnginesNamespaceHandler.kt$EnginesNamespaceHandler$throw IllegalArgumentException("缺 payload")</ID>
+  </CurrentIssues>
+</SmellBaseline>

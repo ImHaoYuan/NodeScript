@@ -1,0 +1,14 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>LoopWithTooManyJumpStatements:ApkRepacker.kt$ApkRepacker$while</ID>
+    <ID>LoopWithTooManyJumpStatements:ArscPatcher.kt$ArscPatcher$for</ID>
+    <ID>LoopWithTooManyJumpStatements:AxmlPatcher.kt$AxmlPatcher$for</ID>
+    <ID>NestedBlockDepth:ApkRepacker.kt$ApkRepacker$private fun rewriteInternal( apk: Path, replacements: Map&lt;String, ByteArray&gt;, target: Path, allowNew: Boolean, removals: Set&lt;String&gt;, )</ID>
+    <ID>ThrowsCount:ApkPackager.kt$ApkPackager$fun pack( planned: PackagerCollector.Planned, projectRoot: Path, signing: Signing? = null, ): Result</ID>
+    <ID>ThrowsCount:ApkRepacker.kt$ApkRepacker$private fun rewriteInternal( apk: Path, replacements: Map&lt;String, ByteArray&gt;, target: Path, allowNew: Boolean, removals: Set&lt;String&gt;, )</ID>
+    <ID>TooGenericExceptionCaught:ApkRepacker.kt$ApkRepacker$e: Exception</ID>
+    <ID>UnusedPrivateMember:AxmlPatcherTest.kt$AxmlPatcherTest$private fun fixtureArsc(): ByteArray</ID>
+  </CurrentIssues>
+</SmellBaseline>
