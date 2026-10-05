@@ -230,8 +230,8 @@ object AppShellKit {
         val tasks = FileTaskStore(autojsDir)
 
         // vendored npm CLI 落位 + 执行体注入（§10.2 调用链首段/末段）。
-        // 素材随包在 `assets/npm/**`，启动期幂等部署到 `filesDir/npm/`（素材没换 = 整目录
-        // 跳过，开机路径零 IO）。**只有"部署就位 + 有 Node 宿主"两条同时成立才注入
+        // 素材随包在 `assets/npm/**`，启动期先按打包前清单检疫 APK 文件集合与摘要，
+        // 再与落盘目录对账；全树未变化才幂等跳过。**只有"部署就位 + 有 Node 宿主"两条同时成立才注入
         // [HostNodeExecutor]**；任一不成立就保持 Unavailable，桥对 npm.* 如实
         // `ERR_NOT_IMPLEMENTED` —— 装了 CLI 却没有能跑它的 node，"注入"就等于把必失败
         // 伪装成已接线。失败原因原文进 [AssembledShell.npmCliFailure]，不吞成"一切正常"。

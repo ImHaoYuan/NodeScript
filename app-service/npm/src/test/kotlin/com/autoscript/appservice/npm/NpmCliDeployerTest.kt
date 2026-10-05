@@ -24,6 +24,8 @@ class NpmCliDeployerTest {
     lateinit var dir: Path
 
     private class DirSource(val root: Path) : NpmCliDeployer.CliSource {
+        override fun manifest() = com.autoscript.testkit.npmManifest(list().associateWith { read(it)!! })
+
         override fun read(relPath: String): ByteArray? {
             val f = root.resolve(relPath)
             return if (Files.isRegularFile(f)) Files.readAllBytes(f) else null
@@ -102,7 +104,7 @@ class NpmCliDeployerTest {
             }
         }
         Files.delete(fake.resolve("bin/npm-cli.js"))
-        assertThrows(IllegalStateException::class.java) {
+        assertThrows(IllegalArgumentException::class.java) {
             NpmCliDeployer.deploy(dir, DirSource(fake))
         }
         assertFalse(Files.exists(dir.resolve("npm/bin/npm-cli.js")), "缺锚绝不能让 bin/npm-cli.js 就位")
@@ -156,7 +158,12 @@ class NpmCliDeployerTest {
         // 本机 npm 树**就是**素材根：把资产前缀 "npm" 摘掉映射回文件系统
         val root = npm!!
         fun fsRel(p: String) = p.removePrefix("npm").trimStart('/')
-        val src = AssetTreeCliSource("npm", { assetList(root, fsRel(it)) }) { path ->
+        val tree = AssetTreeCliSource("npm", { assetList(root, fsRel(it)) }) { path ->
+            Files.newInputStream(root.resolve(fsRel(path)))
+        }
+        val manifest = com.autoscript.testkit.npmManifest(tree.list().associateWith { tree.read(it)!! })
+        val src = AssetTreeCliSource("npm", { assetList(root, fsRel(it)) },
+            openManifest = { manifest.byteInputStream() }) { path ->
             Files.newInputStream(root.resolve(fsRel(path)))
         }
         val r = NpmCliDeployer.deploy(dir, src) as NpmCliDeployer.Outcome.Ready

@@ -45,6 +45,7 @@ class AppShellNpmCliTest {
     /** 内存素材源：键 = 相对素材根的路径（`bin/npm-cli.js` 形态，与 CliSource 契约同形）。 */
     private class MemSource(paths: List<String>) : NpmCliDeployer.CliSource {
         private val tree = paths.associateWith { "// $it\n".toByteArray() }
+        override fun manifest() = com.autoscript.testkit.npmManifest(tree)
         override fun list(): List<String> = tree.keys.toList()
         override fun read(relPath: String): ByteArray? = tree[relPath]
     }

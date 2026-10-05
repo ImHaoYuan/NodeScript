@@ -10,7 +10,7 @@ import java.io.InputStream
  * `AssetsWalk` 同一条理由：JVM 单测里造不出真的 AssetManager 实例（android.jar 是可 mock
  * 的桩，方法一调就抛），混进本体就得连坐"不可单测"。生产装配是两行，住 `:app` 装配层：
  * ```
- * AssetTreeCliSource("npm", { assets.list(it) }, { assets.open(it) })
+ * AssetTreeCliSource("npm", { assets.list(it) }, { assets.open("npm-manifest.json") }) { assets.open(it) }
  * ```
  * 资产键 = `npm/<rel>`（`app/build.gradle.kts` 的 `prepareNpmCliAssets` 产出形状），
  * 故 [root] 传 `"npm"`。
@@ -25,13 +25,21 @@ import java.io.InputStream
  *
  * @param root assets 内的素材根（生产 = `"npm"`）。
  * @param listDir 列目录：返当前层条目（目录名可能带尾 '/'）；目录不存在返 null。
+ * @param openManifest 打包前清单读口；不提供或不可读时部署拒绝。
  * @param openFile 开文件流：由本类负责关闭。
  */
 class AssetTreeCliSource(
     private val root: String,
     private val listDir: (String) -> Array<String>?,
+    private val openManifest: (() -> InputStream?)? = null,
     private val openFile: (String) -> InputStream,
 ) : NpmCliDeployer.CliSource {
+
+    override fun manifest(): String? = try {
+        openManifest?.invoke()?.use { it.readBytes().toString(Charsets.UTF_8) }
+    } catch (_: IOException) {
+        null
+    }
 
     override fun list(): List<String> {
         val out = ArrayList<String>()

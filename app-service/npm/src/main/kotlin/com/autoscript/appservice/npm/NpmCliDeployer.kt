@@ -1,107 +1,134 @@
 package com.autoscript.appservice.npm
 
+import com.autoscript.domain.json.DomainJson
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
+import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
 
-/**
- * vendored npm CLI 部署器（docs §10.2 存储布局 · `files/npm/`）：
- * assets 里的 npm CLI（~8–9MB）**原子部署**到 filesDir（tmp 写逐文件 + 全量 sha256 校验 + rename）。
- *
- * 幂等（防每次开机重复解 9MB）：目标 `bin/npm-cli.js` 旁写 `.cli-manifest.sha256`
- * 锚文件，内容 = 源侧 npm-cli.js 的 sha256；已存在且匹配即整目录跳过。
- * 升级换版本 = 新哈希 ≠ 锚 → 重部署（版本钉在 node-runtime-build 侧，与主链同轨）。
- *
- * 与 [InstallStaging] 的 install journal 同源但正交：本事务管「CLI 自身就位」；
- * 失败/半途的 tmp 目录由下次 [deploy] 开头的 stale 清扫兜底（调用方无感重试）。
- *
- * 素材源为接缝（[CliSource]）：Android 侧 `assets.list/open("npm/…")` 读 APK 资产；
- * 测试/桌面侧文件系统目录树直读。本模块零 android.*（archUnit 守护）。
- */
+/** 将打包前的 npm 文件清单与 APK 实际可读的资产、落盘目录逐项对账。 */
 object NpmCliDeployer {
+    private val ANCHORS = listOf("bin/npm-cli.js", "bin/npx-cli.js")
+    private const val MARKER = ".cli-manifest.sha256"
+    private val SHA256 = Regex("[0-9a-f]{64}")
 
-    /** 部署后必须存在的锚文件：缺一票否决——防「assets 只跟了一半」的半瘫 CLI。 */
-    private val ANCHORS = listOf(
-        "bin/npm-cli.js",
-        "bin/npx-cli.js",
-    )
-
-    /** 素材源：按相对路径取字节 + 可枚举源树全部常规文件 relPath。 */
     interface CliSource {
         fun read(relPath: String): ByteArray?
-
-        /** 枚举源树（assets 侧 = list 递归；目录源 = Files.walk）。 */
         fun list(): List<String>
+        /** 构建期生成、位于 assets 根的 npm-manifest.json；生产缺失必须报错。 */
+        fun manifest(): String?
     }
 
-    /** 部署结果：Ready(cliJs, deployedFresh=false 表示幂等命中）。 */
     sealed interface Outcome {
         data class Ready(val cliJs: Path, val deployedFresh: Boolean) : Outcome
     }
 
-    /** CLI 落位根（`files/npm/`）。 */
     fun npmRoot(filesDir: Path): Path = filesDir.resolve("npm")
-
-    /** `node <filesDir>/npm/bin/npm-cli.js` 的可执行入口（§10.2 调用链末段）。 */
     fun cliJsPath(filesDir: Path): Path = npmRoot(filesDir).resolve("bin/npm-cli.js")
 
-    /**
-     * 确保 vendored CLI 就位：枚举源 → 幂等闸 → tmp 全量写 + 逐文件 sha256 校验 → 原子 rename。
-     *
-     * @return Ready；deployedFresh=false 表示幂等命中——调用方零成本复用上次落盘。
-     * @throws IllegalStateException 源树缺 [ANCHORS] 锚文件（检疫：宁可诚实失败也不降级系统 npm）。
-     */
+    private data class Entry(val path: String, val sha256: String)
+    private data class Manifest(val files: List<Entry>, val bytes: Long, val identity: String)
+
+    private fun parseManifest(text: String): Manifest {
+        val fields = DomainJson.decodeObject(text)
+        val count = DomainJson.optLong(fields, "count") ?: error("npm 清单缺 count")
+        val bytes = DomainJson.optLong(fields, "bytes") ?: error("npm 清单缺 bytes")
+        val files = (fields["files"] as? DomainJson.Value.Arr)?.items
+            ?: error("npm 清单缺 files 数组")
+        require(count > 0 && bytes >= 0 && files.size.toLong() == count) {
+            "npm 清单件数不一致：count=$count files=${files.size}"
+        }
+        val entries = files.map { value ->
+            val item = (value as? DomainJson.Value.Obj)?.fields ?: error("npm 清单文件条目不是对象")
+            val path = DomainJson.reqStr(item, "path")
+            val hash = DomainJson.reqStr(item, "sha256")
+            require(safePath(path) && path != MARKER && SHA256.matches(hash)) {
+                "npm 清单路径或 SHA-256 非法：$path"
+            }
+            Entry(path, hash)
+        }
+        require(entries.map { it.path }.toSet().size == entries.size) { "npm 清单有重复路径" }
+        require(ANCHORS.all { anchor -> entries.any { it.path == anchor } }) {
+            "vendored npm CLI 素材缺锚文件：${ANCHORS.filter { anchor -> entries.none { it.path == anchor } }}"
+        }
+        // 身份覆盖整棵树，而不只是 bin/npm-cli.js；清单顺序不改变身份。
+        val identity = DirSizer.sha256(
+            DomainJson.encode(
+                mapOf(
+                    "count" to count, "bytes" to bytes,
+                    "files" to entries.sortedBy { it.path }.map { mapOf("path" to it.path, "sha256" to it.sha256) },
+                ),
+            )
+                .toByteArray(StandardCharsets.UTF_8),
+        )
+        return Manifest(entries, bytes, identity)
+    }
+
+    private fun safePath(path: String): Boolean =
+        path.isNotBlank() && !path.startsWith('/') && !path.contains('\\') &&
+            !path.contains('\u0000') && path.split('/').all { it.isNotEmpty() && it != "." && it != ".." }
+
+    private fun treeMatches(target: Path, expected: Manifest): Boolean {
+        if (!Files.isDirectory(target, LinkOption.NOFOLLOW_LINKS)) return false
+        val paths = Files.walk(target).use { walk ->
+            walk.filter { Files.isRegularFile(it, LinkOption.NOFOLLOW_LINKS) }
+                .map { target.relativize(it).toString().replace('\\', '/') }
+                .filter { it != MARKER }.collect(java.util.stream.Collectors.toList())
+        }
+        if (paths.toSet() != expected.files.map { it.path }.toSet() || paths.size != expected.files.size) return false
+        return expected.files.all { entry ->
+            val file = target.resolve(entry.path)
+            Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS) &&
+                DirSizer.sha256(Files.readAllBytes(file)) == entry.sha256
+        }
+    }
+
+    /** 源树检疫在缓存判断之前完成；失败不触碰旧目录。 */
     fun deploy(filesDir: Path, source: CliSource): Outcome {
+        val manifestText = source.manifest() ?: error("vendored npm CLI 缺 npm-manifest.json（APK 素材未完整交付）")
+        val expected = parseManifest(manifestText)
+        val rels = source.list()
+        val actualPaths = rels.toSet()
+        val expectedPaths = expected.files.map { it.path }.toSet()
+        require(rels.size == actualPaths.size && rels.all(::safePath) && actualPaths == expectedPaths) {
+            "vendored npm CLI 清单与 APK 文件集合不一致：缺 ${expectedPaths - actualPaths}；多 ${actualPaths - expectedPaths}"
+        }
+        var sourceBytes = 0L
+        for (entry in expected.files) {
+            val bytes = source.read(entry.path) ?: error("vendored npm CLI 素材不可读：${entry.path}")
+            sourceBytes += bytes.size
+            require(DirSizer.sha256(bytes) == entry.sha256) { "vendored npm CLI 素材哈希不匹配：${entry.path}" }
+        }
+        require(sourceBytes == expected.bytes) { "vendored npm CLI 素材字节数不符：$sourceBytes != ${expected.bytes}" }
+
         Files.createDirectories(filesDir)
         val target = npmRoot(filesDir)
-        val cli = target.resolve("bin/npm-cli.js")
-        val manifest = target.resolve(".cli-manifest.sha256")
+        val cli = cliJsPath(filesDir)
+        val marker = target.resolve(MARKER)
+        if (Files.isRegularFile(marker, LinkOption.NOFOLLOW_LINKS) &&
+            String(Files.readAllBytes(marker), StandardCharsets.UTF_8).trim() == expected.identity &&
+            treeMatches(target, expected)
+        ) return Outcome.Ready(cli, deployedFresh = false)
 
-        val rels = source.list()
-        val cliHash = rels.firstOrNull { it == "bin/npm-cli.js" }
-            ?.let { source.read(it) }
-            ?.let { DirSizer.sha256(it) }
-            ?: throw IllegalStateException("vendored npm CLI 素材缺失：bin/npm-cli.js（assets/npm/ 未随包分发？）")
-        val missingAnchors = ANCHORS.filter { it !in rels.toSet() }
-        require(missingAnchors.isEmpty()) { "vendored npm CLI 素材缺锚文件：$missingAnchors（防半瘫 CLI 部署）" }
-
-        // 幂等闸：锚哈希匹配 → 整目录跳过（开机路径零 IO）
-        if (Files.isRegularFile(cli) && Files.exists(manifest) &&
-            String(Files.readAllBytes(manifest), StandardCharsets.UTF_8).trim() == cliHash
-        ) {
-            return Outcome.Ready(cli, deployedFresh = false)
-        }
-
-        // stale 清扫：上次半途 tmp 目录 + 墓碑
         Files.list(filesDir).use { s ->
             s.filter {
                 val n = it.fileName.toString()
                 n.startsWith(".npm-deploy-") || n.startsWith(".npm-tombstone-")
             }.forEach { it.toFile().deleteRecursively() }
         }
-
-        val tmp = Files.createDirectories(
-            filesDir.resolve(".npm-deploy-" + System.nanoTime().toString(36)),
-        )
+        val tmp = Files.createDirectories(filesDir.resolve(".npm-deploy-" + System.nanoTime().toString(36)))
         try {
-            // 全量写入 tmp（先写内容 + 期望哈希登记，校验通过才允许 rename）
-            val expect = LinkedHashMap<String, String>()
-            for (rel in rels) {
-                val bytes = source.read(rel) ?: continue
-                val dest = tmp.resolve(rel)
+            for (entry in expected.files) {
+                val bytes = source.read(entry.path) ?: error("vendored npm CLI 素材不可读：${entry.path}")
+                require(DirSizer.sha256(bytes) == entry.sha256) { "vendored npm CLI 素材哈希不匹配：${entry.path}" }
+                val dest = tmp.resolve(entry.path)
                 Files.createDirectories(dest.parent)
-                Files.write(dest, bytes, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)
-                expect[rel] = DirSizer.sha256(bytes)
+                Files.write(dest, bytes, StandardOpenOption.CREATE_NEW)
             }
-            require(expect.isNotEmpty()) { "vendored npm CLI 源树为空（$rels）" }
-            // 逐文件磁盘哈希复核（rename 前零半截）
-            for ((rel, want) in expect) {
-                val got = DirSizer.sha256(Files.readAllBytes(tmp.resolve(rel)))
-                require(got == want) { "vendored CLI 部署校验失败：$rel（磁盘哈希不匹配）" }
-            }
-            // 整体就位：旧目录移墓碑再 rename（失败滚回墓碑，不让 CLI 消失）
+            require(treeMatches(tmp, expected)) { "vendored npm CLI 部署校验失败：磁盘文件集合或哈希不匹配" }
+            Files.write(tmp.resolve(MARKER), expected.identity.toByteArray(StandardCharsets.UTF_8), StandardOpenOption.CREATE_NEW)
             if (Files.isDirectory(target)) {
                 val tomb = filesDir.resolve(".npm-tombstone-" + System.nanoTime().toString(36))
                 Files.move(target, tomb, StandardCopyOption.ATOMIC_MOVE)
@@ -115,11 +142,9 @@ object NpmCliDeployer {
             } else {
                 Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE)
             }
-            Files.write(manifest, cliHash.toByteArray(StandardCharsets.UTF_8))
             return Outcome.Ready(cli, deployedFresh = true)
         } finally {
-            tmp.toFile().deleteRecursively()   // 失败路径清残骸（成功路径 tmp 已 rename 走）
+            tmp.toFile().deleteRecursively()
         }
     }
 }
-

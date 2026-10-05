@@ -7,6 +7,8 @@
 // 「三件齐/半套红/全无警」与选填件「缺位只 warn」语义逐字保留；ANDROID_NDK_HOME
 // 无缺省且只在三件齐分支必填（没 NDK 的机器走「全无 → 警告」照常 assemble）。
 import java.io.File
+import java.security.MessageDigest
+import groovy.json.JsonOutput
 
 // facade dist 随包的生成位（§12.4）：声明须在 android.sourceSets 引用之前（kts 顺序求值）。
 val bridgeDistAssetsDir = layout.buildDirectory.dir("generated/bridgeDistAssets/bridge-dist")
@@ -202,10 +204,13 @@ val prepareNpmCliAssets = tasks.register("prepareNpmCliAssets") {
         rootProject.layout.projectDirectory.dir("node-runtime-build/out/npm").asFile,
     )
     outputs.dir(npmCliAssetsDir)
+    outputs.file(layout.buildDirectory.file("generated/npmCliAssets/npm-manifest.json"))
     // 来源不在 git：每次装配现查现拷（否则刚解包的 artifact 会被"outputs 已存在"跳过）
     outputs.upToDateWhen { false }
     doLast {
         val out = npmCliAssetsDir.get().asFile
+        val manifestFile = out.parentFile.resolve("npm-manifest.json")
+        manifestFile.delete() // 无素材时不可沿用上一次的清单
         out.deleteRecursively()
         out.mkdirs()
         val src = candidates.firstOrNull { it.isDirectory }
@@ -221,6 +226,7 @@ val prepareNpmCliAssets = tasks.register("prepareNpmCliAssets") {
         var files = 0
         var bytes = 0L
         var skippedDot = 0
+        val entries = mutableListOf<Map<String, String>>()
         src.walkTopDown()
             .filter { it.isFile }
             .filter { f ->
@@ -234,7 +240,10 @@ val prepareNpmCliAssets = tasks.register("prepareNpmCliAssets") {
                 dest.parentFile.mkdirs()
                 f.copyTo(dest, overwrite = true)
                 files++
-                bytes += f.length()
+                bytes += dest.length()
+                val hash = MessageDigest.getInstance("SHA-256").digest(dest.readBytes())
+                    .joinToString("") { "%02x".format(it) }
+                entries += mapOf("path" to f.relativeTo(src).invariantSeparatorsPath, "sha256" to hash)
             }
         if (skippedDot > 0) {
             logger.warn("[npm-cli] 跳过 $skippedDot 个点条目（AssetManager 可见性 ROM 间不一致；source=$src）")
@@ -246,6 +255,9 @@ val prepareNpmCliAssets = tasks.register("prepareNpmCliAssets") {
                     "未剪裁完的半成品，要么 NPM_CLI_ROOT 指错了目录"
             }
         }
+        manifestFile.writeText(
+            JsonOutput.toJson(mapOf("count" to files, "bytes" to bytes, "files" to entries.sortedBy { it["path"] })),
+        )
         logger.lifecycle("[npm-cli] 素材随包：$files 个文件 / ${bytes / 1024 / 1024}MiB → assets/npm/（source=$src）")
     }
 }

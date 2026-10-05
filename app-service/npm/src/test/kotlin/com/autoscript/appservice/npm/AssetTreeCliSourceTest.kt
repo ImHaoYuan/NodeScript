@@ -44,7 +44,8 @@ class AssetTreeCliSourceTest {
                 names.toTypedArray()
             }
         }
-        val src = AssetTreeCliSource("npm", list) { path ->
+        val manifest = com.autoscript.testkit.npmManifest(map.mapKeys { it.key.removePrefix("npm/") })
+        val src = AssetTreeCliSource("npm", list, openManifest = { manifest.byteInputStream() }) { path ->
             opens++
             ByteArrayInputStream(map[path] ?: throw FileNotFoundException(path))
         }
