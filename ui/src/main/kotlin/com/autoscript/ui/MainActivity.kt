@@ -1,7 +1,10 @@
 package com.autoscript.ui
 
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
 import android.os.Bundle
+import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
@@ -33,9 +36,12 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color as ComposeColor
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import com.autoscript.domain.host.HostSummary
 import com.autoscript.domain.host.TaskRegistration
@@ -156,10 +162,14 @@ class MainActivity : ComponentActivity() {
             // —— 圆外露出的就是 [ThemeSwitchReveal.fromBackground]（旧主题的底）。
             // 反面做法（先画一个色圆再换主题）在圆里看到的是一块死色，不是"另一个模式"。
             var reveal by remember { mutableStateOf<ThemeSwitchReveal?>(null) }
+            val view = LocalView.current
             val switchTheme: (Offset) -> Unit = { origin ->
                 reveal = ThemeSwitchReveal(
                     origin = origin,
                     fromBackground = if (dark) DarkColors.background else LightColors.background,
+                    // **先抓帧、再换主题**：抓的是"点之前"那一帧（旧主题的原样界面），
+                    // 换主题的重组还没发生。抓帧在下面那个函数里，失败退化成纯色底。
+                    fromFrame = captureFrame(view),
                     // **初值 0**（不是 1）：揭示的第一帧画出来就是"圆还没长"，不指望
                     // LaunchedEffect 抢在第一次绘制前 snapTo —— 那个先后没有保证，
                     // 抢不到就会闪一帧"整屏已是新主题"。
@@ -629,13 +639,37 @@ private fun themeSwitchLabel(isDark: Boolean): String =
  * @property origin 圆心 —— 那颗 ⋮ 在**根坐标**里的中心（见 `centerInRoot`；菜单本体在
  *   独立 popup 窗口里，量不到被点那一行的坐标，故取锚点）。
  * @property fromBackground 揭示期间**圆外**铺的底色 = 切换**前**那一档的 `background`。
+ * @property fromFrame 切换**前**那一帧的位图（[captureFrame]）—— 圆外画的是**旧主题的原样
+ *   界面**，不是一块纯色；抓不到时是 null，退化成 [fromBackground] 那块底。
  * @property progress 半径进度 0 → 1；**建的时候就是 0**（见 `switchTheme` 那处的注释）。
  */
 private data class ThemeSwitchReveal(
     val origin: Offset,
     val fromBackground: ComposeColor,
+    val fromFrame: ImageBitmap?,
     val progress: Animatable<Float, AnimationVector1D>,
 )
+
+/**
+ * 把 [view] 当前这一帧抓成位图（旧主题的"底片"）。
+ *
+ * **为什么非得抓帧**：圆形揭示要求圆外**还是旧主题的原样界面**。只把主题换掉再裁剪，
+ * 圆外就只剩一块纯色 —— 列表整块消失再从圆里长回来，那不是 TG 那个效果（TG 的
+ * `ThemeSwitchView` 也是先留一张旧主题的底片，再在它上面揭示新主题）。
+ *
+ * **失败不致命**：抓到空白 / OOM / 硬件层不给软件画布，都退回 null，绘制侧先铺的
+ * [ThemeSwitchReveal.fromBackground] 就顶上来 —— 同一段动画，圆外从"原样界面"降级成
+ * "旧主题的底色"，而不会把一次换主题升级成崩溃。故这里用 `runCatching`（一次最好的努力）
+ * 而不是 `catch` 块。
+ */
+private fun captureFrame(view: View): ImageBitmap? {
+    if (view.width <= 0 || view.height <= 0) return null
+    return runCatching {
+        val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+        view.draw(Canvas(bitmap))
+        bitmap.asImageBitmap()
+    }.getOrNull()
+}
 
 /**
  * 揭示时长：400ms。TG 的日夜切换是"看得见"的一段（不是 150ms 的淡入）——
@@ -656,7 +690,9 @@ private const val THEME_REVEAL_MILLIS = 400
  * [progress] 在 draw 期读（`Animatable.value`）：动画每帧只重绘，不重组整棵界面。
  */
 private fun ContentDrawScope.drawThemeReveal(reveal: ThemeSwitchReveal, progress: Float) {
+    // 圆外两层：先铺旧主题的底色（抓帧失败时看到的就是它），再叠上旧主题那一帧的原样界面。
     drawRect(reveal.fromBackground)
+    reveal.fromFrame?.let { frame -> drawImage(frame) }
     val radius = progress * ThemeReveal.maxRadius(
         originX = reveal.origin.x,
         originY = reveal.origin.y,
