@@ -16,7 +16,11 @@
 - [ ] `bridge/js` facade 单测（`npm --prefix bridge/js test`）
 - [ ] 文档链接门（`bash .github/scripts/check-doc-links.sh`）
 - [ ] `./gradlew :app:assembleDebug` + `:app:lintDebug` —— 仅当改了装配 / 资源 / manifest 面（两者已在 `ci.yml` 的 `android-build` job 里跑；本机跑是为了拿**带引擎二进制**的那个 APK）
-- [ ] 冻结文件（`settings.gradle.kts` / `gradle/libs.versions.toml` / 根 `build.gradle.kts`）未动，或已事先提出并获准
+- [ ] 冻结面未动，或已事先提出并获准 —— `settings.gradle.kts` / `gradle/libs.versions.toml` /
+      根 `build.gradle.kts` / `build-logic/` / `docs/design/` / `docs/README.md` /
+      `docs/framework-design.md` / `.github/` / `SECURITY.md` / `CONTRIBUTING.md` / `CLAUDE.md`
+- [ ] 只追加台账（`docs/log/` / `docs/design-status.md` / `docs/design-decisions.md` /
+      `docs/backlog.md`）**只加了新条目**，没有删改既有条目
 
 **结果如实写**：红过就写红过、哪条没跑就写没跑。借助 AI 助手完成的 PR，按
 [`CLAUDE.md`](../CLAUDE.md)「协作纪律」的约定在描述末尾补署名行（约定在那边，本模板只提醒）。
