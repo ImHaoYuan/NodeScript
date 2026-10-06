@@ -44,6 +44,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
@@ -140,7 +142,8 @@ private fun MenuItemRow(action: MenuAction, position: Int, onDismiss: () -> Unit
                 overlay = selector,
                 onClick = {
                     // 先关菜单再执行：动作里常带对话框/复制回执，菜单还开着会盖住它们。
-                    onDismiss()
+                    // 例外是 action.dismissOnClick = false 那一格（主题切换，见 MenuAction）。
+                    if (action.dismissOnClick) onDismiss()
                     action.onClick()
                 },
             )
@@ -355,6 +358,17 @@ fun ActionBottomSheetItem(
 private val SheetItemTextStyle = TextStyle(fontSize = 16.sp)
 
 /**
+ * 一颗按钮在**根坐标**里的中心（挂在锚点按钮上，供"从这颗按钮长出来"的动画取圆心）。
+ *
+ * 为什么量的是**锚点按钮**（顶栏那颗 ⋮）而不是菜单里被点的那一行：菜单本体住独立
+ * popup 窗口（[MenuPopup] 的 `Popup`），里面 `positionInRoot()` 给的是 **popup 自己的**
+ * 根，跟主窗口的根不是一个坐标系 —— 拿它当圆心，圆会从屏幕外的某个点长出来。
+ * 锚点在主窗口里，且就在菜单正上方：视觉上就是"从这颗按钮长出来"。
+ */
+internal fun LayoutCoordinates.centerInRoot(): Offset =
+    positionInRoot() + Offset(size.width / 2f, size.height / 2f)
+
+/**
  * 菜单里的一项。
  *
  * @property tone 让"取消/停止"这类带后果的项着色（TG 的删除项是红的：`text_RedRegular`）。
@@ -362,12 +376,16 @@ private val SheetItemTextStyle = TextStyle(fontSize = 16.sp)
  *   着色只留给"带后果"那一档（见 [StatusTone.menuColor]）。
  * @property enabled 挂起中（操作在途）时置 false —— 与行里那些胶囊**同一条口径**，
  *   否则会出现"胶囊灰着、菜单里还能点"的漏口。
+ * @property dismissOnClick 点完是否收起菜单（缺省 true）。主题切换那一格是 false ——
+ *   切完菜单留着（用户口径）：这一格点下去只是换个配色，菜单里其余的项还得能接着点，
+ *   收掉会逼用户为"再选一次排序"重开一遍菜单。
  */
 data class MenuAction(
     val label: String,
     val onClick: () -> Unit,
     val tone: StatusTone = StatusTone.NEUTRAL,
     val enabled: Boolean = true,
+    val dismissOnClick: Boolean = true,
 ) : MenuEntry
 
 /**

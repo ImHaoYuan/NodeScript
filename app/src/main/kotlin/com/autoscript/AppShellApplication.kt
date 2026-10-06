@@ -567,6 +567,24 @@ class AppShellApplication : Application(), HostSummary {
         }
     }
 
+    /**
+     * 读一个脚本文件的文本（[HostSummary] 的生产实现，项目页点文件进编辑）。
+     *
+     * 同 [createEntry]：只看 `files/scripts/` 落盘，不依赖壳寄存器。拒绝口径
+     * （目录/超限/二进制）在 [ScriptFileOps.read]（原文抛给 UI）。
+     */
+    override suspend fun readScriptFile(projectId: String, relPath: String): String =
+        ScriptFileOps.read(filesDir.toPath(), projectId, relPath)
+
+    /**
+     * 覆盖写一个脚本文件的文本（[HostSummary] 的生产实现，编辑器「保存」）。
+     *
+     * 原子替换 + 只覆盖已存在文件，见 [ScriptFileOps.save]。
+     */
+    override suspend fun saveScriptFile(projectId: String, relPath: String, content: String) {
+        ScriptFileOps.save(filesDir.toPath(), projectId, relPath, content)
+    }
+
     /** 漏投账本（能力中心呈现「闹钟已响但调度未就绪」）。 */
     fun missedAlarms(): Map<String, Long> = alarmDispatch.missed()
 

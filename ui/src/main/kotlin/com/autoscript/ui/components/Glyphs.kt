@@ -100,6 +100,9 @@ enum class GlyphKind {
 
     /** 使用情况访问权限（批 48）：三根高低不同的柱子 —— 「哪个应用用了多久」就是这么读的。 */
     CHART,
+
+    /** 「更多」（文件/文件夹行尾的溢出钮）：三个竖排实心点（TG `ic_ab_other`）。 */
+    MORE_VERT,
 }
 
 /** 线宽 ÷ 图标边长。四个字形共用一条，粗细才不会一格一个样。 */
@@ -111,6 +114,7 @@ private const val StrokeRatio = 0.085f
  * @param tint 线条色（调用方给：选中 = 强调色，未选中 = 次级灰）。
  * @param weight 线宽倍率。**选中项略微加粗** —— 这套图标是线性的，没有"填充版"可切，
  *   加粗就是它这一档语言里的"实心"（TG 底栏选中项也是靠视觉重量拉开，不是靠颜色一条）。
+ *   实心字形（[GlyphKind.MORE_VERT]）没有线宽可加，它缩放的是**点半径**（见那一格）。
  */
 @Composable
 fun Glyph(
@@ -398,6 +402,46 @@ fun Glyph(
                 drawPath(path(0.50f to 0.84f, 0.50f to 0.24f), tint, style = stroke)
                 drawPath(path(0.83f to 0.84f, 0.83f to 0.42f), tint, style = stroke)
             }
+
+            // 「更多」三点（TG `ic_ab_other` 的实测：三点竖排、半径 2.1/24≈0.088、
+            // 圆心 y = 4.5/12/19.5 ÷ 24 ≈ 0.19/0.50/0.81）。**实心**不是描边 ——
+            // 0.088 的小圆用 StrokeRatio 描边会糊成一圈灰环，看不出是三个点。
+            // `weight` 在这一格缩放的是**点半径**（实心圆没有线宽）：TG 的 `ic_ab_other`
+            // 只有一档粗细，本仓要两档 —— 顶栏那颗最粗、列表行尾那颗最细，
+            // 见 [BAR_MORE_DOTS_WEIGHT] / [ROW_MORE_DOTS_WEIGHT] 那组常量。
+            GlyphKind.MORE_VERT -> {
+                val dot = 0.088f * u * weight
+                drawCircle(tint, radius = dot, center = at(0.5f, 0.19f))
+                drawCircle(tint, radius = dot, center = at(0.5f, 0.50f))
+                drawCircle(tint, radius = dot, center = at(0.5f, 0.81f))
+            }
         }
     }
 }
+
+/**
+ * 顶栏那颗「更多」（⋮）的画布边长：**全仓最粗的一档三点**。
+ *
+ * 与 [ROW_MORE_DOTS_SIZE] / [ROW_MORE_DOTS_WEIGHT] 那组一起，构成两档粗细
+ * （用户口径：顶栏最粗、列表行尾细一点）。两处都是 `Glyph(GlyphKind.MORE_VERT, …)`
+ * 加这组参数，**没有各自的包装函数** —— 一层的包装只是把同一个 `Glyph` 调用的实参
+ * 藏起来，读的人反而要跳一层才知道粗细是多少。
+ *
+ * 实测尺寸：24dp 画布 × [BAR_MORE_DOTS_WEIGHT] → 点半径 2.75dp（点径 5.5dp、点距 7.4dp）；
+ * 行尾那颗是点径 2.8dp —— 差近一倍，这是**要求**不是随手调的：顶栏是整屏唯一的全局入口，
+ * 行尾只是"这一行的操作"，两者重量必须读得出层级。层级由 `MoreDotsTest` 守着，
+ * 免得下一个人顺手把两处改成一样。
+ *
+ * 为什么不是 `Text("⋮")`（本仓原先的写法）：那个字符的粗细由**系统字体**决定，
+ * 换一台机器就是一个样，而且没法与行尾那颗比大小。画出来的点与行尾那颗**同形**。
+ */
+internal val BarMoreDotsSize = 24.dp
+
+/** 顶栏三点的粗细倍率：最粗的一档（见 [BarMoreDotsSize]）。 */
+internal const val BAR_MORE_DOTS_WEIGHT = 1.3f
+
+/** 行尾三点的画布边长：比顶栏小一号（它住在 48dp 触控目标里，右边还要留 4dp 呼吸位）。 */
+internal val RowMoreDotsSize = 20.dp
+
+/** 行尾三点的粗细倍率：比顶栏细一档（见 [BarMoreDotsSize]）。 */
+internal const val ROW_MORE_DOTS_WEIGHT = 0.8f

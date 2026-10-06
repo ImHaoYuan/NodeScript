@@ -18,7 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -50,9 +50,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -65,7 +67,10 @@ import com.autoscript.ui.components.ActionBar
 import com.autoscript.ui.components.ActionBarAction
 import com.autoscript.ui.components.ActionBottomSheet
 import com.autoscript.ui.components.ActionBottomSheetItem
+import com.autoscript.ui.components.BAR_MORE_DOTS_WEIGHT
+import com.autoscript.ui.components.BarMoreDotsSize
 import com.autoscript.ui.components.ContextMenu
+import com.autoscript.ui.components.centerInRoot
 import com.autoscript.ui.components.EaseOutQuint
 import com.autoscript.ui.components.OvershootEasing
 import com.autoscript.ui.components.rememberPressIndication
@@ -75,8 +80,11 @@ import com.autoscript.ui.components.MenuGap
 import com.autoscript.ui.components.Glyph
 import com.autoscript.ui.components.GlyphKind
 import com.autoscript.ui.components.LocalToast
+import com.autoscript.ui.components.ROW_MORE_DOTS_WEIGHT
 import com.autoscript.ui.components.RefreshableBox
+import com.autoscript.ui.components.RowMoreDotsSize
 import com.autoscript.ui.components.ScrollToTopButton
+import com.autoscript.ui.components.rememberScrollToTopVisible
 import com.autoscript.ui.components.TabBarBottomClearance
 import com.autoscript.ui.components.ToneText
 import com.autoscript.ui.components.pressable
@@ -115,8 +123,12 @@ import kotlinx.coroutines.launch
 @Composable
 fun ProjectScreen(
     state: ProjectState,
-    /** 主题两态切换（⋮ 第一格，TG 日/夜同款 —— 目标模式写菜单项上）。 */
-    onSwitchTheme: () -> Unit,
+    /**
+     * 主题两态切换（⋮ 第一格，TG 日/夜同款 —— 目标模式写菜单项上）。
+     *
+     * 参数是**这颗 ⋮ 在根坐标里的中心**：外壳的圆形揭示从它长出来（见 `centerInRoot`）。
+     */
+    onSwitchTheme: (Offset) -> Unit,
     /**
      * 那一格的**文案** = 点它切到的那一档（TG `DialogsActivity` 的日夜项：
      * 当前深色写 "Day Mode"、当前浅色写 "Night Mode"）。
@@ -127,6 +139,10 @@ fun ProjectScreen(
     themeSwitchLabel: String,
     /** 新建文件/文件夹（FAB 展开的两个子项；落盘在宿主，本屏只收结论）。 */
     onCreate: (projectId: String, name: String, isFolder: Boolean) -> Unit,
+    /** 读一个脚本文件的文本（**点文件**进编辑面时调；失败原文抛，本屏如实显示）。 */
+    onReadFile: suspend (projectId: String, relPath: String) -> String,
+    /** 覆盖写一个脚本文件的文本（编辑器「保存」；**正常返回即已落盘**）。 */
+    onSaveFile: suspend (projectId: String, relPath: String, content: String) -> Unit,
     /** 排序档/逆向变更（写入 state —— 重读不重置呈现偏好）。 */
     onSortChange: (FileSort, Boolean) -> Unit,
     modifier: Modifier = Modifier,
@@ -158,16 +174,39 @@ fun ProjectScreen(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
+    // 正在编辑的文件（null = 不在编辑）。编辑面**换掉整页**而不是叠一层浮层
+    // （TG 打开文档就是整屏换页）：列表/FAB/搜索栏在编辑期间根本不组合，
+    // 返回键也整条让给编辑器 —— 少一层"底下那份还在不在"的悬念。
+    var editing by remember { mutableStateOf<ScriptFileRowUi?>(null) }
+    val editingNow = editing
+    if (editingNow != null) {
+        ScriptEditorScreen(
+            projectId = editingNow.projectId,
+            relPath = editingNow.relPath,
+            displayName = editingNow.name,
+            onRead = onReadFile,
+            onSave = onSaveFile,
+            onClose = { editing = null },
+            modifier = modifier,
+        )
+        return
+    }
+
     // 可见集 = 一层（[ProjectState.childrenOf]）→ 排序。**搜索时层裁剪让位**：
     // TG 文件选择器的搜索是**另一份数据集**（`searchAdapter` 搜整棵树、含"最近"分区，
     // 展开搜索栏时列表整个换掉），不是"在当前目录里筛一下" —— 用户搜文件名时想找的是
     // "那个文件在哪"，锁在当前层就等于答非所问。搜索清空即回到当前层。
     val searching = query.isNotBlank()
-    val visible = ScriptFileRowUi.sorted(
-        files = ProjectState.poolFor(state.files, currentFolder, searching).filter { it.matches(query) },
-        sort = state.sort,
-        reversed = state.reversed,
-    )
+    // **记忆化**：本屏每次重组都会走到这里，而 `poolFor + filter + sorted` 是"整层重排一遍"
+    // —— 多选里每勾一行、浮层每弹一条回执都会触发重组，200 个文件就是 200 次白排序。
+    // 键取真正的输入（池 + 词 + 排序档），敲搜索词本来就该重算，勾选/回执不该。
+    val visible = remember(state.files, currentFolder, searching, query, state.sort, state.reversed) {
+        ScriptFileRowUi.sorted(
+            files = ProjectState.poolFor(state.files, currentFolder, searching).filter { it.matches(query) },
+            sort = state.sort,
+            reversed = state.reversed,
+        )
+    }
     val selectionMode = selected.isNotEmpty()
     val allSelected = ProjectState.allSelected(selected, visible)
 
@@ -269,15 +308,16 @@ fun ProjectScreen(
                     state = listState,
                     contentPadding = PaddingValues(top = 4.dp, bottom = TabBarBottomClearance()),
                 ) {
-                    items(visible, key = { ProjectState.keyOf(it) }) { file ->
+                    itemsIndexed(visible, key = { _, item -> ProjectState.keyOf(item) }) { index, file ->
                         val key = ProjectState.keyOf(file)
                         FileRow(
                             file = file,
                             selected = key in selected,
+                            showMore = !selectionMode,
                             onClick = {
                                 when {
                                     selectionMode -> selected = ProjectState.toggleSelection(selected, key)
-                                    // 目录 = 进一层（TG 文件页点文件夹下钻）；文件 = 开操作面板。
+                                    // 目录 = 进一层（TG 文件页点文件夹下钻）。
                                     // 从搜索结果进目录要**收起搜索**：不然进了层列表还是全库的
                                     // 搜索结果，等于"点了没反应"（TG 的 onSearchCollapse 同款）。
                                     file.isDirectory -> {
@@ -286,9 +326,13 @@ fun ProjectScreen(
                                         selected = emptySet()
                                         scope.launch { listState.scrollToItem(0) }
                                     }
-                                    else -> sheetTarget = file
+                                    // 文件 = **直接进编辑面**（TG 文件页点文档就是打开，不弹菜单）；
+                                    // 复制路径等其余动作走行尾的 ⋮ 与长按面板 —— 一行的主手势
+                                    // 只留给"最常做的那件事"，两件事抢同一下点击就是猜。
+                                    else -> editing = file
                                 }
                             },
+                            onMore = { sheetTarget = file },
                             onLongClick = {
                                 longPressFeedback()
                                 // 长按进选择模式并选中这一行（TG 的选择模式入口就是长按）；
@@ -296,6 +340,19 @@ fun ProjectScreen(
                                 selected = ProjectState.toggleSelection(selected, key)
                             },
                         )
+                        // 行间那条淡灰分割线（用户口径：`test.txt` 与 `main.js` 之间那条）。
+                        // **最后一行不画**：列表末尾挂一条悬空的线，读起来像"下面还有内容"。
+                        // 左内缩对齐**文字左缘**（12 外边距 + 52 头像 + 12 间距）—— 线从头像
+                        // 底下穿过去，"头像属于哪一行"就糊了。
+                        if (index < visible.lastIndex) {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = FileRowDividerInset)
+                                    .height(1.dp)
+                                    .background(ThemeColors.divider),
+                            )
+                        }
                     }
                     if (state.load.isLoaded && visible.isEmpty()) {
                         item { EmptyFilesHint(filtered = query.isNotBlank(), inFolder = currentFolder != null) }
@@ -303,7 +360,7 @@ fun ProjectScreen(
                 }
             }
             ScrollToTopButton(
-                visible = listState.firstVisibleItemIndex > 0,
+                visible = rememberScrollToTopVisible(listState),
                 onClick = { scope.launch { listState.animateScrollToItem(0) } },
                 modifier = Modifier.align(Alignment.BottomEnd)
                     .padding(start = 16.dp, end = 16.dp, bottom = TabBarBottomClearance(extra = 64.dp)),
@@ -379,29 +436,44 @@ private fun ProjectMenu(
     currentSort: FileSort,
     reversed: Boolean,
     themeSwitchLabel: String,
-    onSwitchTheme: () -> Unit,
+    onSwitchTheme: (Offset) -> Unit,
     onSelectAll: () -> Unit,
     onSort: (FileSort, Boolean) -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     var sortMenuOpen by remember { mutableStateOf(false) }
+    // 这颗 ⋮ 在根坐标里的中心：主题切换的圆形揭示从它长出来。菜单本体住独立 popup
+    // 窗口、坐标不在主窗口的系里，所以量的是锚点而不是被点的那一行（见 centerInRoot）。
+    val anchor = remember { mutableStateOf(Offset.Zero) }
     Box {
-        Text(
-            text = "⋮",
-            color = ThemeColors.text,
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier
-                .pressable(role = Role.Button, onClick = { open = true })
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-        )
+        Box(Modifier.onGloballyPositioned { anchor.value = it.centerInRoot() }) {
+            // 三点是**画出来的**（[GlyphKind.MORE_VERT] + 最粗那档参数）：原先写成
+            // `Text("⋮")`，粗细由系统字体决定、没法与列表行尾那颗比大小（见那组常量的 KDoc）。
+            Glyph(
+                kind = GlyphKind.MORE_VERT,
+                tint = ThemeColors.text,
+                modifier = Modifier
+                    .pressable(role = Role.Button, onClick = { open = true })
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                size = BarMoreDotsSize,
+                weight = BAR_MORE_DOTS_WEIGHT,
+            )
+        }
         ContextMenu(
             expanded = open,
             onDismiss = { open = false },
             actions = buildList {
                 // 标签 = **点它切到的那一档**（TG `DialogsActivity` 的日夜项：
                 // 当前是深色就写 "Day Mode"，当前是浅色就写 "Night Mode"）。
-                add(MenuAction(label = themeSwitchLabel, onClick = onSwitchTheme))
+                // `dismissOnClick = false`：切主题**不关菜单**（用户口径）—— 换的只是配色，
+                // 菜单里其余项还得能接着点；收掉会逼用户为"再选一次排序"重开一遍。
+                add(
+                    MenuAction(
+                        label = themeSwitchLabel,
+                        dismissOnClick = false,
+                        onClick = { onSwitchTheme(anchor.value) },
+                    ),
+                )
                 add(MenuGap)
                 add(MenuAction(label = "选择全部", onClick = onSelectAll))
                 add(
@@ -496,9 +568,11 @@ private fun SearchField(
  * 文件夹行：头像 = 文件夹字形（accent 色底白线），次行 = "N 项 · 时刻"（TG 文件页
  * 文件夹行不显示字节数的同一口径）。
  *
- * **两个手势**（TG 列表的读法，与任务中心同构）：
- * - **点**：目录 = 进一层；文件 = 开操作面板；选择模式里 = 勾/去勾这一行；
- * - **长按**：进选择模式并勾上这一行（TG 的选择模式入口就是长按）。
+ * **三个手势**（TG 列表的读法，与任务中心同构）：
+ * - **点**：目录 = 进一层；文件 = 进编辑面；选择模式里 = 勾/去勾这一行；
+ * - **长按**：进选择模式并勾上这一行（TG 的选择模式入口就是长按）；
+ * - **行尾 ⋮**（[showMore]）：开这一行的操作面板（复制路径 / 进文件夹）——
+ *   与长按**不是**同一件事：长按是"选中"（TG 语义），操作面板要一个明确可点的入口。
  *
  * 选中态是**整行淡底 + 头像位换成勾**（TG 选择模式的读法：勾在最左那一格，
  * 头像让位）—— 只换行底色的话，勾选与"这行被按住了"看起来是一回事。
@@ -507,7 +581,11 @@ private fun SearchField(
 private fun FileRow(
     file: ScriptFileRowUi,
     selected: Boolean,
+    /** 是否画行尾的 ⋮（选择模式里不画 —— 那时行尾留给"已选 N 项"那套语义）。 */
+    showMore: Boolean,
     onClick: () -> Unit,
+    /** 行尾 ⋮ 的落点（开操作面板）。 */
+    onMore: () -> Unit,
     onLongClick: () -> Unit,
 ) {
     val palette = ThemeColors
@@ -548,9 +626,46 @@ private fun FileRow(
                 maxLines = 1,
             )
         }
-        Spacer(Modifier.width(16.dp))
+        if (showMore) {
+            // 行尾 ⋮（TG 的溢出钮 `ic_ab_other`）：48dp 触控目标、居行右端。
+            // 色取 `windowBackgroundWhiteBlackText`（[ThemeColors.text]：浅色下就是黑），
+            // 与顶栏那颗 `⋮` 同档 —— 列表行里唯一一处"文字色"的图标。
+            Box(
+                Modifier
+                    .size(FileRowMoreTouch)
+                    .pressable(
+                        role = Role.Button,
+                        overlay = palette.menuSelector,
+                        shape = CircleShape,
+                        onClick = onMore,
+                    )
+                    .semantics { contentDescription = "更多（${file.name}）" },
+                contentAlignment = Alignment.Center,
+            ) {
+                Glyph(
+                    kind = GlyphKind.MORE_VERT,
+                    tint = palette.text,
+                    size = RowMoreDotsSize,
+                    weight = ROW_MORE_DOTS_WEIGHT,
+                )
+            }
+            Spacer(Modifier.width(4.dp))
+        } else {
+            Spacer(Modifier.width(16.dp))
+        }
     }
 }
+
+/** 行尾 ⋮ 的触控目标（Material 最小可达性 48dp）。 */
+private val FileRowMoreTouch = 48.dp
+
+/**
+ * 行间分割线的左内缩：与**文字左缘**对齐。
+ *
+ * 12dp 行外边距 + 52dp 头像格 + 12dp 间距 —— 三个数分别写死在 `FileRow` 的布局里，
+ * 这里把和写成常量：改头像尺寸时至少这一处会**显式**跟着改（写 76.dp 就没有这个提醒）。
+ */
+private val FileRowDividerInset = 12.dp + 52.dp + 12.dp
 
 /** 选中遮罩的圆角（`DialogCell` 的 `cornersRadius = dp(8) * cornerProgress`）。 */
 private val FileRowSelectedRadius = 8.dp
@@ -686,8 +801,8 @@ private fun EmptyFilesHint(filtered: Boolean, inFolder: Boolean) {
  *
  * 点击展开两个子项（新建文件/新建文件夹）：TG 的子按钮是另一颗 48dp 圆浮在主按钮上方
  * （`createSubButtonLayoutParams` 同位、blur3 背板），这里用同一语法的动画展开 ——
- * 按住主钮时子项滑入，点空白/主钮收起。子项与主钮**同规格**的 48dp 圆徽章（批 25：
- * 圆标 + 灰底，不再是文字胶囊；见 [FabSubItem]）。
+ * 按住主钮时子项滑入，点空白/主钮收起。子项是**圆角长方形**（高同主钮、宽随文案，
+ * 文案在左、图标靠右；见 [FabSubItem]）。
  */
 @Composable
 private fun CreateFab(
@@ -727,7 +842,9 @@ private fun CreateFab(
     val subExit = fadeOut(tween(FabAnimDurationMillis, easing = EaseOutQuint)) +
         scaleOut(targetScale = FabSubInitialScale, animationSpec = tween(FabAnimDurationMillis, easing = EaseOutQuint)) +
         slideOutVertically(tween(FabAnimDurationMillis, easing = EaseOutQuint)) { subOffsetPx }
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+    // 子项与主钮同尺寸（48dp），列宽 = 主钮宽；**右对齐**是让"子钮与主钮同心"这条
+    // 在任何列宽下都成立（居中一旦遇上更宽的子项就会把主钮往左推）。
+    Column(modifier, horizontalAlignment = Alignment.End) {
         // 子项自下而上展开（TG：子按钮浮在主按钮上方，逐颗滑出）。
         AnimatedVisibility(visible = expanded, enter = subEnter, exit = subExit) {
             FabSubItem(label = "新建文件夹", glyph = GlyphKind.FOLDER, onClick = {
@@ -755,7 +872,9 @@ private fun CreateFab(
                 .background(ThemeColors.featuredButton, CircleShape)
                 .clickable(
                     interactionSource = source,
-                    indication = rememberPressIndication(),
+                    // 形状要一起给：按压遮罩按矩形画，不给形状就会在圆的四个角上露出
+                    // 方块灰影（见 `FlatPressIndication`）。
+                    indication = rememberPressIndication(shape = CircleShape),
                     role = Role.Button,
                     onClick = { expanded = !expanded },
                 ),
@@ -796,32 +915,40 @@ private const val FabSubInitialScale = 0.4f
 private val FabSubRise = 64.dp
 
 /**
- * FAB 展开的子项：与主钮同规格的 48dp 圆徽章（`createSubButtonLayoutParams` 的 48×48）。
+ * FAB 展开的子项：**与主钮同尺寸的圆徽章（[FabSize] = 48dp）、只有图标** ——
+ * TG 的 `FragmentFloatingButton` 子按钮就是这个形态（一颗同尺寸的圆钮 + 一枚字形）。
  *
- * 背板 = TG 的 `iBlur3Background`（`BlurredBackgroundDrawable`）：
- * - **圆角 18dp**（`setRadius(dp(18))`）—— 在 48dp 的圆徽章上即"接近圆"的方角，
- *   不是正圆；
+ * **不带文案**：这两档动作（新建文件 / 新建文件夹）一度做成"圆角长方形 + 文案"，
+ * 但两颗子钮并排时文字把主钮上方那一列撑得很宽、也把 48dp 的节奏打散；
+ * 图标（文档 / 文件夹）+ 点完立刻出现的命名对话框标题已经足够分辨。
+ * 无文案的代价是读屏认不出，故 [label] 仍进 contentDescription。
+ *
+ * 背板沿用 TG 的 `iBlur3Background`（`BlurredBackgroundDrawable`）那一套：
+ * - **正圆**（TG 的 `setRadius(dp(18))` 落在 48dp 上本来就近乎正圆；用户口径：与主钮同形）；
  * - **描边 0.4dp**（`setStrokeWidth(dpf2(0.4f), dpf2(0.4f))`），色随深浅：
  *   上边浅色 `0x20000000` / 深色 `0x11FFFFFF`（[FabSubStrokeTop]）；
  * - 底是**模糊背板**（把身后的内容模糊后上浮），本仓没有实时模糊，
- *   取 `key_windowBackgroundWhite` 的实色近似 —— 浅色下就是白，深色下是 `#181819`
- *   （[ThemeColors.surfaceMuted] 的浅色档不适用，故直接用 [ThemeColors.background]）。
- * - 图标 = `key_actionBarDefaultIcon`（[ThemeColors.barIcon]：浅色偏冷深灰 `#FF404E56`，
- *   **不是**正文黑）；按下底 = `key_listSelector`（[ThemeColors.menuSelector] 同档）。
- *
- * TG 子按钮同样只有图标没有字 —— 文案进 contentDescription 给读屏。
+ *   取 `key_windowBackgroundWhite` 的实色近似 —— 浅色下就是白，深色下是 `#161E27`
+ *   （[ThemeColors.background]，批 67 的用户口径值）。
+ * - 图标取 `key_actionBarDefaultIcon`（[ThemeColors.barIcon]：浅色偏冷深灰
+ *   `#FF404E56`，**不是**正文黑）；按下底 = `key_listSelector`
+ *   （[ThemeColors.menuSelector] 同档）。形状要一起给 [pressable]：按压遮罩按矩形画，
+ *   不给形状就会在圆的四个角上露出方块灰影（见 `FlatPressIndication`）。
  */
 @Composable
 private fun FabSubItem(label: String, glyph: GlyphKind, onClick: () -> Unit) {
     val palette = ThemeColors
+    // 正圆：与主钮同形（TG 那颗 `setRadius(dp(18))` 落在 48dp 上本来就近乎正圆）。
+    val shape = CircleShape
     Box(
         Modifier
             .size(FabSize)
-            .background(palette.background, RoundedCornerShape(FabSubCornerRadius))
-            .border(0.4.dp, FabSubStrokeTop(), RoundedCornerShape(FabSubCornerRadius))
+            .background(palette.background, shape)
+            .border(0.4.dp, FabSubStrokeTop(), shape)
             .pressable(
                 role = Role.Button,
                 overlay = palette.menuSelector,
+                shape = shape,
                 onClick = onClick,
             )
             .semantics { contentDescription = label },
@@ -830,9 +957,6 @@ private fun FabSubItem(label: String, glyph: GlyphKind, onClick: () -> Unit) {
         Glyph(kind = glyph, tint = palette.barIcon, size = 24.dp)
     }
 }
-
-/** 子钮背板圆角（`iBlur3Background.setRadius(dp(18))`）。 */
-private val FabSubCornerRadius = 18.dp
 
 /**
  * 子钮那圈 0.4dp 描边（`BlurredBackgroundDrawable.getStrokeColorTop()`：

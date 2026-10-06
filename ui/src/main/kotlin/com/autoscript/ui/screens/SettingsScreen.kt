@@ -30,9 +30,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -40,12 +42,17 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.autoscript.ui.components.ActionBar
+import com.autoscript.ui.components.BAR_MORE_DOTS_WEIGHT
+import com.autoscript.ui.components.BarMoreDotsSize
 import com.autoscript.ui.components.ContextMenu
+import com.autoscript.ui.components.Glyph
+import com.autoscript.ui.components.centerInRoot
 import com.autoscript.ui.components.GlyphKind
 import com.autoscript.ui.components.LocalToast
 import com.autoscript.ui.components.MenuAction
 import com.autoscript.ui.components.RefreshableBox
 import com.autoscript.ui.components.ScrollToTopButton
+import com.autoscript.ui.components.rememberScrollToTopVisible
 import com.autoscript.ui.components.SettingIconColors
 import com.autoscript.ui.components.SettingsCard
 import com.autoscript.ui.components.SettingsCellRow
@@ -94,7 +101,7 @@ fun SettingsScreen(
     state: CapabilityCenterState,
     onOpenSettings: (Capability) -> Unit,
     themeSwitchLabel: String,
-    onSwitchTheme: () -> Unit,
+    onSwitchTheme: (Offset) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // 子页开着时先吃掉系统返回。横划到别的页签时本屏不在组合里，BackHandler 随之卸下，
@@ -215,7 +222,7 @@ fun SettingsScreen(
             }
             val listState = if (permissionsOpen) pageListState else topListState
             ScrollToTopButton(
-                visible = listState.firstVisibleItemIndex > 0,
+                visible = rememberScrollToTopVisible(listState),
                 onClick = { scope.launch { listState.animateScrollToItem(0) } },
                 // 回顶钮抬到悬浮底栏上方（胶囊占位 + 导航 inset，另加 8dp 呼吸）。
                 modifier = Modifier.align(Alignment.BottomEnd)
@@ -353,26 +360,40 @@ private fun PermissionRow(row: CapabilityRowState, onOpenSettings: (Capability) 
  * 顶页 `⋮`（TG 设置页顶栏右侧三个点的对应位，`ic_ab_other`）。
  *
  * TG 那格挂的是退出登录（`LogoutActivity`），本仓无登录概念 —— 挂全局的主题切换
- * （与项目页 ⋮ 第一格同一项、同一份「标签 = 目标模式」文案口径）。
+ * （与项目页 ⋮ 第一格同一项、同一份「标签 = 目标模式」文案口径；那一格的
+ * `dismissOnClick = false` 也同一份口径：切主题不关菜单）。
  * 刷新钮批 47 已整颗删掉，不再挪进菜单；子页顶栏没有这一格（返回即全部）。
+ *
+ * 参数 `onSwitchTheme` 收**这颗 ⋮ 在根坐标里的中心**：外壳的圆形揭示从它长出来
+ * （见 `centerInRoot` —— 菜单本体住独立 popup 窗口，量不到被点那一行的坐标）。
  */
 @Composable
-private fun SettingsMenu(themeSwitchLabel: String, onSwitchTheme: () -> Unit) {
+private fun SettingsMenu(themeSwitchLabel: String, onSwitchTheme: (Offset) -> Unit) {
     var open by remember { mutableStateOf(false) }
+    val anchor = remember { mutableStateOf(Offset.Zero) }
     Box {
-        Text(
-            text = "⋮",
-            color = ThemeColors.text,
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier
-                .pressable(role = Role.Button, onClick = { open = true })
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-        )
+        Box(Modifier.onGloballyPositioned { anchor.value = it.centerInRoot() }) {
+            // 与项目页顶栏同一颗（画出来的三点 + 最粗那档参数，见那组常量的 KDoc）。
+            Glyph(
+                kind = GlyphKind.MORE_VERT,
+                tint = ThemeColors.text,
+                modifier = Modifier
+                    .pressable(role = Role.Button, onClick = { open = true })
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                size = BarMoreDotsSize,
+                weight = BAR_MORE_DOTS_WEIGHT,
+            )
+        }
         ContextMenu(
             expanded = open,
             onDismiss = { open = false },
-            actions = listOf(MenuAction(label = themeSwitchLabel, onClick = onSwitchTheme)),
+            actions = listOf(
+                MenuAction(
+                    label = themeSwitchLabel,
+                    dismissOnClick = false,
+                    onClick = { onSwitchTheme(anchor.value) },
+                ),
+            ),
         )
     }
 }

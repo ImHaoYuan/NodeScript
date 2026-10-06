@@ -31,9 +31,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -96,10 +98,12 @@ fun ActionBar(
      */
     titleStyle: TextStyle? = null,
     /**
-     * 顶栏底色覆盖（批 41：任务中心要跟页面同灰）。缺省 null = `actionBarDefault`
-     * （[ThemeColors.surface]，白/夜间 0xFF232326）；传色即整栏（含状态栏那一条）
-     * 换底。要"栏与内容连成一块"的屏用它，别去改 [ThemeColors.surface] —— 那是
-     * 四屏共用的键。
+     * 顶栏底色覆盖（批 41：任务中心要跟页面同灰）。缺省 null = **与屏底同色**
+     * （[ThemeColors.background]：白 / 夜间 #161E27）—— 用户口径（批 68）要的就是
+     * "顶栏、菜单、底栏与屏底一个黑"，所以缺省值不再取 [ThemeColors.surface]
+     * （那是卡片色，夜间 0xFF232326，比屏底亮一档，留着就露一条"旧灰"）。
+     * 传色即整栏（含状态栏那一条）换底；浅色档 `background` 与 `surface` 同为白，
+     * 所以这次改动在日间**零观感变化**。
      */
     background: Color? = null,
 ) {
@@ -115,7 +119,7 @@ fun ActionBar(
     Column(
         modifier
             .fillMaxWidth()
-            .background(background ?: palette.surface),
+            .background(background ?: palette.background),
     ) {
         Row(
             Modifier
@@ -313,7 +317,9 @@ fun TabBar(
                     // `setMeasuredDimension(l + paddingLeft + paddingRight, …)`）。
                     .width(with(density) { plan.capsuleWidthPx.toDp() })
                     .shadow(elevation = 10.dp, shape = MainTabsShape)
-                    .background(palette.surface, MainTabsShape)
+                    // 胶囊底与屏底同色（批 68 用户口径）：浅色档本来就是"白胶囊贴白屏底"，
+                    // 深色跟着一致 —— 分层靠 shadow(10dp) 与圆角，不靠第三档灰。
+                    .background(palette.background, MainTabsShape)
                     // 内容离胶囊边 4dp（见 KDoc 第 2 条）。纵向同理：48 + 4×2 = 56。
                     .padding(MainTabsPadding),
             ) {
@@ -378,16 +384,36 @@ private val TabBarHeight: Dp = MainTabsContentHeight + MainTabsPadding * 2
 private val TabBarClearance: Dp = TabBarHeight + MainTabsMargin * 2
 
 /**
+ * 悬浮底栏的**临时隐藏开关**（整屏面用：脚本文本编辑器进来时把底栏整条收掉）。
+ *
+ * 供的是**一个可变槽**而不是一个布尔值：CompositionLocal 只能向下供，而"我现在占整屏"
+ * 这件事只有那个整屏面自己知道 —— 它拿到的必须是写口。谁进谁写 true、`onDispose` 写回
+ * false（见 `ScriptEditorScreen`），外壳那一层只管读。
+ *
+ * 缺省那份是给"没有外壳"的场景（单独组合某一屏的单测/预览）用的：它是**惰性单例**，
+ * 写进去也没有人读 —— 真实路径上永远由 `MainShell` 提供那一个。
+ */
+val LocalTabBarHidden: ProvidableCompositionLocal<MutableState<Boolean>> =
+    staticCompositionLocalOf { mutableStateOf(false) }
+
+/**
  * 悬浮底栏要求内容让出的**总**底部留白 = [TabBarClearance] + 导航栏 inset（[extra] 加呼吸）。
  *
  * 胶囊外层吃掉多少 `navigationBars` inset（三键导航 ≈48dp、手势条更小甚至 0），整条
  * 胶囊就被抬高多少；列表末项、回顶钮若仍按固定 dp 让位，三键一出现就又被盖住
  * （批 21 的固定 72dp 就是这么被实测打脸的）。各屏让位一律走这里 —— 与胶囊消费
  * 同一份 inset，两态导航都成立；别在屏里抄数字。
+ *
+ * **底栏被收起时（[LocalTabBarHidden]）不再让出 [TabBarClearance]**：留着那份留白就是
+ * 屏幕底部凭空多出一块空白，而底栏根本不在那儿。导航栏 inset 照留 —— 那是系统条，
+ * 收不收底栏它都在。读的是同一个开关，所以"底栏滑走"与"内容让位"同帧发生。
  */
 @Composable
-fun TabBarBottomClearance(extra: Dp = 0.dp): Dp =
-    TabBarClearance + extra + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+fun TabBarBottomClearance(extra: Dp = 0.dp): Dp {
+    val navigationBar = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    if (LocalTabBarHidden.current.value) return extra + navigationBar
+    return TabBarClearance + extra + navigationBar
+}
 
 /**
  * 底栏的一格（`GlassTabView`）：图标在上、文字在下，选中格背后画高亮块。

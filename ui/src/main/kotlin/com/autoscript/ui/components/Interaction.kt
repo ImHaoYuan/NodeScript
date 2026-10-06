@@ -15,7 +15,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.addOutline
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.node.DelegatableNode
 import androidx.compose.ui.node.DrawModifierNode
 import androidx.compose.ui.semantics.Role
@@ -36,22 +40,27 @@ import kotlinx.coroutines.launch
  * 绘制，不触发重组（旧的 `rememberUpdatedInstance` + `Modifier.drawBehind` 写法会把
  * 整个 Composable 拖进重组）。
  */
-private class FlatPressIndication(private val overlay: Color) : IndicationNodeFactory {
+private class FlatPressIndication(
+    private val overlay: Color,
+    /** null = 不裁剪（整块矩形覆盖，列表行那一档）；圆钮/圆角钮传自己的形状。 */
+    private val shape: Shape?,
+) : IndicationNodeFactory {
 
     override fun create(interactionSource: InteractionSource): DelegatableNode =
-        FlatPressNode(interactionSource, overlay)
+        FlatPressNode(interactionSource, overlay, shape)
 
     // 这两个不是礼节性实现：`IndicationNodeFactory` 要参与 Modifier 的相等判断，
     // 缺了它每次重组都会被当成"新的手势修饰符"，节点被拆掉重建、订阅丢失。
     override fun equals(other: Any?): Boolean =
-        other is FlatPressIndication && other.overlay == overlay
+        other is FlatPressIndication && other.overlay == overlay && other.shape == shape
 
-    override fun hashCode(): Int = overlay.hashCode()
+    override fun hashCode(): Int = 31 * overlay.hashCode() + (shape?.hashCode() ?: 0)
 }
 
 private class FlatPressNode(
     private val interactionSource: InteractionSource,
     private val overlay: Color,
+    private val shape: Shape?,
 ) : Modifier.Node(), DrawModifierNode {
 
     private var pressed by mutableStateOf(false)
@@ -76,7 +85,17 @@ private class FlatPressNode(
     override fun ContentDrawScope.draw() {
         drawContent()
         // 覆盖画在内容**之上**（TG 的按下变暗是盖住文字与图标的，不是垫在底下）。
-        if (pressed) drawRect(overlay)
+        if (!pressed) return
+        val clip = shape
+        if (clip == null) {
+            drawRect(overlay)
+        } else {
+            // 给了形状就按形状裁：圆钮上的按下档必须是**圆**的，裸 `drawRect` 会在四个角
+            // 上露出方块（2026-10-06 真机：长按项目页右下角那颗蓝钮，浮出一块灰色方影）。
+            // `clipPath` 收的是 Path，故先把 Outline 收进 Path 再裁（`addOutline`）。
+            val outline = clip.createOutline(size, layoutDirection, this)
+            clipPath(Path().apply { addOutline(outline) }) { drawRect(overlay) }
+        }
     }
 }
 
@@ -87,12 +106,14 @@ private class FlatPressNode(
  *   菜单/对话框按钮在 TG 里**不是**同一个键（`dialogButtonSelector` vs
  *   `actionBarDefaultSelector`，浅色 6% vs 8% 黑），所以这一档要能单独传 ——
  *   把两者合成一个"按压色"就是抄错。
+ * @param shape 覆盖的裁剪形状（null = 整块矩形，列表行/菜单项那一档）。**不是圆的控件
+ *   要传自己的形状**：覆盖是按矩形画的，落在圆钮/圆角钮上会在四角露出方块。
  */
 @Composable
-fun rememberPressIndication(overlay: Color? = null): Indication {
+fun rememberPressIndication(overlay: Color? = null, shape: Shape? = null): Indication {
     val fallback = ThemeColors.pressedOverlay
     val color = overlay ?: fallback
-    return remember(color) { FlatPressIndication(color) }
+    return remember(color, shape) { FlatPressIndication(color, shape) }
 }
 
 /**
@@ -103,15 +124,17 @@ fun rememberPressIndication(overlay: Color? = null): Indication {
  *
  * @param role 无障碍角色；页签传 [Role.Tab]、按钮传 [Role.Button]，读屏据此改念法。
  * @param overlay 覆盖色覆盖（见 [rememberPressIndication]）；缺省 null = 列表行那一档。
+ * @param shape 覆盖的裁剪形状（见 [rememberPressIndication]）；缺省 null = 整块矩形。
  */
 @Composable
 fun Modifier.pressable(
     enabled: Boolean = true,
     role: Role? = null,
     overlay: Color? = null,
+    shape: Shape? = null,
     onClick: () -> Unit,
 ): Modifier {
-    val indication = rememberPressIndication(overlay)
+    val indication = rememberPressIndication(overlay, shape)
     val source = remember { MutableInteractionSource() }
     return clickable(
         interactionSource = source,

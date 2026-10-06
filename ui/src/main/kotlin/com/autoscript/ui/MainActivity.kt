@@ -1,12 +1,24 @@
 package com.autoscript.ui
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.view.PixelCopy
+import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
@@ -15,20 +27,36 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color as ComposeColor
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.ClipOp
+import androidx.compose.ui.graphics.drawscope.ContentDrawScope
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import com.autoscript.domain.host.HostSummary
 import com.autoscript.domain.host.TaskRegistration
+import com.autoscript.ui.components.EaseInOutQuad
 import com.autoscript.ui.components.GlyphKind
 import com.autoscript.ui.components.LocalBarAction
+import com.autoscript.ui.components.LocalTabBarHidden
 import com.autoscript.ui.components.TabBarBottomClearance
 import com.autoscript.ui.components.TabItem
 import com.autoscript.ui.components.TabBar
@@ -49,11 +77,17 @@ import com.autoscript.ui.state.ProjectState
 import com.autoscript.ui.state.RegistrationForm
 import com.autoscript.ui.state.TaskCenterState
 import com.autoscript.ui.state.TaskRowState
+import com.autoscript.ui.state.ThemeReveal
+import com.autoscript.ui.theme.DarkColors
+import com.autoscript.ui.theme.LightColors
 import com.autoscript.ui.theme.Theme
 import com.autoscript.ui.theme.ThemeMode
 import com.autoscript.ui.theme.isDark
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.coroutines.resume
 
 /**
  * 启动入口（launcher，manifest 在本模块，随库合并进 :app）。
@@ -135,6 +169,9 @@ class MainActivity : ComponentActivity() {
             // 否则白底上画一排白图标 = 看不见。`enableEdgeToEdge` 的 auto 只认系统档位，
             // 这里每次重组按当前档位覆盖一次。
             val dark = themeMode.isDark()
+            // 主题切换的圆形揭示（抓帧 → 换主题 → 圆形裁剪）：整段接线收在一个
+            // `remember…` 函数里 —— 它自带状态与协程，onCreate 已经贴着 detekt 的长函数线。
+            val themeSwitch = rememberThemeSwitch(dark) { themeMode = themeMode.next(dark) }
             SideEffect {
                 WindowCompat.getInsetsController(window, window.decorView).apply {
                     isAppearanceLightStatusBars = !dark
@@ -150,6 +187,7 @@ class MainActivity : ComponentActivity() {
                     // 唯一事实来源，页签条与重读都从它派生，绕过去就又会漂移。
                     onSelectTab = { scope.launch { pagerState.animateScrollToPage(it) } },
                     toast = toast,
+                    modifier = themeSwitch.modifier,
                 ) { shellModifier ->
                         // 四屏装进 **HorizontalPager**：这是 TG 主页签的做法
                         // （`MainTabsActivity extends ViewPagerActivity`），换来两件事 ——
@@ -170,12 +208,18 @@ class MainActivity : ComponentActivity() {
                             when (Tab.entries[current]) {
                                 Tab.HOME -> ProjectScreen(
                                     state = projectState,
-                                    onSwitchTheme = { themeMode = themeMode.next(dark) },
+                                    onSwitchTheme = themeSwitch.onSwitch,
                                     // 菜单项写**目标模式**（TG 的日夜项同款）：
                                     // 冷启缺省跟随系统，此时按"当下是不是深色"定文案。
                                     themeSwitchLabel = themeSwitchLabel(dark),
                                     onCreate = { projectId, name, isFolder ->
                                         scope.launch { createEntryOp(projectId, name, isFolder) }
+                                    },
+                                    // 点文件进编辑面：读/存都**不在这里落状态** —— 成败归编辑器自己
+                                    // 显示（清单没变），保存成功后才重读一次清单（大小/时刻变了）。
+                                    onReadFile = { projectId, relPath -> readScriptFileOp(projectId, relPath) },
+                                    onSaveFile = { projectId, relPath, content ->
+                                        saveScriptFileOp(projectId, relPath, content)
                                     },
                                     onSortChange = { sort, reversed ->
                                         projectState = projectState.copy(sort = sort, reversed = reversed, opError = null, opNotice = null)
@@ -210,7 +254,7 @@ class MainActivity : ComponentActivity() {
                                     onOpenSettings = { hostSummary()?.openCapabilitySettings(it) },
                                     // 与项目页 ⋮ 同一项：标签 = 目标模式（TG 日夜项同款口径）。
                                     themeSwitchLabel = themeSwitchLabel(dark),
-                                    onSwitchTheme = { themeMode = themeMode.next(dark) },
+                                    onSwitchTheme = themeSwitch.onSwitch,
                                     modifier = Modifier,
                                 )
                         }
@@ -271,7 +315,6 @@ class MainActivity : ComponentActivity() {
         projectState = try {
             ProjectState.of(
                 snapshot = host.scriptFiles(),
-                nowMillis = System.currentTimeMillis(),
                 // 排序/回执是用户的呈现偏好与刚才的操作结论，重读不重置
                 // （回执在刷新**之后**盖上去会自相矛盾，见 performTaskOp 同一条）。
                 previous = projectState.takeIf { it.load is LoadState.Loaded },
@@ -316,6 +359,30 @@ class MainActivity : ComponentActivity() {
             creating = null,
             opNotice = "已新建$kind「$name」",
         )
+    }
+
+    /**
+     * 读一个脚本文件（项目页点文件进编辑面）。
+     *
+     * **不写 [projectState]**：读取的成败归编辑器自己显示（清单没有任何变化），
+     * 宿主未接线照抛 —— 编辑器把原因显示在正文上方，而不是让列表替它报错。
+     */
+    private suspend fun readScriptFileOp(projectId: String, relPath: String): String {
+        val host = hostSummary() ?: error("宿主摘要未接线（Application 未实现 HostSummary）")
+        return host.readScriptFile(projectId, relPath)
+    }
+
+    /**
+     * 保存一个脚本文件（编辑器「保存」）。
+     *
+     * 落盘成功后再重读一次清单：文件大小/修改时刻变了，列表上那两列要跟着变
+     * （不然"刚存的内容没生效"会从列表上读出来）。**失败不重读**（清单没变），
+     * 原文抛给编辑器显示。
+     */
+    private suspend fun saveScriptFileOp(projectId: String, relPath: String, content: String) {
+        val host = hostSummary() ?: error("宿主摘要未接线（Application 未实现 HostSummary）")
+        host.saveScriptFile(projectId, relPath, content)
+        reloadProjectFiles()
     }
 
     private suspend fun reloadCapabilities() {
@@ -547,6 +614,233 @@ private fun themeSwitchLabel(isDark: Boolean): String =
     if (isDark) "日间模式" else "夜间模式"
 
 /**
+ * 主题切换那两件套：⋮ 菜单要调的动作 + 外壳要挂的绘制修饰符。
+ *
+ * @property onSwitch 收**那颗 ⋮ 在根坐标里的中心**（见 `centerInRoot`）。
+ * @property modifier 揭示的绘制修饰符；没有揭示在跑时它什么都不做（直接放行内容）。
+ */
+private class ThemeSwitchWiring(
+    val onSwitch: (Offset) -> Unit,
+    val modifier: Modifier,
+)
+
+/**
+ * 主题切换的接线：**抓帧 → 换主题 → 从 ⋮ 长出一个圆**（TG 的日夜切换同款）。
+ *
+ * 做法是**先把新主题换上**，再把整块界面按一个不断长大的圆裁剪 —— 圆外露出的就是
+ * [ThemeSwitchReveal.fromFrame]（切换前那一帧的原样界面）。反面做法（先画一个色圆再换
+ * 主题）在圆里看到的是一块死色，不是"另一个模式"。
+ *
+ * **揭示的那个槽刻意不在组合里读**（只被 `onSwitch` 的协程与绘制闭包读）：它一变就重组
+ * 的话，下面 `Theme(...)` 会跟着重组，而 `MaterialTheme` 的 colorScheme 是 **static**
+ * CompositionLocal —— 一次主题切换会被放大成三趟"整棵界面重组"（置位一趟、清位一趟、
+ * 换主题一趟）。收成 draw 期读之后只剩换主题那一趟（见 [drawThemeReveal]）。
+ *
+ * @param dark 当下是不是深色：决定这次往哪边切、以及圆外先铺哪一档的底色。
+ * @param onFlip 真正翻档（由调用方写它自己那份状态 —— 这里不碰 `ThemeMode`）。
+ */
+@Composable
+private fun rememberThemeSwitch(dark: Boolean, onFlip: () -> Unit): ThemeSwitchWiring {
+    val scope = rememberCoroutineScope()
+    val reveal = remember { mutableStateOf<ThemeSwitchReveal?>(null) }
+    val view = LocalView.current
+    val onSwitch: (Offset) -> Unit = { origin ->
+        // 重入守卫（TG `DialogsActivity.switchingTheme` 的同一处）：揭示期间再点，
+        // 两次动画会抢同一个裁剪进度，观感是圆抖一下再从头长。
+        if (reveal.value == null) {
+            val toDark = !dark
+            val fromBackground = if (dark) DarkColors.background else LightColors.background
+            scope.launch {
+                // **先抓帧、再换主题**：抓的是"点之前"那一帧（旧主题的原样界面）——
+                // 换主题的重组还没发生。抓帧是挂起的（PixelCopy 在 GPU 侧回读），
+                // 这段等待里界面仍是旧主题，用户看不到中间态。
+                val frame = captureFrame(view)
+                if (reveal.value != null) return@launch // 等待期间又点了一次
+                val active = ThemeSwitchReveal(
+                    origin = origin,
+                    fromBackground = fromBackground,
+                    fromFrame = frame,
+                    toDark = toDark,
+                    // **初值 0**：揭示的第一帧画出来就是"圆还没长"，
+                    // 不指望抢在第一次绘制前 snapTo（那个先后没有保证）。
+                    progress = Animatable(0f),
+                )
+                reveal.value = active
+                onFlip()
+                active.progress.animateTo(
+                    targetValue = 1f,
+                    animationSpec = tween(THEME_REVEAL_MILLIS, easing = EaseInOutQuad),
+                )
+                // 圆已经走完（转深色 = 盖满整屏 / 转浅色 = 收干净），
+                // 此刻撤掉裁剪与旧底片都看不出来（不会闪一下）。
+                reveal.value = null
+            }
+        }
+    }
+    // 揭示挂在**外壳这一层**（而不是某一块内容上）：圆要盖住整屏，页签胶囊与 toast
+    // 也在这一层里，跟着一起被裁。**修饰符只建一次**：绘制闭包在 draw 期读
+    // `reveal.value` 与动画进度，于是"开始/结束一次揭示"只让这一层重绘，不触发任何重组。
+    val modifier = remember(reveal) {
+        Modifier.drawWithContent {
+            val active = reveal.value
+            if (active == null) drawContent() else drawThemeReveal(active, active.progress.value)
+        }
+    }
+    return ThemeSwitchWiring(onSwitch = onSwitch, modifier = modifier)
+}
+
+/**
+ * 一次主题切换的圆形揭示（外壳持有到动画跑完为止）。
+ *
+ * 是 `class` 而不是 `data class`：里面挂着一个**每帧复用**的 [circle]（Path），
+ * 数据类那份 equals/hashCode 会去比这个可变对象，比出来的结论没有意义。
+ *
+ * @property origin 圆心 —— 那颗 ⋮ 在**根坐标**里的中心（见 `centerInRoot`；菜单本体在
+ *   独立 popup 窗口里，量不到被点那一行的坐标，故取锚点）。
+ * @property fromBackground 揭示期间**旧主题那一侧**铺的底色 = 切换**前**那一档的
+ *   `background`（哪一侧由 [toDark] 定，见 [ThemeReveal.oldFrameInside]）。
+ * @property fromFrame 切换**前**那一帧的位图（[captureFrame]）—— 旧主题那一侧画的是
+ *   **旧主题的原样界面**，不是一块纯色；抓不到时是 null，退化成 [fromBackground] 那块底。
+ * @property toDark 这次是往深色切还是往浅色切：**两个方向的圆走法不同**（TG 同款），
+ *   见 [ThemeReveal.circleFraction]。
+ * @property progress 动画进度 0 → 1（**不是半径**：半径由 [toDark] 决定的方向映射出来）；
+ *   **建的时候就是 0**（见 `switchTheme` 那处的注释）。
+ */
+private class ThemeSwitchReveal(
+    val origin: Offset,
+    val fromBackground: ComposeColor,
+    val fromFrame: ImageBitmap?,
+    val toDark: Boolean,
+    val progress: Animatable<Float, AnimationVector1D>,
+) {
+    /**
+     * 每帧那个圆。**复用同一个 Path**：揭示跑 60~120 帧，每帧新建一个 Path 就是每帧一次
+     * 分配 + 一次 GC 压力 —— 400ms 的动画里这种小分配正是"卡一下"的来源之一。
+     * 只在绘制线程上读写，没有并发。
+     */
+    val circle: Path = Path()
+}
+
+/**
+ * 把 [view] 当前这一帧抓成位图（旧主题的"底片"）。
+ *
+ * **为什么非得抓帧**：圆形揭示要求圆外**还是旧主题的原样界面**。只把主题换掉再裁剪，
+ * 圆外就只剩一块纯色 —— 列表整块消失再从圆里长回来，那不是 TG 那个效果。TG 也是先留一张
+ * 旧主题的底片再揭示新主题（`LaunchActivity` 的 `needSetDayNightTheme`：
+ * `getBitmapFromWindow(getWindow())` 抓帧 → `themeSwitchImageView.setImageBitmap(bitmap)`）。
+ *
+ * **走 PixelCopy 而不是软件重画**（与 TG 同一条路）：`view.draw(Canvas(bitmap))` 是让
+ * **整棵视图树在 CPU 上重画一遍**，在点击那一刻同步跑完 —— 这是原先揭示开头那一顿的来源。
+ * PixelCopy 只是把 GPU 已经画好的这一帧**回读**出来（API 26 起可用，本仓 minSdk = 26），
+ * 挂在协程上等回调，不重画任何东西。
+ *
+ * **失败不致命，且逐级降级**：
+ * 1. PixelCopy 成功 → 用回读的帧；
+ * 2. 拿不到 Window / PixelCopy 报错（部分 ROM 对 Window 源支持不全）→ 退回软件重画；
+ * 3. 软件重画也抛（OOM / 硬件层不给软件画布）→ 退回 null，绘制侧先铺的
+ *    [ThemeSwitchReveal.fromBackground] 顶上来 —— 圆外从"原样界面"降级成"旧主题的底色"，
+ *    而不会把一次换主题升级成崩溃。
+ *
+ * 所以这里从头到尾是"一次最好的努力"（`runCatching`），不是错误处理。
+ */
+private suspend fun captureFrame(view: View): ImageBitmap? {
+    val window = view.context.findActivity()?.window
+    // 尺寸取**窗口根视图**（TG 也是拿 `window.getDecorView()` 的宽高建位图）：PixelCopy 的源
+    // 是窗口表面，位图与它同尺寸才不会缩放/裁切。`enableEdgeToEdge` 之后根视图与 ComposeView
+    // 同尺寸，取哪个都一样；真有出入时按根视图来才是"这张图确实是那一帧"。
+    val decor = window?.decorView
+    val width = decor?.width?.takeIf { it > 0 } ?: view.width
+    val height = decor?.height?.takeIf { it > 0 } ?: view.height
+    if (width <= 0 || height <= 0) return null
+    val bitmap = runCatching {
+        Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    }.getOrNull() ?: return null
+    if (window != null) {
+        // 超时兜底：`PixelCopy.request` 在窗口正被销毁之类的情况下**可能一次回调都不来**，
+        // 那会把这次揭示永远挂在"等抓帧"上（用户看到的是"点了没反应"）。等不到就当抓帧
+        // 失败，走下面的退路 —— 宁可圆外是纯色，也不能让按钮失灵。
+        val copied = runCatching {
+            withTimeoutOrNull(FRAME_CAPTURE_TIMEOUT_MILLIS) {
+                suspendCancellableCoroutine { cont ->
+                    PixelCopy.request(window, bitmap, { result ->
+                        cont.resume(result == PixelCopy.SUCCESS)
+                    }, Handler(Looper.getMainLooper()))
+                }
+            }
+        }.getOrNull()
+        if (copied == true) return bitmap.asImageBitmap()
+    }
+    return runCatching {
+        view.draw(Canvas(bitmap))
+        bitmap.asImageBitmap()
+    }.getOrNull()
+}
+
+/** 抓帧的等待上限（见 [captureFrame]）：超了就退化成纯色底，不让按钮失灵。 */
+private const val FRAME_CAPTURE_TIMEOUT_MILLIS = 250L
+
+/**
+ * 悬浮底栏收起/展开的时长。
+ *
+ * 180ms：比主题揭示（[THEME_REVEAL_MILLIS]）短一档 —— 这是"让开位置"的过渡，不是主角。
+ * 再长会让人觉得"进了编辑器之后底栏还在慢慢往下爬"。
+ */
+private const val TAB_BAR_HIDE_MILLIS = 180
+
+/** 从任意一层 `ContextWrapper` 里找出宿主 Activity（PixelCopy 要它的 `window`）。 */
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
+
+/**
+ * 揭示时长：400ms（`anim.setDuration(400)`，TG 原值）。
+ *
+ * 名字走 SCREAMING_SNAKE（本文件 [HOME_RETRY_INTERVAL_MILLIS] 同款）：`:ui` 里那十几条
+ * CamelCase 的 `…Millis` 常量是**基线里的存量债**，新写的按规则来，不再往上加。
+ */
+private const val THEME_REVEAL_MILLIS = 400
+
+/**
+ * 把当前内容按"从 [reveal] 圆心长出来的圆"裁剪后画出来（揭示的绘制侧）。
+ *
+ * 顺序是关键：**先换主题、再裁** —— 旧主题那一侧铺 [ThemeSwitchReveal.fromBackground]
+ * （旧主题的底）+ 旧主题那一帧的原样界面，另一侧是**新主题的界面本身**。反面做法
+ * （先画一个色圆再换主题）圆里只有一块死色，不是"另一个模式"。
+ *
+ * **两个方向共用这一段代码**，差别只有两处（都在 [ThemeReveal] 里，都是纯函数）：
+ * - 圆半径的占比：[ThemeReveal.circleFraction]（转深色 0→1 长大；转浅色 1→0 缩回）；
+ * - 旧底片铺哪一侧：[ThemeReveal.oldFrameInside]（转浅色在圆内，转深色在圆外）。
+ *
+ * **每帧的代价**：一个全屏矩形 + 一次位图绘制（只画它该在的那一侧）+ 一次带圆裁剪的
+ * 内容重绘。进度与半径都在 **draw 期**读，动画每帧只重绘、不重组整棵界面。
+ */
+private fun ContentDrawScope.drawThemeReveal(reveal: ThemeSwitchReveal, progress: Float) {
+    val radius = ThemeReveal.circleFraction(progress, reveal.toDark) * ThemeReveal.maxRadius(
+        originX = reveal.origin.x,
+        originY = reveal.origin.y,
+        width = size.width,
+        height = size.height,
+    )
+    reveal.circle.rewind()
+    reveal.circle.addOval(Rect(center = reveal.origin, radius = radius))
+    // **旧主题那一帧铺在哪一侧由方向定**（[ThemeReveal.oldFrameInside]）：转浅色时它缩在
+    // **圆内**，转深色时留在**圆外**；新主题永远铺另一侧。于是两个方向的起点都是"整屏旧
+    // 主题"、终点都是"整屏新主题" —— 这一条由 `ThemeRevealTest` 钉着（写反了动画会从
+    // 新主题那一屏开始往回长，而中段看过去一样是个圆）。
+    val oldInside = ThemeReveal.oldFrameInside(reveal.toDark)
+    val oldClip = if (oldInside) ClipOp.Intersect else ClipOp.Difference
+    val newClip = if (oldInside) ClipOp.Difference else ClipOp.Intersect
+    // 两层：先铺旧主题的底色（抓帧失败时看到的就是它），再叠上旧主题那一帧的原样界面。
+    // 底片只画它该在的那一侧（**Difference/Intersect** 各裁掉另一半）：另一侧马上要被新主题
+    // 整块盖住，画了也是白画（1080×2400 的一层满屏填充，省下来的是实打实的每帧填充率）。
+    drawRect(reveal.fromBackground)
+    reveal.fromFrame?.let { frame -> clipPath(reveal.circle, clipOp = oldClip) { drawImage(frame) } }
+    clipPath(reveal.circle, clipOp = newClip) { this@drawThemeReveal.drawContent() }
+}
+
+/**
  * 外壳：内容（四屏的 pager）+ 底部页签条。
  *
  * 各屏自己画顶栏（它们各有各的副标题与行尾动作，如任务中心的「登记/刷新」），
@@ -573,36 +867,66 @@ private fun MainShell(
     pagerState: PagerState,
     onSelectTab: (Int) -> Unit,
     toast: ToastAction,
+    modifier: Modifier = Modifier,
     content: @Composable (Modifier) -> Unit,
 ) {
-    Column(Modifier.fillMaxSize()) {
+    // 悬浮底栏的临时隐藏开关：整屏面（脚本文本编辑器）进来时自己写 true、退出写回
+    // false。开关建在这一层是因为**只有外壳能同时"供"和"读"它**（见 LocalTabBarHidden）。
+    val tabBarHidden = remember { mutableStateOf(false) }
+    // 收起进度 0（在）→ 1（收起）。在 layer 块里读，所以这段动画**一帧都不重组**；
+    // 只有 `tabBarHidden` 翻面时本函数重组一次（那是必要的，得知道往哪边跑）。
+    val tabBarShift = remember { Animatable(0f) }
+    LaunchedEffect(tabBarHidden.value) {
+        tabBarShift.animateTo(
+            targetValue = if (tabBarHidden.value) 1f else 0f,
+            animationSpec = tween(TAB_BAR_HIDE_MILLIS, easing = EaseInOutQuad),
+        )
+    }
+    Column(modifier.fillMaxSize()) {
         // pager 占满整个屏高（**不留**底栏的那份）：底栏改成 TG 的悬浮胶囊后它不再
         // 是"占一行的一块版面"，而是浮在内容之上的一条 —— 与内容同层（Box），内容
         // 滚动时会从胶囊底下穿过（TG 同款：会话列表从底栏下面滚过去）。
         Box(Modifier.weight(1f)) {
-            // 浮层宿主包住内容（而不是并列摆一条）：`LocalToast` 要供到四屏里面去。
-            // 位置让出悬浮胶囊与导航栏 —— 提示贴在胶囊**上方**，不压住页签。
-            ToastHost(
-                action = toast,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = TabBarBottomClearance()),
-            ) {
-                content(Modifier.fillMaxSize())
+            CompositionLocalProvider(LocalTabBarHidden provides tabBarHidden) {
+                // 浮层宿主包住内容（而不是并列摆一条）：`LocalToast` 要供到四屏里面去。
+                // 位置让出悬浮胶囊与导航栏 —— 提示贴在胶囊**上方**，不压住页签。
+                // 它也在 provider 里面：底栏收起时提示跟着往下走（读的是同一份留白）。
+                ToastHost(
+                    action = toast,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = TabBarBottomClearance()),
+                ) {
+                    content(Modifier.fillMaxSize())
+                }
+                // 胶囊盖在内容之上：后画的在上层。它自己的 8dp 外边距让四周露出内容。
+                // **收起/展开是滑出去而不是瞬间消失**（编辑器进来时那一下最显眼）。
+                // 用 `graphicsLayer` 的位移 + 透明度，不用 `AnimatedVisibility`：
+                // ① 这两个量在 **layer 块里**读，动画每帧只更新这一层，不重组底栏；
+                // ② `AnimatedVisibility` 在这个 `Column { Box { … } }` 里会被解析到
+                //    `ColumnScope` 那个重载上，当场编译不过（实测，不是风格问题）；
+                // ③ 位移把**触摸区一起挪走**，收起后不会留一条看不见却点得到的胶囊。
+                Box(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .graphicsLayer {
+                            translationY = tabBarShift.value * size.height
+                            alpha = 1f - tabBarShift.value
+                        },
+                ) {
+                    TabBar(
+                        // 四格恒为「项目 / 任务 / 管理 / 设置」（`MainActivity.Tab`）。**不挂徽标**：
+                        // 徽标在 TG 里是"未读"语义，与本仓的"在途 / 漏投 / 未结算"三种账都不是
+                        // 一回事，混上去等于造出第四种读法 —— 计数一律在各自屏内说。`TabItem`
+                        // 因此只有 label + glyph 两个字段，没有"留着将来用"的空槽位。
+                        tabs = MainActivity.Tab.entries.map {
+                            TabItem(label = it.short, glyph = it.glyph)
+                        },
+                        pagerState = pagerState,
+                        onSelect = onSelectTab,
+                    )
+                }
             }
-            // 胶囊盖在内容之上：后画的在上层。它自己的 8dp 外边距让四周露出内容。
-            TabBar(
-                modifier = Modifier.align(Alignment.BottomCenter),
-                // 四格恒为「项目 / 任务 / 管理 / 设置」（`MainActivity.Tab`）。**不挂徽标**：
-                // 徽标在 TG 里是"未读"语义，与本仓的"在途 / 漏投 / 未结算"三种账都不是
-                // 一回事，混上去等于造出第四种读法 —— 计数一律在各自屏内说。`TabItem`
-                // 因此只有 label + glyph 两个字段，没有"留着将来用"的空槽位。
-                tabs = MainActivity.Tab.entries.map {
-                    TabItem(label = it.short, glyph = it.glyph)
-                },
-                pagerState = pagerState,
-                onSelect = onSelectTab,
-            )
         }
     }
 }

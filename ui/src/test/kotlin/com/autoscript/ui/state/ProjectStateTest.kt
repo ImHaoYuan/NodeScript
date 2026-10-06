@@ -15,7 +15,7 @@ class ProjectStateTest {
 
     private val zone = ZoneId.of("Asia/Shanghai")
 
-    /** 2026-10-03 10:00 CST 的 epoch ms（"今天"锚点；行时刻都相对它造）。 */
+    /** 2026-10-03 10:00 CST 的 epoch ms（默认行时刻；格式化用例的锚点）。 */
     private val now = java.time.LocalDateTime.of(2026, 10, 3, 10, 0)
         .atZone(zone).toInstant().toEpochMilli()
 
@@ -81,11 +81,11 @@ class ProjectStateTest {
 
     @Test
     fun `of 逐行成行且次行是大小加时刻`() {
-        val s = ProjectState.of(ScriptFilesSnapshot(listOf(row("main.js", size = 2048L))), nowMillis = now, zone = zone)
+        val s = ProjectState.of(ScriptFilesSnapshot(listOf(row("main.js", size = 2048L))), zone = zone)
         assertTrue(s.load.isLoaded)
         assertEquals(1, s.files.size)
         assertEquals("main.js", s.files[0].name)
-        assertEquals("2.0 KB · 10:00", s.files[0].subtitle)
+        assertEquals("2.0 KB · 26-10-03 10:00", s.files[0].subtitle)
     }
 
     @Test
@@ -98,9 +98,9 @@ class ProjectStateTest {
     @Test
     fun `搜索按文件名与路径命中且大小写不敏感`() {
         val files = listOf(
-            ScriptFileRowUi.of(row("main.js"), now, zone),
-            ScriptFileRowUi.of(row("lib/helper.js", project = "demo").copy(relPath = "demo/lib/helper.js"), now, zone),
-            ScriptFileRowUi.of(row("README.md", ext = "md"), now, zone),
+            ScriptFileRowUi.of(row("main.js"), zone),
+            ScriptFileRowUi.of(row("lib/helper.js", project = "demo").copy(relPath = "demo/lib/helper.js"), zone),
+            ScriptFileRowUi.of(row("README.md", ext = "md"), zone),
         )
         assertTrue(files[0].matches(""))
         assertTrue(files[0].matches("MAIN"))
@@ -123,23 +123,22 @@ class ProjectStateTest {
     fun `文件夹行次行是 N 项加时刻且不显示字节数`() {
         val s = ProjectState.of(
             ScriptFilesSnapshot(listOf(row("lib", isDirectory = true, childCount = 3))),
-            nowMillis = now,
             zone = zone,
         )
-        assertEquals("3 项 · 10:00", s.files[0].subtitle)
+        assertEquals("3 项 · 26-10-03 10:00", s.files[0].subtitle)
         assertTrue(s.files[0].isDirectory)
     }
 
     @Test
     fun `排序——目录恒在最前逆向只翻文件段四档各按各的键`() {
         val dirs = listOf(
-            ScriptFileRowUi.of(row("zeta", isDirectory = true, childCount = 1), now, zone),
-            ScriptFileRowUi.of(row("alpha", isDirectory = true, childCount = 2), now, zone),
+            ScriptFileRowUi.of(row("zeta", isDirectory = true, childCount = 1), zone),
+            ScriptFileRowUi.of(row("alpha", isDirectory = true, childCount = 2), zone),
         )
         val files = listOf(
-            ScriptFileRowUi.of(row("b.js", size = 300L, modified = now - 1000), now, zone),
-            ScriptFileRowUi.of(row("a.js", size = 100L, modified = now - 3000), now, zone),
-            ScriptFileRowUi.of(row("c.md", ext = "md", size = 200L, modified = now - 2000), now, zone),
+            ScriptFileRowUi.of(row("b.js", size = 300L, modified = now - 1000), zone),
+            ScriptFileRowUi.of(row("a.js", size = 100L, modified = now - 3000), zone),
+            ScriptFileRowUi.of(row("c.md", ext = "md", size = 200L, modified = now - 2000), zone),
         )
         val all = dirs + files
 
@@ -172,11 +171,10 @@ class ProjectStateTest {
 
     @Test
     fun `重读保留排序与回执——偏好不因刷新消失`() {
-        val first = ProjectState.of(ScriptFilesSnapshot(listOf(row("a.js"))), now, zone)
+        val first = ProjectState.of(ScriptFilesSnapshot(listOf(row("a.js"))), zone)
             .copy(sort = FileSort.NAME, reversed = true, opNotice = "已新建文件「x.js」")
         val again = ProjectState.of(
             ScriptFilesSnapshot(listOf(row("a.js"), row("b.js"))),
-            now,
             zone,
             previous = first,
         )
@@ -187,25 +185,27 @@ class ProjectStateTest {
     }
 
     @Test
-    fun `时刻三档——今天时分、今年月日、跨年带年份`() {
-        val today = now - 3600_000L
-        val thisYear = java.time.LocalDateTime.of(2026, 9, 14, 22, 10).atZone(zone).toInstant().toEpochMilli()
+    fun `时刻一个格式走到底_两位年月日加时分（用户口径）`() {
+        // 用户给的那个例子（2026-06-24 22:32 CST）：年月日两位 + 时分，中间一个空格。
+        val example = java.time.LocalDateTime.of(2026, 6, 24, 22, 32).atZone(zone).toInstant().toEpochMilli()
+        assertEquals("26-06-24 22:32", ScriptFileRowUi.formatTime(example, zone))
+        // 锚点那一行（2026-10-03 10:00）—— **不再**因为"今天"退化成只有时分。
+        assertEquals("26-10-03 10:00", ScriptFileRowUi.formatTime(now, zone))
+        // 跨年也一样：年份取两位，不换粒度。
         val lastYear = java.time.LocalDateTime.of(2025, 3, 2, 8, 0).atZone(zone).toInstant().toEpochMilli()
-        assertEquals("09:00", ScriptFileRowUi.formatTime(today, now, zone))
-        assertEquals("09-14", ScriptFileRowUi.formatTime(thisYear, now, zone))
-        assertEquals("2025-03-02", ScriptFileRowUi.formatTime(lastYear, now, zone))
+        assertEquals("25-03-02 08:00", ScriptFileRowUi.formatTime(lastYear, zone))
     }
 
     @Test
     fun `childrenOf 一层只回一层且目录文件都算`() {
         val files = listOf(
-            ScriptFileRowUi.of(projectRow("demo"), now, zone),
-            ScriptFileRowUi.of(projectRow("demo2", childCount = 1), now, zone),
-            ScriptFileRowUi.of(rowAt("main.js"), now, zone),
-            ScriptFileRowUi.of(rowAt("lib", isDirectory = true, childCount = 2), now, zone),
-            ScriptFileRowUi.of(rowAt("lib/helper.js"), now, zone),
-            ScriptFileRowUi.of(rowAt("lib/sub", isDirectory = true, childCount = 1), now, zone),
-            ScriptFileRowUi.of(rowAt("other.js", project = "demo2"), now, zone),
+            ScriptFileRowUi.of(projectRow("demo"), zone),
+            ScriptFileRowUi.of(projectRow("demo2", childCount = 1), zone),
+            ScriptFileRowUi.of(rowAt("main.js"), zone),
+            ScriptFileRowUi.of(rowAt("lib", isDirectory = true, childCount = 2), zone),
+            ScriptFileRowUi.of(rowAt("lib/helper.js"), zone),
+            ScriptFileRowUi.of(rowAt("lib/sub", isDirectory = true, childCount = 1), zone),
+            ScriptFileRowUi.of(rowAt("other.js", project = "demo2"), zone),
         )
         // 全库根：列的是**各项目**那一层（demo/ 与 demo2/），不递归到项目里面。
         val root = ProjectState.childrenOf(files, folder = null)
@@ -225,11 +225,11 @@ class ProjectStateTest {
     @Test
     fun `搜索时候选集是整棵树而不是当前一层`() {
         val files = listOf(
-            ScriptFileRowUi.of(projectRow("demo"), now, zone),
-            ScriptFileRowUi.of(rowAt("main.js"), now, zone),
-            ScriptFileRowUi.of(rowAt("lib", isDirectory = true, childCount = 2), now, zone),
-            ScriptFileRowUi.of(rowAt("lib/helper.js"), now, zone),
-            ScriptFileRowUi.of(rowAt("other.js", project = "demo2"), now, zone),
+            ScriptFileRowUi.of(projectRow("demo"), zone),
+            ScriptFileRowUi.of(rowAt("main.js"), zone),
+            ScriptFileRowUi.of(rowAt("lib", isDirectory = true, childCount = 2), zone),
+            ScriptFileRowUi.of(rowAt("lib/helper.js"), zone),
+            ScriptFileRowUi.of(rowAt("other.js", project = "demo2"), zone),
         )
         // 不搜索 = 当前一层的直接子项（"demo/" 那层只有 main.js 与 lib/）。
         assertEquals(
@@ -275,10 +275,10 @@ class ProjectStateTest {
     @Test
     fun `多选 逐行开关与选择全部取消全选`() {
         val files = listOf(
-            ScriptFileRowUi.of(projectRow("demo"), now, zone),
-            ScriptFileRowUi.of(rowAt("main.js"), now, zone),
-            ScriptFileRowUi.of(rowAt("lib", isDirectory = true, childCount = 2), now, zone),
-            ScriptFileRowUi.of(rowAt("other.js", project = "demo2"), now, zone),
+            ScriptFileRowUi.of(projectRow("demo"), zone),
+            ScriptFileRowUi.of(rowAt("main.js"), zone),
+            ScriptFileRowUi.of(rowAt("lib", isDirectory = true, childCount = 2), zone),
+            ScriptFileRowUi.of(rowAt("other.js", project = "demo2"), zone),
         )
         val visible = ProjectState.childrenOf(files, folder = "demo/")
         val mainKey = ProjectState.keyOf(visible[0])
