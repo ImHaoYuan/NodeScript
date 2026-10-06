@@ -99,7 +99,7 @@ fun ActionBar(
     titleStyle: TextStyle? = null,
     /**
      * 顶栏底色覆盖（批 41：任务中心要跟页面同灰）。缺省 null = **与屏底同色**
-     * （[ThemeColors.background]：白 / 夜间 #161E27）—— 用户口径（批 62）要的就是
+     * （[ThemeColors.background]：白 / 夜间 #161E27）—— 用户口径（批 68）要的就是
      * "顶栏、菜单、底栏与屏底一个黑"，所以缺省值不再取 [ThemeColors.surface]
      * （那是卡片色，夜间 0xFF232326，比屏底亮一档，留着就露一条"旧灰"）。
      * 传色即整栏（含状态栏那一条）换底；浅色档 `background` 与 `surface` 同为白，
@@ -317,7 +317,7 @@ fun TabBar(
                     // `setMeasuredDimension(l + paddingLeft + paddingRight, …)`）。
                     .width(with(density) { plan.capsuleWidthPx.toDp() })
                     .shadow(elevation = 10.dp, shape = MainTabsShape)
-                    // 胶囊底与屏底同色（批 62 用户口径）：浅色档本来就是"白胶囊贴白屏底"，
+                    // 胶囊底与屏底同色（批 68 用户口径）：浅色档本来就是"白胶囊贴白屏底"，
                     // 深色跟着一致 —— 分层靠 shadow(10dp) 与圆角，不靠第三档灰。
                     .background(palette.background, MainTabsShape)
                     // 内容离胶囊边 4dp（见 KDoc 第 2 条）。纵向同理：48 + 4×2 = 56。

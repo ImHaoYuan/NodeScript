@@ -126,7 +126,7 @@ data class Colors(
      *
      * 存的是**合成本屏底之后的实色**（TG 那边是 alpha 色叠在顶栏上，本仓的搜索栏不在
      * 顶栏里，叠的是屏底）：浅色 = 5% 的 `0xFF1A1D21` 叠白 → `0xFFF4F4F4`；
-     * 深色 = 7% 的白叠 [background]（批 61 起 `0xFF161E27`）→ `0xFF262E36`。
+     * 深色 = 7% 的白叠 [background]（批 67 起 `0xFF161E27`）→ `0xFF262E36`。
      * **深色下它比屏底亮**，浅色下才比屏底暗一档 —— 原先两套都写成"比 [surface] 深"
      * 是把深色那半抄反了（TG 的 tint 是白，叠上去只会更亮）。
      */
@@ -314,7 +314,7 @@ val LightColors = Colors(
 
 /** 深色（`night.attheme`）。 */
 val DarkColors = Colors(
-    // **用户指定的屏底**（2026-10-06 批 61）：#161E27，带一点蓝的深灰 —— 这是本仓
+    // **用户指定的屏底**（2026-10-06 批 67）：#161E27，带一点蓝的深灰 —— 这是本仓
     // **故意偏离** TG night 的 `windowBackground`（0xFF181819，中性深灰）的一处，
     // 用户口径优先。改它的连带面见下面 [surfaceMuted] 与 [fieldBackground]。
     background = Color(0xFF161E27),
@@ -342,7 +342,7 @@ val DarkColors = Colors(
     tabSelected = Color(0xFF229AF0),
     tabSelectedText = Color(0xFF229AF0),
     pressedOverlay = Color(0x16FFFFFF),
-    // 白 7% 叠 [background]（0xFF161E27）→ 0xFF262E36。批 61 换屏底时**跟着重算**：
+    // 白 7% 叠 [background]（0xFF161E27）→ 0xFF262E36。批 67 换屏底时**跟着重算**：
     // 这两个键在 TG 里本来就是一"配方"关系（见 [Colors.fieldBackground] 的 KDoc），
     // 底换了而配方不换，那个"比屏底亮一档"的结论就不成立了。
     // 与下面 menuBackground 同值纯属巧合（TG 的深色子菜单底也是"比底亮一档的深灰"），
@@ -350,7 +350,7 @@ val DarkColors = Colors(
     fieldBackground = Color(0xFF262E36),
     graySection = Color(0xFF0B0B0C),
     graySectionText = Color(0xFF838384),
-    // 这三个键 night.attheme 都设了 —— 但**用户口径**（2026-10-06 批 62）把"夜间的黑"
+    // 这三个键 night.attheme 都设了 —— 但**用户口径**（2026-10-06 批 68）把"夜间的黑"
     // 统一定成 #161E27：顶栏 / 菜单（子菜单底）/ 底部页签胶囊三处都换成它。
     // 菜单底与屏底同值 = 菜单"贴"在屏底上，靠投影 + 圆角分层 —— 浅色档本来就是
     // 白菜单贴白屏底（见 [LightColors]），深色跟着一致，不另立第三档灰。

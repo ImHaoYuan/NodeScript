@@ -929,7 +929,7 @@ private val FabSubRise = 64.dp
  *   上边浅色 `0x20000000` / 深色 `0x11FFFFFF`（[FabSubStrokeTop]）；
  * - 底是**模糊背板**（把身后的内容模糊后上浮），本仓没有实时模糊，
  *   取 `key_windowBackgroundWhite` 的实色近似 —— 浅色下就是白，深色下是 `#161E27`
- *   （[ThemeColors.background]，批 61 的用户口径值）。
+ *   （[ThemeColors.background]，批 67 的用户口径值）。
  * - 图标取 `key_actionBarDefaultIcon`（[ThemeColors.barIcon]：浅色偏冷深灰
  *   `#FF404E56`，**不是**正文黑）；按下底 = `key_listSelector`
  *   （[ThemeColors.menuSelector] 同档）。形状要一起给 [pressable]：按压遮罩按矩形画，

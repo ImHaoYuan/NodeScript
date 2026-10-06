@@ -383,6 +383,23 @@ fun LabeledRow(
 }
 
 /**
+ * 「回到顶部」那颗按钮的显隐判据（[ScrollToTopButton] 的 `visible`）。
+ *
+ * **为什么要经 `derivedStateOf`**：`firstVisibleItemIndex` 每滚过一行就变一次。
+ * 直接写成 `visible = listState.firstVisibleItemIndex > 0`，这个读就落在**调用方那一整块**
+ * 的组合作用域里 —— 于是每翻一行都重组那一片（列表本身 + 按钮 + 同层的 FAB 等）。派生出
+ * 一个布尔之后，只有"0 ↔ 非 0"翻面时才变值，重组次数从"滚过几行"降到"跨过几次边界"。
+ *
+ * 放在这里而不是各屏各写一遍：四屏（项目 / 设置 / 任务 / 控制台）用的是同一个判据，
+ * 写四遍就迟早有一处漏掉 `derivedStateOf`。
+ */
+@Composable
+fun rememberScrollToTopVisible(listState: LazyListState): Boolean {
+    val visible by remember(listState) { derivedStateOf { listState.firstVisibleItemIndex > 0 } }
+    return visible
+}
+
+/**
  * 「回到顶部」浮动按钮。
  *
  * **诚实边界**：TG 的会话列表里**没有**这颗按钮（它靠长按拖拽/点状态栏回顶），
@@ -402,23 +419,6 @@ fun LabeledRow(
  * @param visible 由调用方按滚动位置判定 —— 一律走 [rememberScrollToTopVisible]，
  *   别把 `firstVisibleItemIndex` 直接读进调用方的组合作用域（见那个函数的 KDoc）。
  */
-/**
- * 「回到顶部」那颗按钮的显隐判据（[ScrollToTopButton] 的 `visible`）。
- *
- * **为什么要经 `derivedStateOf`**：`firstVisibleItemIndex` 每滚过一行就变一次。
- * 直接写成 `visible = listState.firstVisibleItemIndex > 0`，这个读就落在**调用方那一整块**
- * 的组合作用域里 —— 于是每翻一行都重组那一片（列表本身 + 按钮 + 同层的 FAB 等）。派生出
- * 一个布尔之后，只有"0 ↔ 非 0"翻面时才变值，重组次数从"滚过几行"降到"跨过几次边界"。
- *
- * 放在这里而不是各屏各写一遍：四屏（项目 / 设置 / 任务 / 控制台）用的是同一个判据，
- * 写四遍就迟早有一处漏掉 `derivedStateOf`。
- */
-@Composable
-fun rememberScrollToTopVisible(listState: LazyListState): Boolean {
-    val visible by remember(listState) { derivedStateOf { listState.firstVisibleItemIndex > 0 } }
-    return visible
-}
-
 @Composable
 fun ScrollToTopButton(
     visible: Boolean,
