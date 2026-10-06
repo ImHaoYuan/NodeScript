@@ -130,12 +130,20 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## 许可
 
-本项目本体是 **GPL-2.0-or-later**，见 [`LICENSE`](LICENSE)（GPL v2 全文；`or later`
-一节允许受任人把整体升级到 GPL-3.0 发布）。随包分发的第三方组件（Node.js / OpenCV /
-KleidiCV / libc++ / libjpeg-turbo / libpng / zlib / vendored npm）的许可清单见
-[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)，逐字许可原文在
-[`node-runtime-build/licenses/`](node-runtime-build/licenses/)。
+本项目本体（Kotlin / C++ / TypeScript 源码，含 `bridge/js`）是 **GPL-2.0-only** ——
+GNU General Public License **第 2 版**，**不含**「或任何更新版本」。全文见 [`LICENSE`](LICENSE)。
 
-该清单是**生成物**：版本事实来源是 [`node-runtime-build/VERSIONS.env`](node-runtime-build/VERSIONS.env)，
+**为什么是 `only` 而不是 `or-later`**：`ui/` 含衍生自 Telegram Android 的部分，而后者是
+GPL-2.0-**only**；它与 GPL-3.0 不兼容，两者合成的整体无法合法地按 GPL-3.0 再分发，
+所以「or later」这个选项事实上走不通。口径与代价见 [`docs/design-decisions.md`](docs/design-decisions.md)
+第 33 项。
+
+**署名与衍生来源**：源码面（哪几个文件衍生自哪个上游、改了哪些）见 [`NOTICE`](NOTICE)；
+随包分发的第三方**二进制与素材**（Node.js / npm / OpenCV / KleidiCV / libc++ /
+libjpeg-turbo / libpng / zlib）清单见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)，
+逐字许可原文在 [`node-runtime-build/licenses/`](node-runtime-build/licenses/)。
+
+那份清单是**生成物**：版本事实来源是 [`node-runtime-build/VERSIONS.env`](node-runtime-build/VERSIONS.env)，
 改版本后必须重跑 `node node-runtime-build/licenses/gen-notices.mjs`，CI 有一道同步门
-（漂移即红）—— 许可声明与事实脱节在分发时是法律问题，不是文档瑕疵。
+（漂移即红）—— 许可声明与事实脱节在分发时是法律问题，不是文档瑕疵。**别手改它**：
+源码面的署名写进 [`NOTICE`](NOTICE)，那份才是手写的。

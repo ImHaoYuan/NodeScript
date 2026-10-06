@@ -58,9 +58,13 @@
 
 ## 3. 本仓自有代码
 
-AutoScript 自身的 Kotlin / C++ / TypeScript 源码是 **GPL-2.0-or-later**，见
+AutoScript 自身的 Kotlin / C++ / TypeScript 源码是 **GPL-2.0-only**，见
 [`LICENSE`](LICENSE)。
 上面列的是**随包分发的第三方二进制与素材**，不含本仓源码。
+
+**源码面的第三方署名不在本文件**（本文件是生成物，手改会被 `--check` 判漂移）：
+本仓 `ui/` 含衍生自 Telegram Android（GPL-2.0-only）的部分，逐文件来源与修改说明见
+[`NOTICE`](NOTICE)。
 
 ## 4. 不在随包范围（故不在上面清单里）
 

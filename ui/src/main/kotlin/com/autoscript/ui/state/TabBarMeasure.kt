@@ -29,7 +29,8 @@ data class TabBarPlan(
  *
  * 这是 TG 底栏与 Material `NavigationBar` 最大的版式区别：四格不等宽，格子的宽窄跟着
  * 标签文字走（"项目"与"任务"两字同宽，"管理"窄一档，长标签占得更宽）。照抄的是
- * `TMessagesProj/.../MainTabsLayout.java` 的 `onMeasure`，逐句对着写：
+ * `TMessagesProj/.../MainTabsLayout.java` 的 `onMeasure`，逐句对着写（来源与许可见仓库根
+ * 的 `NOTICE` —— 上游 Telegram Android 是 GPL-2.0-only，本文件属其衍生部分）：
  *
  * 1. **三趟试排**（`PASS_TEXT_SIZES_DP = {12, 12, 10}` × `PASS_PADDINGS_DP = {16, 8, 4}`）：
  *    先按 12sp / 16dp 内边距算总宽，塞不下就换 8dp 内边距（**字号不变** —— 第 1、2 趟

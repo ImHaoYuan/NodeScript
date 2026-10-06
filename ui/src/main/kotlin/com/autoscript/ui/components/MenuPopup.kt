@@ -200,7 +200,8 @@ internal val LocalMenuAnim = compositionLocalOf<MenuAnim> {
 }
 
 /**
- * `AndroidUtilities.cascade` 逐字移植（Telegram/AndroidUtilities.java:5215）：
+ * `AndroidUtilities.cascade` 逐字移植（Telegram/AndroidUtilities.java:5215；来源与许可见
+ * 仓库根的 `NOTICE` —— 上游 Telegram Android 是 GPL-2.0-only，本文件属其衍生部分）：
  * 把总进度 [t] 按 [position]/[count] 错相成一波一波的浮现，[waveLength] 控制同屏
  * 波峰数 —— 项越多每波的启动间隔越短，总时长不随项数失控。
  */

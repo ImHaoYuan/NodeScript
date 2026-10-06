@@ -31,8 +31,9 @@ import androidx.compose.ui.unit.sp
  * 这个颜色到底是什么」变得不可读。故 [Colors] 是本仓的语义调色板，
  * `ColorScheme` 只作为 `MaterialTheme` 的最小适配（部分 M3 组件仍要它）。
  *
- * 「GPL-2.0-or-later」下**未抄任何 TG 源码**：这里只有颜色数值（事实）与版式约定
- * （顶栏 + 底页签 + 密排列表），代码是本仓自己的。
+ * 本文件取自 TG 的是**色值常量**（事实性数据，不受版权保护）与键名；版式约定
+ * （顶栏 + 底页签 + 密排列表）是观感参考，代码是本仓自写。本仓整体为 GPL-2.0-only，
+ * 源码面的衍生来源与修改说明逐文件列在仓库根的 `NOTICE`。
  */
 @Immutable
 data class Colors(
