@@ -67,6 +67,8 @@ import com.autoscript.ui.components.ActionBar
 import com.autoscript.ui.components.ActionBarAction
 import com.autoscript.ui.components.ActionBottomSheet
 import com.autoscript.ui.components.ActionBottomSheetItem
+import com.autoscript.ui.components.BAR_MORE_DOTS_WEIGHT
+import com.autoscript.ui.components.BarMoreDotsSize
 import com.autoscript.ui.components.ContextMenu
 import com.autoscript.ui.components.centerInRoot
 import com.autoscript.ui.components.EaseOutQuint
@@ -78,8 +80,11 @@ import com.autoscript.ui.components.MenuGap
 import com.autoscript.ui.components.Glyph
 import com.autoscript.ui.components.GlyphKind
 import com.autoscript.ui.components.LocalToast
+import com.autoscript.ui.components.ROW_MORE_DOTS_WEIGHT
 import com.autoscript.ui.components.RefreshableBox
+import com.autoscript.ui.components.RowMoreDotsSize
 import com.autoscript.ui.components.ScrollToTopButton
+import com.autoscript.ui.components.rememberScrollToTopVisible
 import com.autoscript.ui.components.TabBarBottomClearance
 import com.autoscript.ui.components.ToneText
 import com.autoscript.ui.components.pressable
@@ -192,11 +197,16 @@ fun ProjectScreen(
     // 展开搜索栏时列表整个换掉），不是"在当前目录里筛一下" —— 用户搜文件名时想找的是
     // "那个文件在哪"，锁在当前层就等于答非所问。搜索清空即回到当前层。
     val searching = query.isNotBlank()
-    val visible = ScriptFileRowUi.sorted(
-        files = ProjectState.poolFor(state.files, currentFolder, searching).filter { it.matches(query) },
-        sort = state.sort,
-        reversed = state.reversed,
-    )
+    // **记忆化**：本屏每次重组都会走到这里，而 `poolFor + filter + sorted` 是"整层重排一遍"
+    // —— 多选里每勾一行、浮层每弹一条回执都会触发重组，200 个文件就是 200 次白排序。
+    // 键取真正的输入（池 + 词 + 排序档），敲搜索词本来就该重算，勾选/回执不该。
+    val visible = remember(state.files, currentFolder, searching, query, state.sort, state.reversed) {
+        ScriptFileRowUi.sorted(
+            files = ProjectState.poolFor(state.files, currentFolder, searching).filter { it.matches(query) },
+            sort = state.sort,
+            reversed = state.reversed,
+        )
+    }
     val selectionMode = selected.isNotEmpty()
     val allSelected = ProjectState.allSelected(selected, visible)
 
@@ -337,7 +347,7 @@ fun ProjectScreen(
                 }
             }
             ScrollToTopButton(
-                visible = listState.firstVisibleItemIndex > 0,
+                visible = rememberScrollToTopVisible(listState),
                 onClick = { scope.launch { listState.animateScrollToItem(0) } },
                 modifier = Modifier.align(Alignment.BottomEnd)
                     .padding(start = 16.dp, end = 16.dp, bottom = TabBarBottomClearance(extra = 64.dp)),
@@ -424,14 +434,16 @@ private fun ProjectMenu(
     val anchor = remember { mutableStateOf(Offset.Zero) }
     Box {
         Box(Modifier.onGloballyPositioned { anchor.value = it.centerInRoot() }) {
-            Text(
-                text = "⋮",
-                color = ThemeColors.text,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
+            // 三点是**画出来的**（[GlyphKind.MORE_VERT] + 最粗那档参数）：原先写成
+            // `Text("⋮")`，粗细由系统字体决定、没法与列表行尾那颗比大小（见那组常量的 KDoc）。
+            Glyph(
+                kind = GlyphKind.MORE_VERT,
+                tint = ThemeColors.text,
                 modifier = Modifier
                     .pressable(role = Role.Button, onClick = { open = true })
                     .padding(horizontal = 12.dp, vertical = 8.dp),
+                size = BarMoreDotsSize,
+                weight = BAR_MORE_DOTS_WEIGHT,
             )
         }
         ContextMenu(
@@ -617,7 +629,12 @@ private fun FileRow(
                     .semantics { contentDescription = "更多（${file.name}）" },
                 contentAlignment = Alignment.Center,
             ) {
-                Glyph(kind = GlyphKind.MORE_VERT, tint = palette.text, size = 20.dp)
+                Glyph(
+                    kind = GlyphKind.MORE_VERT,
+                    tint = palette.text,
+                    size = RowMoreDotsSize,
+                    weight = ROW_MORE_DOTS_WEIGHT,
+                )
             }
             Spacer(Modifier.width(4.dp))
         } else {

@@ -37,3 +37,10 @@ CLAUDE.local.md
 # 密钥库（SECURITY.md 密钥管理：绝不提交）
 *.jks
 *.keystore
+
+# Telegram 安卓客户端源码（DrKLO/Telegram，`git clone --depth 1` 下来的本地副本）。
+# 用途：抄它的**配色键值**（`TMessagesProj/src/main/assets/{day,night}.attheme`、
+# `ui/ActionBar/ThemeColors.java`）与**日夜切换动画**（`ui/LaunchActivity.java`
+# 的 needSetDayNightTheme 分支、`ui/Components/Easings.java`），见 docs/log 同日条目。
+# 384MB 级、且是别人的仓库（自带 .git），**不入库**；要更新自己进去 git pull。
+/Telegram/

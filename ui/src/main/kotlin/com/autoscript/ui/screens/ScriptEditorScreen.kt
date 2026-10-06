@@ -16,6 +16,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -25,12 +26,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.autoscript.ui.components.ActionBar
 import com.autoscript.ui.components.ActionBarAction
+import com.autoscript.ui.components.LocalTabBarHidden
 import com.autoscript.ui.components.LocalToast
 import com.autoscript.ui.components.TabBarBottomClearance
 import com.autoscript.ui.components.color
@@ -75,6 +79,16 @@ fun ScriptEditorScreen(
     val palette = ThemeColors
     val scope = rememberCoroutineScope()
     val toast = LocalToast.current
+    // 保存成功后要收的两样东西：焦点（= 光标）与输入法（见下面保存那一段）。
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    // **编辑面占整屏，底栏整条收掉**（用户口径）：编辑时那四个页签既点不到正文、又压着最后几行。
+    // 开关由外壳供（[LocalTabBarHidden]），只在进出时写它 —— 退出（含配置重建）自动还回去。
+    val tabBarHidden = LocalTabBarHidden.current
+    DisposableEffect(Unit) {
+        tabBarHidden.value = true
+        onDispose { tabBarHidden.value = false }
+    }
     // null = 还没读到（或正在读）：与「读到了但是空文件」（空串）必须区分开。
     var text by remember { mutableStateOf<String?>(null) }
     var loadError by remember { mutableStateOf<String?>(null) }
@@ -90,14 +104,9 @@ fun ScriptEditorScreen(
         loadError = null
         saveError = null
         dirty = false
-        text = try {
-            onRead(projectId, relPath)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (t: Exception) {
-            loadError = t.message ?: t.javaClass.simpleName
-            null
-        }
+        val loaded = loadScriptText(projectId, relPath, onRead)
+        text = loaded.text
+        loadError = loaded.error
     }
 
     /** 退回上一层（返回键与 ‹ 共用）：有未保存改动先问一句，不静默丢。 */
@@ -125,17 +134,17 @@ fun ScriptEditorScreen(
                         scope.launch {
                             saving = true
                             saveError = null
-                            try {
-                                onSave(projectId, relPath, content)
-                                dirty = false
-                                toast?.show("已保存「$displayName」")
-                            } catch (e: CancellationException) {
-                                throw e
-                            } catch (t: Exception) {
-                                saveError = t.message ?: t.javaClass.simpleName
-                            } finally {
-                                saving = false
-                            }
+                            saveError = saveScriptText(projectId, relPath, content, onSave)
+                            saving = false
+                            // 存失败：那句原文留在正文上方，**不收键盘**（还要接着改）。
+                            if (saveError != null) return@launch
+                            dirty = false
+                            // 存完就**收键盘、撤光标**（用户口径）：写完了还杵着输入法 +
+                            // 一根闪烁光标，读起来像"还在编辑、没存上"。清焦点即撤光标
+                            // （未聚焦的 BasicTextField 不画光标），键盘随之收起。
+                            focusManager.clearFocus()
+                            keyboard?.hide()
+                            toast?.show("已保存「$displayName」")
                         }
                     },
                 )
@@ -206,6 +215,56 @@ fun ScriptEditorScreen(
         )
     }
 }
+
+/**
+ * 读一次正文：**读到了给正文，读不到给失败原文**，两者绝不会同时非空。
+ *
+ * 单独抽出来的两个理由：① 「失败不冒充空文件」这条判据现在是一个可以直接单测的函数
+ * （空文件 = `text = ""`、读失败 = `text = null` + `error`），而不是埋在组合里的
+ * try/catch；② 组合函数已经贴着 detekt 的长函数线。
+ *
+ * 取消**照原样抛**（`CancellationException` 是协程的通行证，吞了会让换文件时的重读
+ * 变成"上一位的结果盖到新文件上"）。
+ */
+internal suspend fun loadScriptText(
+    projectId: String,
+    relPath: String,
+    onRead: suspend (projectId: String, relPath: String) -> String,
+): ScriptLoad = try {
+    ScriptLoad(text = onRead(projectId, relPath), error = null)
+} catch (e: CancellationException) {
+    throw e
+} catch (t: Exception) {
+    ScriptLoad(text = null, error = t.message ?: t.javaClass.simpleName)
+}
+
+/**
+ * 保存一次：**正常返回即已落盘**；失败把原文作为结果带回来（不往组合里抛）。
+ *
+ * 与 [loadScriptText] 同一条纪律：`CancellationException` 照原样抛（协程的通行证），
+ * 其余异常都收成"这次没存上"的那句话 —— 由调用方决定它显示在哪儿。
+ */
+internal suspend fun saveScriptText(
+    projectId: String,
+    relPath: String,
+    content: String,
+    onSave: suspend (projectId: String, relPath: String, content: String) -> Unit,
+): String? = try {
+    onSave(projectId, relPath, content)
+    null
+} catch (e: CancellationException) {
+    throw e
+} catch (t: Exception) {
+    t.message ?: t.javaClass.simpleName
+}
+
+/**
+ * [loadScriptText] 的结果。
+ *
+ * @property text 正文；`null` = 没读到（**不是**空文件 —— 空文件是 `""`）。
+ * @property error 失败原文；`null` = 读到了。
+ */
+internal data class ScriptLoad(val text: String?, val error: String?)
 
 /** 读不到 / 读取中这两句的落位（居中一行，次级色）—— 与正文同一块地方，不另起一屏。 */
 @Composable

@@ -42,13 +42,17 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.autoscript.ui.components.ActionBar
+import com.autoscript.ui.components.BAR_MORE_DOTS_WEIGHT
+import com.autoscript.ui.components.BarMoreDotsSize
 import com.autoscript.ui.components.ContextMenu
+import com.autoscript.ui.components.Glyph
 import com.autoscript.ui.components.centerInRoot
 import com.autoscript.ui.components.GlyphKind
 import com.autoscript.ui.components.LocalToast
 import com.autoscript.ui.components.MenuAction
 import com.autoscript.ui.components.RefreshableBox
 import com.autoscript.ui.components.ScrollToTopButton
+import com.autoscript.ui.components.rememberScrollToTopVisible
 import com.autoscript.ui.components.SettingIconColors
 import com.autoscript.ui.components.SettingsCard
 import com.autoscript.ui.components.SettingsCellRow
@@ -218,7 +222,7 @@ fun SettingsScreen(
             }
             val listState = if (permissionsOpen) pageListState else topListState
             ScrollToTopButton(
-                visible = listState.firstVisibleItemIndex > 0,
+                visible = rememberScrollToTopVisible(listState),
                 onClick = { scope.launch { listState.animateScrollToItem(0) } },
                 // 回顶钮抬到悬浮底栏上方（胶囊占位 + 导航 inset，另加 8dp 呼吸）。
                 modifier = Modifier.align(Alignment.BottomEnd)
@@ -369,14 +373,15 @@ private fun SettingsMenu(themeSwitchLabel: String, onSwitchTheme: (Offset) -> Un
     val anchor = remember { mutableStateOf(Offset.Zero) }
     Box {
         Box(Modifier.onGloballyPositioned { anchor.value = it.centerInRoot() }) {
-            Text(
-                text = "⋮",
-                color = ThemeColors.text,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
+            // 与项目页顶栏同一颗（画出来的三点 + 最粗那档参数，见那组常量的 KDoc）。
+            Glyph(
+                kind = GlyphKind.MORE_VERT,
+                tint = ThemeColors.text,
                 modifier = Modifier
                     .pressable(role = Role.Button, onClick = { open = true })
                     .padding(horizontal = 12.dp, vertical = 8.dp),
+                size = BarMoreDotsSize,
+                weight = BAR_MORE_DOTS_WEIGHT,
             )
         }
         ContextMenu(

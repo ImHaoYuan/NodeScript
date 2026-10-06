@@ -43,7 +43,13 @@ data class Colors(
     val surface: Color,
     /** 设置页底（灰底上浮白卡片的那层灰；`windowBackgroundGray`）。 */
     val surfaceMuted: Color,
-    /** 分隔线（`divider`）。 */
+    /**
+     * 分隔线（`divider`）。
+     *
+     * 深色**是纯黑**（night.attheme `divider` = `0xFF000000`）：TG 深色下的分隔线是
+     * "比卡片更暗的一道槽"，不是"比底更亮的一条线" —— 卡片 `0xFF232326` 上那道黑线
+     * 就是它。原先写成 `0xFF2F2F33`（比卡片亮）是拿浅色的读法套深色，抄反了。
+     */
     val divider: Color,
     /** 正文主色（`chats_name` / `actionBarDefaultTitle`）。 */
     val text: Color,
@@ -53,7 +59,12 @@ data class Colors(
     val textTertiary: Color,
     /** 强调色：链接、选中态（`windowBackgroundWhiteBlueText` / `actionBarTabActiveText`）。 */
     val accent: Color,
-    /** 顶栏副标题淡色（`actionBarDefaultSubtitle`）。 */
+    /**
+     * 顶栏副标题淡色（`actionBarDefaultSubtitle`）。
+     *
+     * 深色取 night.attheme 的 `0x73F2F2F2`（**45%** 白）；原先写的 `0x99F2F2F2`（60%）
+     * 比 TG 亮一档，顶栏副标题（编辑器里就是文件路径那一行）会跟标题抢注意力。
+     */
     val barSubtitle: Color,
     /** 错误（`chats_sentError`）。 */
     val error: Color,
@@ -99,7 +110,15 @@ data class Colors(
      * —— 因为 night 主题两个键都没设，一起回退到 `chat_messagePanelSend`。
      */
     val tabSelectedText: Color,
-    /** 按下态遮罩（`actionBarDefaultSelector` 那种半透明压暗）。 */
+    /**
+     * 按下态遮罩（`actionBarDefaultSelector` 那种半透明压暗）。
+     *
+     * 两套都取 attheme 的实值：浅色 `0x121A1D21`（`actionBarDefaultSelector`，`DEFAULT_BLACK_TEXT`
+     * 压到 alpha 0x12 ≈ 7% —— **不是纯黑**）、深色 `0x16FFFFFF`（alpha 0x16 ≈ 9% 白）。原先两处
+     * 各多写了两个 1/255 的档（0x14 / 0x1A）—— 眼睛按不出差别，但已经与源不一致；这类
+     * "差不多"攒起来就是"不像 TG"。（attheme 的 alpha 是 0–255，不是百分数：同一份文件里
+     * `actionBarDefaultSubtitle` 的 0x73 要是当百分数就 >100 了。）
+     */
     val pressedOverlay: Color,
     /**
      * 输入框/搜索底（TG `FragmentSearchField.updateColors` 的配方：把
@@ -128,7 +147,13 @@ data class Colors(
     val sheetBackground: Color,
     /** 主按钮/胶囊底（`featuredStickers_addButton`，TG 的"动作蓝"，与 [accent] 不是一个键）。 */
     val featuredButton: Color,
-    /** 带后果的文字（`text_RedRegular`，TG 菜单里的"删除/停止"那一档）。 */
+    /**
+     * 带后果的文字（`text_RedRegular`，TG 菜单里的"删除/停止"那一档）。
+     *
+     * 浅色 `0xFFCC2929` 来自 `ThemeColors.java` 的默认值 —— 这个键 **day.attheme 里没有**
+     * （那份只设了 `text_RedBold`），原先的注记写"两个键 day.attheme 都设了"是错的；
+     * 深色 `0xFFEE686F` 才是 night.attheme 设的。
+     */
     val dangerText: Color,
     /** 输入光标（`groupcreate_cursor`）。 */
     val cursor: Color,
@@ -226,7 +251,7 @@ val LightColors = Colors(
     tabUnselected = Color(0xFF1A1D21),
     tabSelected = Color(0xFF1A91E6),
     tabSelectedText = Color(0xFF0D7FCF),
-    pressedOverlay = Color(0x14000000),
+    pressedOverlay = Color(0x121A1D21),
     // `windowBackgroundWhiteBlackText`(0xFF1A1D21) 5% 叠白（TG 的 5%）。
     fieldBackground = Color(0xFFF4F4F4),
     graySection = Color(0xFFF6F6F6),
@@ -237,7 +262,8 @@ val LightColors = Colors(
     sheetBackground = Color(0xFFFFFFFF),
     // day.attheme 设了 `featuredStickers_addButton`；night 没设 → TELEGRAM_COLOR。
     featuredButton = Color(0xFF4DA0EB),
-    // `text_RedRegular` / `groupcreate_cursor` 两个键 day.attheme 都设了。
+    // `groupcreate_cursor` 是 day.attheme 设的（0xFF329FED）；`text_RedRegular` **不是**，
+    // 走 ThemeColors.java 的默认值 0xffcc2929（见 [Colors.dangerText]）。
     dangerText = Color(0xFFCC2929),
     cursor = Color(0xFF329FED),
     // `chat_messagePanelBackground` / `glass_defaultIcon` / `chats_tabletSelectedOverlay`
@@ -275,12 +301,12 @@ val DarkColors = Colors(
     // TG 的设置页灰底（night.attheme `windowBackgroundGray` = #000000，纯黑）：
     // 深色下白卡片浮在黑底上，卡片与底的对比来自明度差，不靠描边。
     surfaceMuted = Color(0xFF000000),
-    divider = Color(0xFF2F2F33),
+    divider = Color(0xFF000000),
     text = Color(0xFFFFFFFF),
     textSecondary = Color(0xFF828282),
     textTertiary = Color(0xFF787878),
     accent = Color(0xFF5CC1FF),
-    barSubtitle = Color(0x99F2F2F2),
+    barSubtitle = Color(0x73F2F2F2),
     error = Color(0xFFE06C6C),
     warning = Color(0xFFF0B429),
     success = Color(0xFF71D756),
@@ -293,7 +319,7 @@ val DarkColors = Colors(
     tabUnselected = Color(0xFFFFFFFF),
     tabSelected = Color(0xFF229AF0),
     tabSelectedText = Color(0xFF229AF0),
-    pressedOverlay = Color(0x1AFFFFFF),
+    pressedOverlay = Color(0x16FFFFFF),
     // 白 7% 叠 [background](0xFF181819) —— 与下面 menuBackground 同值纯属巧合（TG 的
     // 深色子菜单底也是"比底亮一档的深灰"），两个键在 TG 里各是各的，别合并。
     fieldBackground = Color(0xFF282829),

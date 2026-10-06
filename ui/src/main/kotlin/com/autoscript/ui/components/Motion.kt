@@ -32,3 +32,13 @@ fun OvershootEasing(tension: Float): Easing = Easing { t ->
     val u = t - 1f
     u * u * ((tension + 1f) * u + tension) + 1f
 }
+
+/**
+ * `CubicBezierInterpolator.EASE_IN_OUT_QUAD = (0.455, 0.03, 0.515, 0.955)`
+ * （`Easings.easeInOutQuad`，逐字抄控制点）。
+ *
+ * **日夜切换的圆形揭示用它**（`LaunchActivity`：`anim.setInterpolator(Easings.easeInOutQuad)`，
+ * `anim.setDuration(400)`）。不要顺手换成 [EaseOutQuint]：那条起步就把大半段路程走完，
+ * 圆会先"跳"一下再爬 —— 400ms 的揭示里这就是肉眼可见的一顿。
+ */
+val EaseInOutQuad: Easing = CubicBezierEasing(0.455f, 0.03f, 0.515f, 0.955f)

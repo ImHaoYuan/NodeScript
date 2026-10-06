@@ -83,6 +83,7 @@ import com.autoscript.ui.components.OvershootEasing
 import com.autoscript.ui.components.PillButton
 import com.autoscript.ui.components.RefreshableBox
 import com.autoscript.ui.components.ScrollToTopButton
+import com.autoscript.ui.components.rememberScrollToTopVisible
 import com.autoscript.ui.components.SectionHeader
 import com.autoscript.ui.components.Separator
 import com.autoscript.ui.components.ToneText
@@ -381,7 +382,7 @@ fun TaskCenterScreen(
                 modifier = Modifier.align(Alignment.TopCenter),
             )
             ScrollToTopButton(
-                visible = listState.firstVisibleItemIndex > 0,
+                visible = rememberScrollToTopVisible(listState),
                 onClick = { scope.launch { listState.animateScrollToItem(0) } },
                 // 回顶钮抬到 FAB 上方（同项目页的让位档：extra 64dp）。
                 modifier = Modifier.align(Alignment.BottomEnd)

@@ -37,6 +37,7 @@ import com.autoscript.ui.components.ContextMenu
 import com.autoscript.ui.components.MenuAction
 import com.autoscript.ui.components.RefreshableBox
 import com.autoscript.ui.components.ScrollToTopButton
+import com.autoscript.ui.components.rememberScrollToTopVisible
 import com.autoscript.ui.components.ToneText
 import com.autoscript.ui.components.pressable
 import com.autoscript.ui.components.pressableLongPress
@@ -202,7 +203,7 @@ fun ConsoleScreen(
             }
             particles.Overlay(Modifier.matchParentSize())
             ScrollToTopButton(
-                visible = listState.firstVisibleItemIndex > 0,
+                visible = rememberScrollToTopVisible(listState),
                 onClick = { scope.launch { listState.animateScrollToItem(0) } },
                 // 回顶钮抬到悬浮底栏上方（胶囊占位 + 导航 inset，另加 8dp 呼吸 —— TG 的 FAB 同款让位）。
                 modifier = Modifier.align(Alignment.BottomEnd)
