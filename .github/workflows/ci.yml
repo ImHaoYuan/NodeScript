@@ -149,18 +149,18 @@ jobs:
   # 挡下游/协作者改契约面与台账面（删 `docs/log/` 既有条目、改 `docs/design/`、改门禁脚本……）。
   # `check-doc-links.sh` 抓不到这类改动 —— 它只验链接目标存在，删条目不影响任何链接。
   #
-  # **只对下游 PR 生效**：`author_association` 是 OWNER/MEMBER 时整 job 跳过 —— 维护者改冻结面
-  # 是合法的（与 ruleset `main-protect` 的 bypass list「Repository admin」同一条口径）。
-  # fork PR 的 association 是 CONTRIBUTOR / FIRST_TIME_CONTRIBUTOR / NONE，照跑。
+  # **只审下游 PR**：维护者自己的 PR（`author_association` 是 OWNER/MEMBER）不审 —— 维护者改
+  # 冻结面是合法的（与 ruleset `main-protect` 的 bypass list「Repository admin」同一条口径）。
+  # fork PR 的 association 是 CONTRIBUTOR / FIRST_TIME_CONTRIBUTOR / NONE，照审。
+  #
+  # **刻意不在 job 级用 `if` 跳过**：本仓纪律是「skipped ≠ 绿」（`TestGuard` 就是为此存在的），
+  # 而 `skipped` 的 required check 在 ruleset 里算不算通过有歧义 —— 本 job **永远跑、永远给出
+  # 明确结论**，不审时在日志里写明「为什么没审」，不给「看起来绿」留缝。
   #
   # 为什么下游删不掉这道门：`pull_request` 事件跑的是**基线分支**里的 workflow 文件，不是 PR
   # 里那份；改 main 上的它又会被本门自己拦（`.github/` 在冻结面里）。
   frozen-paths:
     name: 冻结面门（下游 PR 不许改契约面/台账面）
-    if: >-
-      github.event_name == 'pull_request'
-      && github.event.pull_request.author_association != 'OWNER'
-      && github.event.pull_request.author_association != 'MEMBER'
     runs-on: ubuntu-latest
     timeout-minutes: 5        # 纯 git 比对，秒级
     steps:
@@ -170,10 +170,23 @@ jobs:
           fetch-depth: 0
       - name: 检查冻结面与只追加面（脚本自带规则说明；本机同一条命令可跑）
         env:
+          EVENT_NAME: ${{ github.event_name }}
+          AUTHOR_ASSOCIATION: ${{ github.event.pull_request.author_association }}
           # 基线取**基线分支**（不是 PR 的 head）—— 与 `git merge-base` 配成一对才是「本 PR 的净改动」。
           BASE_REF: origin/${{ github.base_ref }}
           HEAD_REF: refs/remotes/origin/pr-head
         run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "非 PR 触发（$EVENT_NAME）—— 本门只审 PR 的净改动，此处无对象可审。"
+            exit 0
+          fi
+          case "$AUTHOR_ASSOCIATION" in
+            OWNER|MEMBER)
+              echo "维护者本人（author_association=$AUTHOR_ASSOCIATION）—— 冻结面门不审。"
+              echo "**这是有意不审，不是门没跑**：维护者改冻结面属合法（与 ruleset bypass 同口径）。"
+              exit 0
+              ;;
+          esac
           # 显式取 PR 的 head ref：不能拿 checkout 给的 HEAD（fork PR 上那是**合并提交**，
           # 基线一旦落后于 main，`git diff` 会把 main 的新文件读成「被本 PR 删了」—— 假红）。
           git fetch --no-tags origin "+refs/pull/${{ github.event.pull_request.number }}/head:$HEAD_REF"
