@@ -73,11 +73,32 @@ data class IntentRun(
     val committedAtMillis: Long? = null,
 )
 
-/** 执行结果（对外副作用幂等锚点的对偶：业务重复性统一由 nonce 挡住）。 */
+/**
+ * 执行结果（对外副作用幂等锚点的对偶：业务重复性统一由 nonce 挡住）。
+ *
+ * **诊断字段为什么是裸字段而不是 `domain.engine.RunSummary`**（backlog B11）：
+ * 本模块的架构门（`ArchitectureTest`）明令禁止依赖 `com.autoscript.domain.engine..`
+ * —— scheduler 只许碰 `domain.scripts` 的脚本模型（KDoc 原文「scheduler 只许碰 RunRecord
+ * 等脚本模型」）。折整个 `RunSummary` 进来会当场红门；而消费端 [RunRecord] 要的
+ * 恰好就是这两个裸字段，折一次是纯转手、零信息增益。故 `:app` 的 dispatcher 负责把
+ * 引擎摘要**摊平**成这两个字段（那里本来就同时看得见两侧类型）。
+ */
 sealed interface RunOutcome {
     data object Succeeded : RunOutcome
-    data object Failed : RunOutcome                      // 脚本自身失败 exit!=0 / run 抛错
-    data class Crashed(val message: String? = null) : RunOutcome   // 引擎被杀/OOM/看门狗
+
+    /** 脚本自身失败 exit!=0 / run 抛错 —— 软停超时也归此类；带进程侧诊断（B11）。 */
+    data class Failed(
+        val exitCode: Int? = null,
+        val crashSummary: String? = null,
+    ) : RunOutcome
+
+    /** 引擎被杀/OOM/看门狗/等待超时强杀 —— 崩溃病因从这两个字段折进档案（B11）。 */
+    data class Crashed(
+        val message: String? = null,
+        val exitCode: Int? = null,
+        val crashSummary: String? = null,
+    ) : RunOutcome
+
     data object Cancelled : RunOutcome                   // 用户停止/排队取消
 
     /**
@@ -86,3 +107,19 @@ sealed interface RunOutcome {
      */
     data object Interrupted : RunOutcome
 }
+
+/** 进程侧诊断读口（backlog B11）：只有 [RunOutcome.Failed]/[RunOutcome.Crashed] 携带，其余恒 null。 */
+internal val RunOutcome.diagExitCode: Int?
+    get() = when (this) {
+        is RunOutcome.Failed -> exitCode
+        is RunOutcome.Crashed -> exitCode
+        else -> null
+    }
+
+/** 见 [RunOutcome.diagExitCode]。 */
+internal val RunOutcome.diagCrashSummary: String?
+    get() = when (this) {
+        is RunOutcome.Failed -> crashSummary
+        is RunOutcome.Crashed -> crashSummary
+        else -> null
+    }

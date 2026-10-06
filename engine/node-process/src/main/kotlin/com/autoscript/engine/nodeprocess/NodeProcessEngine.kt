@@ -8,6 +8,7 @@ import com.autoscript.domain.engine.EngineRunReceipt
 import com.autoscript.domain.engine.EngineRunRequest
 import com.autoscript.domain.engine.EngineStatus
 import com.autoscript.domain.engine.KillCause
+import com.autoscript.domain.engine.RunSummary
 import com.autoscript.domain.engine.ScriptEngine
 import com.autoscript.domain.engine.StopResult
 import com.autoscript.domain.scripts.ScriptPaths
@@ -110,6 +111,15 @@ class NodeProcessEngine(
     @Volatile
     private var killRequested: Boolean = false
 
+    /**
+     * 上次执行的进程侧事实快照（backlog B11）：`execute` 开始时清空，[status] 判出
+     * **自然退出**时填充（含 exit 0 —— 摘要只是诊断读口，状态归类不看它）。
+     * 外部经 [ScriptEngine.lastRunSummary] 读 —— 强杀/请求停止那两条分支**不**填充：
+     * 137/143 是终止手段的产物，不是病因（bucket clarity）。
+     */
+    @Volatile
+    private var lastSummary: RunSummary? = null
+
     /** 只在子进程存活时给真 pid；未启动/已退出回 null（§8.4 诚实口径，绝不 0/自身）。 */
     override val pid: Int?
         get() = process?.takeIf { it.isAlive }?.pid
@@ -175,6 +185,7 @@ class NodeProcessEngine(
         val cwd = ScriptPaths.projectRoot(config.filesDir, run.projectId)
         stopRequested = false
         killRequested = false
+        lastSummary = null        // 新执行体的摘要从零计（进程侧旧事实不留到下次 execute）
         val spawned = try {
             launcher.spawn(command, env, cwd)
         } catch (e: IOException) {
@@ -222,14 +233,39 @@ class NodeProcessEngine(
         KillCause.REQUESTED
     }
 
-    /** 进程事实推导（见类 KDoc 状态语义表）；纯读易失字段，不阻塞、不抛。 */
+    /**
+     * 进程事实推导（见类 KDoc 状态语义表）；纯读易失字段，不阻塞、不抛。
+     * 判出「自然退出且 exit≠0」（=CRASHED）时顺带把进程侧摘要快照进 [lastSummary]。
+     */
     override suspend fun status(): EngineStatus {
         val p = process ?: return EngineStatus.IDLE
         if (p.isAlive) return if (stopRequested) EngineStatus.QUIESCING else EngineStatus.RUNNING
         if (killRequested) return EngineStatus.CRASHED      // 强杀钉死：退出码不作判据
         if (stopRequested) return EngineStatus.STOPPED      // 请求过停止：143 不是崩溃
-        return if (p.exitValue() == 0) EngineStatus.STOPPED else EngineStatus.CRASHED
+        return if (p.exitValue() == 0) {
+            // exit 0 = 干净退出（STOPPED）——摘要仍快照（RunSummary(0, tail) 无害），
+            // 只供「上次跑了什么」的诊断读口，状态归类不依赖它。
+            snapshotSummary(p)
+            EngineStatus.STOPPED
+        } else {
+            snapshotSummary(p)
+            EngineStatus.CRASHED
+        }
     }
+
+    /** 快照进程侧事实（退出码 + 捕获的 stderr 尾部）。进程已退净后调用方谓词保证。 */
+    private fun snapshotSummary(p: SpawnedProcess) {
+        lastSummary = RunSummary(
+            exitCode = p.exitValue(),
+            stderrTail = p.stderrTail.takeIf { it.isNotBlank() },
+        )
+    }
+
+    /**
+     * 上次执行的进程侧事实（[ScriptEngine.lastRunSummary] 的宿主实现）：
+     * 未执行 / 尚未退净 / 强杀与请求停止路径都如实回 null（那些退出码不是病因）。
+     */
+    override suspend fun lastRunSummary(): RunSummary? = lastSummary
 
     companion object {
         /**

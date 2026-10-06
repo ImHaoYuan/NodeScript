@@ -202,14 +202,19 @@ data class RunRowState(
     val scriptPath: String,
     val stateLabel: String,
     val startedText: String?,
+    /** 崩溃摘要（stderr 尾部，`RunRow` 的对偶；数据面字段，见 [RunStateText.describe] KDoc）。 */
+    val crashSummary: String? = null,
 ) {
     companion object {
         fun of(run: RunRow, nowMillis: Long, zone: ZoneId): RunRowState = RunRowState(
             engineRunId = run.engineRunId,
             intentRunId = run.intentRunId,
             scriptPath = run.scriptPath,
-            stateLabel = RunStateText.describe(run.state),
+            // 有摘要就报病因（`describe(state, crashSummary)`），没摘要退回套话 ——
+            // 单参 `describe(state)` 与它是同一句话的两个入口，不是两套文案。
+            stateLabel = RunStateText.describe(run.state, run.crashSummary),
             startedText = run.startedAtMillis?.let { ScheduleText.absolute(it, zone) },
+            crashSummary = run.crashSummary,
         )
     }
 }
@@ -290,5 +295,21 @@ object RunStateText {
         RunState.FAILED -> "失败"
         RunState.CRASHED -> "崩溃（被杀/OOM/看门狗）"
         RunState.CANCELLED -> "已取消"
+    }
+
+    /**
+     * 带崩溃摘要的措辞（backlog B11 诊断面）：取到进程侧摘要则拼出病因原文，
+     * 无则退回 [describe]。这是**崩溃行怎么念**的唯一入口（[RunRowState.of] 走这条）；
+     * 单参 [describe] 留给不需要摘要的调用点与逐句断言。
+     *
+     * 摘要是**一句话**不是一段日志：`crashSummary` 已由引擎侧截到
+     * `RunSummary.MAX_DETAIL`（4 KiB），呈现层不再二次裁剪 —— 要折叠/展开是渲染的事，
+     * 不在这层做（当前任务中心卡不渲染这一栏，见 [RunRowState] KDoc）。
+     */
+    fun describe(state: RunState, crashSummary: String?): String {
+        if (state == RunState.CRASHED && !crashSummary.isNullOrBlank()) {
+            return "崩溃：$crashSummary"
+        }
+        return describe(state)
     }
 }

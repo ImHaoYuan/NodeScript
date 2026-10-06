@@ -64,7 +64,7 @@ class ControllerRunDispatcher(
 
     private suspend fun run(pending: PendingRun): DispatchReport {
         when (val gate = screenGate.pass(pending.screen)) {
-            is ScreenGateDecision.Deny -> return DispatchReport(RunOutcome.Failed, null, null)
+            is ScreenGateDecision.Deny -> return DispatchReport(RunOutcome.Failed(), null, null)
             ScreenGateDecision.Proceed -> Unit
         }
         val started = when (
@@ -94,15 +94,37 @@ class ControllerRunDispatcher(
         // 未产生引擎执行的门禁拒绝/排队超时/启动失败三条早退分支回 null stop（如实：无可停的东西）。
         val stop: suspend () -> Unit = { controller.stop(started.runId); Unit }
         val awaitTimeout = pending.timeoutMillis ?: defaultAwaitTimeoutMillis
-        return when (controller.awaitCompletion(started.runId, awaitTimeout)) {
+        return when (val completed = controller.awaitCompletion(started.runId, awaitTimeout)) {
             RuntimeController.Completed.StoppedClean -> DispatchReport(RunOutcome.Succeeded, link, stop)
-            RuntimeController.Completed.StopTimeout -> DispatchReport(RunOutcome.Failed, link, stop)
-            RuntimeController.Completed.Killed ->
+            is RuntimeController.Completed.StopTimeout ->
+                DispatchReport(
+                    RunOutcome.Failed(completed.summary?.exitCode, completed.summary?.stderrTail),
+                    link,
+                    stop,
+                )
+            is RuntimeController.Completed.Killed ->
                 // Completed.Killed 两条来路：自然 CRASHED（脚本抛错/宿主 exit≠0）与真被强杀 ——
                 // 措辞必须同时盖住，否则"脚本自己崩了"被日志写成"被强杀"就是撒谎（§1 诚实）。
-                DispatchReport(RunOutcome.Crashed("引擎异常结算（崩溃或被强杀）runId=${started.runId}"), link, stop)
-            RuntimeController.Completed.UnknownRun ->
-                DispatchReport(RunOutcome.Crashed("run 已结算或从未存在 runId=${started.runId}"), link, stop)
+                // summary（进程侧退出码 + stderr 尾部）随 outcome 折进档案与意图日志（backlog B11）。
+                DispatchReport(
+                    RunOutcome.Crashed(
+                        "引擎异常结算（崩溃或被强杀）runId=${started.runId}",
+                        completed.summary?.exitCode,
+                        completed.summary?.stderrTail,
+                    ),
+                    link,
+                    stop,
+                )
+            is RuntimeController.Completed.UnknownRun ->
+                DispatchReport(
+                    RunOutcome.Crashed(
+                        "run 已结算或从未存在 runId=${started.runId}",
+                        completed.summary?.exitCode,
+                        completed.summary?.stderrTail,
+                    ),
+                    link,
+                    stop,
+                )
             RuntimeController.Completed.TimedOut -> {
                 controller.killRun(started.runId, KillCause.REQUESTED)
                 DispatchReport(RunOutcome.Crashed("完成等待超时，已强杀 runId=${started.runId}"), link, stop)

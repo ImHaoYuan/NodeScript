@@ -225,7 +225,7 @@ class AppShellKitTest {
         try {
             log.all().forEach {
                 assertEquals(
-                    RunOutcome.Failed, it.outcome,
+                    RunOutcome.Failed(), it.outcome,
                     "门禁拒绝 → Failed 且已封账（不留悬挂意向）",
                 )
             }

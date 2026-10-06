@@ -109,6 +109,10 @@ data class RunRow(
     val state: RunState,
     val startedAtMillis: Long?,
     val finishedAtMillis: Long?,
+    /** 进程退出码（`RunRecord` 的对偶；未知为 null）。 */
+    val exitCode: Int? = null,
+    /** 崩溃摘要（stderr 尾部，`RunRecord` 的对偶；见 [com.autoscript.domain.engine.RunSummary]）。 */
+    val crashSummary: String? = null,
 )
 
 /**
