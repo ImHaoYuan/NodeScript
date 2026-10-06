@@ -35,15 +35,69 @@ export interface FindAllOptions {
   signal?: AbortSignal
 }
 
+/**
+ * 输入通道（§9.3，与 :domain `InputChannel` 逐字对齐）。
+ *
+ * **不是降级顺序，是三个平级通道**：`auto` 无障碍 / `adb` Shizuku / `root` su。
+ * 指定哪条走哪条；指定的那条不可用就抛 `ERR_PERMISSION_DENIED`（带引导），
+ * **绝不改用别的通道** —— 三者可观测后果不同（无障碍注入会被前台应用看出、
+ * root 注入在系统层不留无障碍痕迹、adb 注入的进程身份是 shell），
+ * 静默换通道等于让脚本以为在测 A 实际在测 B。
+ */
+export type InputChannelInput = 'auto' | 'adb' | 'root'
+
+/**
+ * 带通道选择的调用选项。
+ *
+ * **通道必须显式指定**（2026-10-06 用户口径「必须显式传，无默认」）：要么在这里给
+ * `channel`，要么先用 [a11y.setInputChannel] 设过本脚本的会话通道。**两者都没有时
+ * 宿主回 `ERR_INVALID_PARAM`**，不会替你选一条。
+ *
+ * **为什么 `channel` 在类型上仍是可选的**：设过会话值之后，省略就是**合法**的写法
+ * （那也是一次显式选择，宿主认它）—— 类型系统看不见会话状态，把它标成必填会在
+ * 会话值已设时逼调用方重复写一遍。所以判据只有一处：**宿主 handler**（与
+ * `engines.exec` 的 `timeoutMillis` 同一条「校验不写两遍」纪律）。
+ *
+ * **为什么不像别处那样给个 `auto` 缺省**：三者可观测后果不同（见 [InputChannelInput]），
+ * 缺省等于「什么都没说 = 走了无障碍」，而那正是这套机制要消灭的静默。
+ */
+export interface ChannelOptions {
+  /** 走哪条通道（或先调 [a11y.setInputChannel]）；只作用于这一次调用，不改变会话值。 */
+  channel?: InputChannelInput
+  timeout?: number
+  signal?: AbortSignal
+}
+
 /** 滚动方向（与 :domain ScrollDirection 对齐；小写 wire 名，Kotlin 侧大小写不敏感）。 */
 export type ScrollDirectionInput = 'forward' | 'backward' | 'up' | 'down' | 'left' | 'right'
 
+/**
+ * 显式通道 → payload 片段：**没给就一个键都不加**，让宿主侧去判（会话值 or 报错）。
+ *
+ * **为什么不在 JS 侧预检**：与 `engines.exec` 的 `timeoutMillis` 同一条纪律 ——
+ * 同一份校验写两遍必然漂移，缺通道的判据只该有一处（宿主 handler），JS 只负责
+ * 把脚本说的原样发出去。所以这里**不**替调用方补 `auto`、也不在这里抛。
+ */
+function withChannel(opts: ChannelOptions | undefined): Record<string, unknown> {
+  return opts?.channel === undefined ? {} : { channel: opts.channel }
+}
+
 /** 控件句柄代理（§7.4 gen/id）：JS 侧持 HandleRef，操作携带 generation 校验。 */
 export interface UiObject {  readonly ref: { refId: number; generation: number }
-  click(opts?: { timeout?: number; signal?: AbortSignal }): Promise<boolean>
-  longClick(opts?: { timeout?: number; signal?: AbortSignal }): Promise<boolean>
-  /** 滚动（§9.1 scroll 走无障碍 Action；缺省向前；不可滚动容器回 false）。 */
-  scroll(direction?: ScrollDirectionInput, opts?: { timeout?: number; signal?: AbortSignal }): Promise<boolean>
+  /**
+   * 点击。`auto` 通道走节点语义 `ACTION_CLICK`；`adb`/`root` 通道**没有节点语义可用**，
+   * 改为解出节点 bounds 再按坐标注入（点中心）—— 那是「点这个控件所在的位置」，
+   * 不是「对这个控件发 action」。
+   */
+  click(opts?: ChannelOptions): Promise<boolean>
+  longClick(opts?: ChannelOptions): Promise<boolean>
+  /**
+   * 滚动（§9.1 scroll；缺省向前；不可滚动容器回 false）。
+   *
+   * `auto` 走无障碍 Action；`adb`/`root` 解 bounds 后按方向在节点内划一条
+   * （手指方向与内容方向相反，见 §9.3）。
+   */
+  scroll(direction?: ScrollDirectionInput, opts?: ChannelOptions): Promise<boolean>
   /**
    * 复制节点文本到剪贴板（§9.1 copy 走无障碍 Action；text ?? desc，皆空记空串）。
    * 粘贴剪贴板到可编辑节点（不可编辑/空剪贴板回 false，不抛错）。
@@ -91,8 +145,16 @@ export const a11y = {
   },
 
   /** 手势能力门（§9.1 canPerformGestures；false 时走能力中心引导，不发手势）。 */
-  async canPerformGestures(opts: { timeout?: number } = {}): Promise<boolean> {
-    return (await runtimeBridge.invoke('a11y', 'canPerformGestures', null, {
+  /**
+   * 当前通道能不能发手势（问的是**会话通道**，可用 `{channel}` 单次覆盖）。
+   *
+   * `auto` 问的是无障碍服务的 `CAPABILITY_CAN_PERFORM_GESTURES` 能力位；
+   * `adb`/`root` 通道**没有对应的开关** —— 能不能用取决于进程身份，而那正是该通道
+   * 被接线的前提，所以到得了这里的调用恒为 `true`。真正的失败（`su` 没了、Shizuku
+   * 服务死了）以命令退出码的形式出现在动作调用里。
+   */
+  async canPerformGestures(opts: ChannelOptions = {}): Promise<boolean> {
+    return (await runtimeBridge.invoke('a11y', 'canPerformGestures', withChannel(opts), {
       ttl: opts.timeout ?? 5_000,
     })) === true
   },
@@ -100,12 +162,30 @@ export const a11y = {
   /**
    * 手势派发（§9.1 dispatchGesture；对偶 Kotlin `a11y.gesture`）。
    * 关门回 false（不抛错）；非法手势（空笔画/负坐标/非正 duration）抛 ERR_INVALID_PARAM。
+   *
+   * **经 `adb`/`root` 通道时实际是直线**：shell 面只有 `input tap`/`input swipe` 两个
+   * 原语、没有轨迹，所以多笔画会被逐条串行注入、每条只取首尾两点。要真轨迹得走
+   * `sendevent`（§9.3 提过，未落地）。
    */
-  async gesture(input: GestureInput, opts: { timeout?: number; signal?: AbortSignal } = {}): Promise<boolean> {
-    return (await runtimeBridge.invoke('a11y', 'gesture', input, {
+  async gesture(input: GestureInput, opts: ChannelOptions = {}): Promise<boolean> {
+    return (await runtimeBridge.invoke('a11y', 'gesture', { ...input, ...withChannel(opts) }, {
       ttl: opts.timeout ?? 10_000,
       signal: opts.signal,
     })) === true
+  },
+
+  /**
+   * 设**本脚本**的会话输入通道（§9.3）：`await auto.a11y.setInputChannel('root')`。
+   *
+   * 会话态住宿主侧的**每连接**上下文（不是全局 handler 字段）—— 一个脚本设的通道
+   * 不会漏给另一个脚本。单次调用可用 `{channel}` 覆盖，不改变会话值。
+   *
+   * **没有「缺省通道」**：设过会话值之后，本脚本后续的 `click`/`gesture`/… 可以省掉
+   * `channel`；**没设过又没传**则抛 `ERR_INVALID_PARAM`。指定了 `adb`/`root` 而不可用时
+   * 抛 `ERR_PERMISSION_DENIED`，**不会悄悄回落到无障碍**。
+   */
+  async setInputChannel(channel: InputChannelInput, opts: { timeout?: number } = {}): Promise<void> {
+    await runtimeBridge.invoke('a11y', 'setInputChannel', { channel }, { ttl: opts.timeout ?? 5_000 })
   },
 }
 
@@ -202,12 +282,12 @@ function wrapUiObject(ref: { refId: number; generation: number }): UiObject {
     runtimeBridge.invoke('a11y', method, { ref, ... (params as Record<string, unknown>) }, { ttl })
   return {
     ref,
-    click: async () => (await call('click', null)) === true,
-    longClick: async () => (await call('longClick', null)) === true,
-    scroll: async (direction = 'forward', opts = {}) =>
-      (await runtimeBridge.invoke('a11y', 'scroll', { ref, direction }, {
-        ttl: (opts as { timeout?: number }).timeout ?? 10_000,
-        signal: (opts as { signal?: AbortSignal }).signal,
+    click: async (opts = {}) => (await call('click', withChannel(opts))) === true,
+    longClick: async (opts = {}) => (await call('longClick', withChannel(opts))) === true,
+    scroll: async (direction = 'forward', opts: ChannelOptions = {}) =>
+      (await runtimeBridge.invoke('a11y', 'scroll', { ref, direction, ...withChannel(opts) }, {
+        ttl: opts.timeout ?? 10_000,
+        signal: opts.signal,
       })) === true,
     setText: async (text: string) => (await call('setText', { text })) === true,
     copy: async () => (await call('copy', null)) === true,

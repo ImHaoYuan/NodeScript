@@ -2,6 +2,7 @@ package com.autoscript.platform.capabilities
 
 import com.autoscript.domain.automation.FrameSource
 import com.autoscript.domain.automation.InputProvider
+import com.autoscript.domain.automation.InputChannel
 import com.autoscript.domain.automation.UiActionExecutor
 import com.autoscript.domain.automation.UiEventStream
 import com.autoscript.domain.automation.UiNodeTreeReader
@@ -44,8 +45,13 @@ object CapabilityNamespaces {
         actions: UiActionExecutor,
         input: InputProvider = InMemoryInputProvider(),
         events: UiEventStream? = null,
+        /**
+         * 通道 → provider 表（§9.3 三通道）。**缺省只有 auto** —— 其余两条如实不可用
+         * （`ERR_PERMISSION_DENIED`），不是「悄悄回落到 auto」。生产装配把三条都塞进来。
+         */
+        channels: Map<InputChannel, InputProvider> = mapOf(InputChannel.AUTO to input),
     ): NamespaceHandler {
-        return A11yNamespaceHandler(tree, actions, input, events)
+        return A11yNamespaceHandler(tree, actions, input, events, channels)
     }
 
     /**

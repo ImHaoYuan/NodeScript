@@ -1,5 +1,8 @@
 package com.autoscript.bridge
 
+import com.autoscript.domain.automation.InputChannel
+import com.autoscript.domain.automation.InputChannelSession
+import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -45,6 +48,17 @@ class NewlineFrameServerTest {
     }
 
     private fun frame(bytes: ByteArray) = bytes + "\n".toByteArray(StandardCharsets.UTF_8)
+
+    /**
+     * 等回帧落地。**为什么需要**：帧任务挂在 server scope 而非连接 Job 下（慢请求不挡
+     * 快请求），所以 `serveConnection(...).join()` 只保证**读循环**结束，不保证在途帧
+     * 已写回 —— 直接断言会读出空流（本仓已有的一处竞态）。
+     */
+    private suspend fun awaitFrame(out: ByteArrayOutputStream) {
+        withTimeout(5_000) {
+            while (out.size() == 0) delay(10)
+        }
+    }
 
     private fun readFrames(out: ByteArrayOutputStream): List<BridgeResponse> {
         val lines = out.toString(StandardCharsets.UTF_8.name()).split("\n").filter { it.isNotEmpty() }
@@ -207,5 +221,65 @@ class NewlineFrameServerTest {
         conn.join()
         assertEquals(6, readFrames(output).size, "背压解除后剩下的帧仍要处理完")
         server.close()
+    }
+
+    // ── 每连接一个 InputChannelSession（2026-10-06，§9.3） ─────────────
+    //
+    // 会话级状态（当前输入通道）必须**按连接**隔离：handler 是全局单例、所有脚本共用
+    // 一条桥连接池，字段级会话态会让一个脚本设的通道漏给另一个 —— 静默的跨脚本串扰。
+
+    /** 记账 handler：把「这一帧看到的会话通道」回给调用方。 */
+    private class ChannelEcho : com.autoscript.domain.bridge.NamespaceHandler {
+        override suspend fun handle(request: BridgeRequest): BridgeResponse {
+            val session = kotlin.coroutines.coroutineContext[InputChannelSession]
+            return BridgeResponse.Ok(request.id, session?.current?.name ?: "NO_SESSION")
+        }
+    }
+
+    @Test
+    fun `每帧带会话上下文——同一连接内共享`() = runBlocking {
+        val server = NewlineFrameServer(BridgeRouter(RequestRegistry()).also { it.register("ch", ChannelEcho()) })
+        try {
+            val session = InputChannelSession(InputChannel.ROOT)
+            val req = frame(transport.encodeRequest(BridgeRequest(11, "ch", "probe", null, 5_000)))
+            val out = ByteArrayOutputStream()
+            server.serveConnection(ByteArrayInputStream(req), out, session).join()
+            awaitFrame(out)
+            assertTrue(
+                out.toString(StandardCharsets.UTF_8.name()).contains("ROOT"),
+                "帧任务要能看到本连接的会话通道：$out",
+            )
+        } finally {
+            server.close()
+        }
+    }
+
+    @Test
+    fun `连接之间会话隔离——另一个连接看不到上一个设的通道`() = runBlocking {
+        val server = NewlineFrameServer(BridgeRouter(RequestRegistry()).also { it.register("ch", ChannelEcho()) })
+        try {
+            val a = ByteArrayOutputStream()
+            server.serveConnection(
+                ByteArrayInputStream(frame(transport.encodeRequest(BridgeRequest(21, "ch", "probe", null, 5_000)))),
+                a, InputChannelSession(InputChannel.ADB),
+            ).join()
+            awaitFrame(a)
+            val b = ByteArrayOutputStream()
+            // 默认参数 = 新会话（生产里每条连接都是新会话）
+            server.serveConnection(
+                ByteArrayInputStream(frame(transport.encodeRequest(BridgeRequest(22, "ch", "probe", null, 5_000)))),
+                b,
+            ).join()
+            awaitFrame(b)
+            assertTrue(a.toString(StandardCharsets.UTF_8.name()).contains("ADB"))
+            // 新连接是**没设过**（NO_SESSION），不是"缺省 AUTO" —— 通道无缺省（2026-10-06
+            // 用户口径「必须显式传」），会话没设过时调用方必须自己给 channel。
+            assertTrue(
+                b.toString(StandardCharsets.UTF_8.name()).contains("NO_SESSION"),
+                "新连接不该继承上一个连接的通道，也不该凭空有个缺省：$b",
+            )
+        } finally {
+            server.close()
+        }
     }
 }

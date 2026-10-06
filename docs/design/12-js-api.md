@@ -11,7 +11,7 @@
 - 兼容垫片：对知名差异（如 `uc_obj` 语义）通过 `compat` 标志位提供，**不反向攻坚原生语义**。
 
 ### 12.2 命名空间清单（对应 AutoJsPro v9，含设计说明）
-- `auto.a11y` —— 无障碍（选择器/控件/手势/事件）
+- `auto.a11y` —— 无障碍（选择器/控件/手势/事件 + 输入通道选路 `setInputChannel`，§9.3）
 - `auto.ui` / `auto.ui.activity / layout / view / web / res / selector`
 - `auto.engine`（自身引擎）/ `auto.engines`（多引擎, `engines.getEngine/exec/stop/channel`）
 - `auto.screen`（`capture()` 截图 / `ScreenCapturer` 会话）/ `auto.images`（OpenCV 图像）
@@ -45,7 +45,7 @@
 |---|---|---|---|
 | `console` | `console.ts` | `ConsoleCollector`（`:bridge:java`） | `AppShell.assemble` 已挂；`:ui` 控制台屏读口已接（`HostSummary.console`，§7.3 末） |
 | `engines` | `engines.ts` | `EnginesNamespaceHandler`（`:app-service:runtime`） | 已挂（含 `heartbeat` 打点，§8.4；命名通道 `channel/channelEmit/channelDrain/channelClose` 双侧对齐：Kotlin 侧缓冲 + 游标、`EngineChannel` 按 `sinceSeq` 节流轮询；`status` 只读在途表、结算后 `ERR_NOT_FOUND` 不伪造 `STOPPED`，`exec` 回 `EngineSessionImpl`（`cancel`→`stop` 归口、`onExit`→`status` 轮询：本会话 cancel 后结算报 null、外部结算报 UNKNOWN），**`exec` 的 `timeoutMillis` 必填**（§8.6 期限线：缺席/`null`/`<= 0` → `ERR_INVALID_PARAM`；到点由看门狗落 `KillCause.TIMEOUT` → `onExit` 报 `{cause:'UNKNOWN'}`）） |
-| `a11y` | `a11y.ts` | `A11yNamespaceHandler`（`:platform:capabilities`）+ `CapabilityNamespaces.a11y(tree, actions, input, events)` 装配缝（树/动作/输入/事件四 SPI）+ **Android 真实现** `AndroidUiTree`/`AndroidGestureInput` 经 `SystemA11yBridge`（`A11yServiceHolder` 连接态） | **生产已接**：`PlatformWiring.inject` → `a11yHandler` → `AppShellApplication.installWithFiles`（服务未连 = 桥如实 `ERR_SERVICE_DISABLED`，装配期即可注入不必等 `onServiceConnected`）；内存实现仍是单测缺省；未注入缝保留 → 仍如实 `ERR_NOT_IMPLEMENTED` |
+| `a11y`（+ `setInputChannel`，§9.3 三通道选路） | `a11y.ts` | `A11yNamespaceHandler`（`:platform:capabilities`）+ `CapabilityNamespaces.a11y(tree, actions, input, events, channels)` 装配缝（树/动作/输入/事件四 SPI + 通道表）+ **Android 真实现** `AndroidUiTree`/`AndroidGestureInput` 经 `SystemA11yBridge`（`A11yServiceHolder` 连接态）；`adb`/`root` 两条走 `ShellInputProvider`（`:platform:system`，`su -c` / Shizuku 远端进程） | **生产已接**：`PlatformWiring.inject` → `a11yHandler` → `AppShellApplication.installWithFiles`（服务未连 = 桥如实 `ERR_SERVICE_DISABLED`，装配期即可注入不必等 `onServiceConnected`）；内存实现仍是单测缺省；未注入缝保留 → 仍如实 `ERR_NOT_IMPLEMENTED`。**通道表**：`auto` 恒登记；`root` 恒登记（走既有 `su -c`，真无 root 时命令自己失败）；`adb` **只在 `ShizukuInput.isAvailable()` 为真时登记**（装了 + 服务活着）—— 未登记即调用方拿 `ERR_PERMISSION_DENIED`，**不回落 auto**。会话通道经 `InputChannelSession` 随桥连接隔离（`NewlineFrameServer` 每连接建一个） |
 | `screen` | `images.ts` | `ScreenNamespaceHandler`（`:platform:capabilities`）+ `ScreenshotSource`（333ms 节流/§8.8 策略预检/句柄记账）+ **Android 真实现** `AndroidFrameProducer`（经 `SystemA11yBridge.takeScreenshot`：API34+ 窗口级、API30–33 显示级、API<30 如实 `ERR_NOT_IMPLEMENTED`；失败码分类 SECURE→BLACK_FRAME/限频→INVALID_PARAM/通道失效→SERVICE_DISABLED/内部→ERR_IO） | **生产已接**：`PlatformWiring.screenHandler` → `AppShellApplication.installWithFiles`（与 a11y 同底：服务未连 = `ERR_SERVICE_DISABLED`）；**回包尺寸 = 系统真值**（`ProducedFrame` 随帧走，不再固定 1080×2400）。MediaProjection 高清会话仍待（换 producer 即插） |
 | `images`（decode/matchTemplate/findImage/findColor/toGrayscale/crop/resize/rotate/findFeature/release —— 十方法，2026-09-29 起） | `images.ts` | `ImagesNamespaceHandler.kt`（`:platform:system`，经 `SystemNamespaces.images(analyzer)` 转接；SPI = `:domain` `ImageAnalyzer`+`ImageFrame`/`ImageMatch`，真身 = `:platform:system` 的 `NativeImageAnalyzer`/`JniOps` + `:bridge:image` 的 `libopencv.so`，2026-09-25 已接） | **桥面已可挂**：`assemble` 的 `imagesHandler` **独立缝**（同 datastore/zip/settings/notification/clipboard/sensors —— 图像面无共担门禁：读图是应用私有目录内 IO、匹配是纯计算，`ERR_FILE_NOT_FOUND`/`ERR_STALE_HANDLE` 判据在 SPI；不入 `systemHandlers` 束；未注入则如实 `ERR_NOT_IMPLEMENTED`；`AppShellKit.assemble` 透传同一缝）。**生产侧已喂**（2026-09-25）：`PlatformWiring.of` 构造 `NativeImageAnalyzer.of(JniOps.loadOrNull())` 传 `inject(images = …)` —— so 缺位（未跑 `build-opencv.sh` 的 CI JVM / 无 native 的设备）→ null → 桥对 `images.*` 如实 `ERR_NOT_IMPLEMENTED`（一个看不见像素的内存分析器只能靠自报坐标假装匹配成功，那比没有更坏 —— 这条防线从"不喂"变成"缺件不喂"，语义不变）。两侧钉子：`ImagesNamespaceHandlerTest` + `images.test.cjs` + `NativeImageAnalyzerTest` |
 | `dialogs`/`shell`/`device`/`app`/`floatingWindow` | `extras.ts` | `DialogsNamespaceHandler`（`:platform:capabilities`，经 `CapabilityNamespaces.dialogs` 转接）+ `SystemNamespaces.{Shell,Device,App,FloatingWindow}NamespaceHandler`（`:platform:system` —— 2026-09-30 步骤 6 handler 归位实现模块） | **生产已接**：`com.autoscript.shell.PlatformWiring.of(context)`（§6 包级例外二）把 `SystemSpis.of` 十件拼成 `systemHandlers` 束 + 七独立缝，`AppShellApplication.installWithFiles` 喂 `AppShellKit.assemble`（七个字段各自可空，未注入仍如实 `ERR_NOT_IMPLEMENTED`；`dialogs` **生产已接** —— `PlatformWiring.of(context)` 构造 `AndroidDialogHost(SystemDialogOps(...))`（实现住 :platform:capabilities，`inject` 单测缺省不传仍 null→`ERR_NOT_IMPLEMENTED`）。SPI 侧 `shell`/`device`/`app`/`floatingWindow` 四件走 `:platform:system` 真实现；JS 双侧契约见 `extras.test.cjs`（mock 宿主验 wire 形状）。**参数面已收口（2026-09-26，原 §12.3.3 记的两处缺口）**：`floatingWindow.create` 三处一起改齐 —— facade 把 `{title,width,height}` 原样发 payload（缺省显式 `null`，不静默删键）+ 补 `close({ref})`，与 handler 的 payload 要求对上；`screen.startCapturer` 的 `{width,height}` 现透给 `FrameSource.openSession`（**请求提示**，回包尺寸仍是真实帧）。两侧各加契约测试（`extras.test.cjs` / `screen.test.cjs` + `ScreenNamespaceHandlerTest`/`ScreenshotSourceTest`），任一侧漂移即红 |
@@ -102,7 +102,8 @@ const btn = await auto.a11y.selector()
   .text('启动').packageName('com.example')   // 条件名与 :domain UiSelector 1:1（没有 .package() 这种截断别名）
   .time(2_000)                               // 超时挂在**选择器**上：findOne 未传 timeout 时取它
   .findOne()
-await btn.click();                           // UiObject 句柄代理：动作经 invoke 回桥（携带 generation 校验）
+await btn.click({ channel: 'auto' });        // UiObject 句柄代理：动作经 invoke 回桥（携带 generation 校验）
+                                             // **channel 必填**（§9.3 三通道）：不传且没设过会话值 → ERR_INVALID_PARAM
 await btn.bounds;                            // getter 也是桥调用（一次 invoke）—— 循环里逐节点读属性要先想清楚
 await btn.dispose();                         // void（fire-and-forget；释放失败不抛给脚本）
 
@@ -118,12 +119,18 @@ const ok = await auto.a11y.waitFor(
 // 调用方以前进游标为准 —— 别拿"这轮 0 条"当"界面没变化"（两者不是同一件事）
 const batch = await auto.a11y.events({ sinceSeq: 0, batch: 32 })
 
+// 输入通道（§9.3）：auto 无障碍 / adb Shizuku / root su。**三条平级，不是降级链** ——
+// 指定哪条走哪条，不可用即 ERR_PERMISSION_DENIED，绝不改用别的通道。
+await auto.a11y.setInputChannel('root');     // 会话级：设过之后本脚本可省略 channel（按桥连接隔离）
+
 // 手势：先问能力（false 时走能力中心引导），再派发（通道关门回 false；非法手势抛 ERR_INVALID_PARAM）
-if (await auto.a11y.canPerformGestures()) {
+if (await auto.a11y.canPerformGestures({ channel: 'auto' })) {
   await auto.a11y.gesture({
     strokes: [{ points: [{ x: 540, y: 1800 }, { x: 540, y: 600 }], durationMillis: 300 }],
-  })
+  }, { channel: 'auto' })
 }
+await btn.click();                           // 走上面 setInputChannel 设的会话通道（root）
+await btn.click({ channel: 'auto' });        // 单次覆盖：只这一次走无障碍，会话值不变
 
 // ── screen：截图帧源（句柄归 screen 自己发号）
 const img = await auto.screen.capture();     // 锁屏 ERR_SCREEN_LOCKED / FLAG_SECURE ERR_BLACK_FRAME /

@@ -20,6 +20,7 @@
         "parent",
         "paste",
         "scroll",
+        "setInputChannel",
         "setText",
         "text",
         "waitFor"

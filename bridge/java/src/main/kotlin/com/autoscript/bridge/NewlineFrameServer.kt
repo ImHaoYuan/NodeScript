@@ -1,5 +1,6 @@
 package com.autoscript.bridge
 
+import com.autoscript.domain.automation.InputChannelSession
 import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.core.ErrorCode
 import java.io.BufferedInputStream
@@ -29,6 +30,11 @@ import kotlinx.coroutines.launch
  *   **取得到信封 id 就回错误帧**（否则对端要干等到 TTL 才醒），取不到才丢弃；
  *   连接保持（除超限帧：直接关连接，防内存吞噬）；
  * - EOF 即正常结束；[close] 取消全部在途任务并关闭监听。
+ *
+ * **每连接一个 [InputChannelSession]**（2026-10-06）：会话级状态（当前输入通道）挂在
+ * **连接**上而不是 handler 上 —— handler 是全局单例、所有脚本共用，字段级会话态会让
+ * 一个脚本设的通道漏给另一个。连接内的帧共享同一个会话对象（`setInputChannel` 之后
+ * 本连接的后续调用都生效），连接之间天然不共享。
  *
  * 传输介质由调用方决定：桌面/CI 走 loopback TCP（`ServerSocket(0)`），设备上走 unix domain socket
  *（`ServerSocketChannel.bind(UnixDomainSocketAddress)`，同一 read/write 路径）。
@@ -60,13 +66,23 @@ class NewlineFrameServer(
     /** 服务一条连接：读帧 → 并发 dispatch → 回写。返回读循环 Job（EOF 即正常结束）。 */
     fun serveConnection(socket: Socket): Job = scope.launch {
         socket.use { s ->
-            readLoop(s.getInputStream(), s.getOutputStream())
+            readLoop(s.getInputStream(), s.getOutputStream(), InputChannelSession())
         }
     }
 
-    /** 流版本（测试/自定义传输直接用；与 socket 版本同一语义）。 */
-    fun serveConnection(input: InputStream, output: OutputStream): Job = scope.launch {
-        readLoop(input, output)
+    /**
+     * 流版本（测试/自定义传输直接用；与 socket 版本同一语义）。
+     *
+     * [session] 由调用方给：生产是每连接新建（见类 KDoc），测试可以传一个预置了通道的
+     * 会话来验「同一连接内共享」。**默认值只服务「不关心会话」的调用方** —— 传默认值时
+     * 每条连接仍是各自新建，不会互相串。
+     */
+    fun serveConnection(
+        input: InputStream,
+        output: OutputStream,
+        session: InputChannelSession = InputChannelSession(),
+    ): Job = scope.launch {
+        readLoop(input, output, session)
     }
 
     /**
@@ -74,7 +90,7 @@ class NewlineFrameServer(
      * 帧任务挂在 server scope 而非连接 Job 下：EOF 关连接时在途 dispatch 不被连带取消
      *（写回失败即对端已走，丢弃）。
      */
-    private suspend fun readLoop(input: InputStream, output: OutputStream) {
+    private suspend fun readLoop(input: InputStream, output: OutputStream, session: InputChannelSession) {
         val buffered = BufferedInputStream(input)
         while (true) {
             val frame = try {
@@ -91,7 +107,9 @@ class NewlineFrameServer(
             // 慢请求不挡快请求，响应按 id 关联可乱序；EOF 关连接时在途 dispatch 不被连带取消。
             // 配额在**起协程前**取：满了就挂起读循环（背压），在途帧数因此永远 ≤ maxInFlight。
             inFlight.acquire()
-            scope.launch {
+            // session 作为上下文元素进**每一帧**的协程：连接内的帧共享同一个会话对象
+            //（setInputChannel 之后本连接后续调用都生效），连接之间不共享。
+            scope.launch(session) {
                 try {
                     handleFrame(frame, output)
                 } finally {

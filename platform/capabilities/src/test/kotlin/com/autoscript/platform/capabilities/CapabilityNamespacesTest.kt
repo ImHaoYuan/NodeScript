@@ -97,7 +97,7 @@ class CapabilityNamespacesTest {
         val clickOther = assertInstanceOf(
             BridgeResponse.Ok::class.java,
             handler.handle(
-                BridgeRequest(12, "a11y", "click", "{\"ref\":{\"refId\":" + rid + ",\"generation\":1}}", 5_000),
+                BridgeRequest(12, "a11y", "click", "{\"ref\":{\"refId\":" + rid + ",\"generation\":1},\"channel\":\"auto\"}", 5_000),
             ),
         )
         assertEquals(12L, clickOther.id, "动作走 actions 侧：tree 里没有该句柄也照样点得动")

@@ -13,6 +13,15 @@ const autoModule = require(path.resolve(__dirname, '..', 'dist', 'index.js'))
 const auto = autoModule.default
 const { NotFoundError } = autoModule
 
+/**
+ * 会话输入通道（对偶 Kotlin `InputChannelSession`）：null = 没设过。
+ * 提到模块级是为了让用例之间能**复位** —— 真实宿主里会话是**每连接**一个
+ * （`NewlineFrameServer` 每连接建），而这里所有用例共用同一个 mock 宿主，
+ * 不复位就会把上一个用例设的通道带进下一个。
+ */
+const session = { channel: null }
+const resetSession = () => { session.channel = null }
+
 /** mock a11y 宿主：内存两节点，按 Kotlin A11yNamespaceHandler 响应形状回包。 */
 let installed = false
 function installMockA11y() {
@@ -22,6 +31,9 @@ function installMockA11y() {
     [1, { text: '启动', desc: '启动按钮', className: 'Button', clickable: true }],
     [2, { text: '取消', className: 'Button', clickable: true }],
   ])
+  // 通道判据（对偶 Kotlin A11yNamespaceHandler.requiredChannel）：载荷 channel ?? 会话值 ?? 报错。
+  // 宿主侧「没给 channel 且没设会话」= ERR_INVALID_PARAM，**不补 auto** —— mock 照此。
+  const ch = (p) => (p.channel != null ? String(p.channel).toLowerCase() : session.channel)
   // 选择器白名单：Kotlin A11yNamespaceHandler.SELECTOR_KEYS。未知键 = ERR_INVALID_PARAM
   // （防拼写错误静默变全量匹配）。findOne/findAll/waitFor 共用 —— mock 之间别走偏。
   const SELECTOR_KEYS = ['text', 'desc', 'id', 'className', 'packageName', 'clickable']
@@ -62,14 +74,32 @@ function installMockA11y() {
       }
       case 'click': {
         if (!nodes.has(p.ref.refId)) err('ERR_STALE_HANDLE', '节点已释放')
+        else if (ch(p) == null) err('ERR_INVALID_PARAM', '未指定输入通道')
+        else ok('true')
+        return undefined
+      }
+      case 'longClick': {
+        if (!nodes.has(p.ref.refId)) err('ERR_STALE_HANDLE', '节点已释放')
+        else if (ch(p) == null) err('ERR_INVALID_PARAM', '未指定输入通道')
         else ok('true')
         return undefined
       }
       case 'scroll': {
         if (!nodes.has(p.ref.refId)) err('ERR_STALE_HANDLE', '节点已释放')
+        else if (ch(p) == null) err('ERR_INVALID_PARAM', '未指定输入通道')
         else if (p.direction != null && !['forward', 'backward', 'up', 'down', 'left', 'right'].includes(String(p.direction).toLowerCase())) {
           err('ERR_INVALID_PARAM', `未知滚动方向 ${p.direction}`)
         } else ok('true')
+        return undefined
+      }
+      case 'setInputChannel': {
+        // 会话值宿主侧记账（对偶 Kotlin InputChannelSession）；未知字面量如实拒绝。
+        if (!['auto', 'adb', 'root'].includes(String(p.channel).toLowerCase())) {
+          err('ERR_INVALID_PARAM', `未知输入通道 '${p.channel}'`)
+        } else {
+          session.channel = String(p.channel).toLowerCase()
+          ok('true')
+        }
         return undefined
       }
       case 'waitFor': {
@@ -105,12 +135,14 @@ function installMockA11y() {
         return undefined
       }
       case 'canPerformGestures': {
-        ok('true')
+        if (ch(p) == null) err('ERR_INVALID_PARAM', '未指定输入通道')
+        else ok('true')
         return undefined
       }
       case 'gesture': {
         const s = p.strokes
         if (!Array.isArray(s) || s.length === 0) err('ERR_INVALID_PARAM', '手势至少包含一个笔画')
+        else if (ch(p) == null) err('ERR_INVALID_PARAM', '未指定输入通道')
         else ok('true')
         return undefined
       }
@@ -145,15 +177,34 @@ test('a11y.findAll 回数组并按 max 截断', async () => {
 
 test('a11y.click 经 ref 句柄；跨代 → ERR_STALE_HANDLE', async () => {
   const btn = await auto.a11y.selector().text('启动').findOne()
-  assert.strictEqual(await btn.click(), true)
+  assert.strictEqual(await btn.click({ channel: 'auto' }), true)
+  assert.strictEqual(await btn.click({ channel: 'root' }), true)
   await assert.rejects(() => auto.bridge.invoke('a11y', 'click', { ref: { refId: 999, generation: 1 } }), (e) => e.code === 'ERR_STALE_HANDLE')
+})
+
+test('a11y.click 不给通道 → ERR_INVALID_PARAM（不替调用方选一条）', async () => {
+  const btn = await auto.a11y.selector().text('启动').findOne()
+  await assert.rejects(() => btn.click(), (e) => e.code === 'ERR_INVALID_PARAM')
+})
+
+test('a11y.setInputChannel 设会话值后，后续调用可省 channel', async () => {
+  const btn = await auto.a11y.selector().text('启动').findOne()
+  try {
+    await auto.a11y.setInputChannel('root')
+    assert.strictEqual(await btn.click(), true, '会话值算显式选择')
+    assert.strictEqual(await btn.scroll('down'), true, 'scroll 同样认会话值')
+    await assert.rejects(() => auto.a11y.setInputChannel('uiautomator'), (e) => e.code === 'ERR_INVALID_PARAM')
+  } finally {
+    resetSession() // 真实宿主是每连接一个会话；这里共用 mock，用完复位
+  }
 })
 
 test('a11y.scroll 缺省向前；非法方向 → ERR_INVALID_PARAM', async () => {
   const btn = await auto.a11y.selector().text('启动').findOne()
-  assert.strictEqual(await btn.scroll(), true)
-  assert.strictEqual(await btn.scroll('down'), true)
-  await assert.rejects(() => btn.scroll('diagonal'), (e) => e.code === 'ERR_INVALID_PARAM')
+  assert.strictEqual(await btn.scroll(undefined, { channel: 'auto' }), true)
+  assert.strictEqual(await btn.scroll('down', { channel: 'auto' }), true)
+  await assert.rejects(() => btn.scroll('diagonal', { channel: 'auto' }), (e) => e.code === 'ERR_INVALID_PARAM')
+  await assert.rejects(() => btn.scroll(), (e) => e.code === 'ERR_INVALID_PARAM')
 })
 
 test('a11y.events 游标拉取回 first/last/events', async () => {
@@ -174,12 +225,17 @@ test('a11y.copy/paste 经 ref 句柄；跨代 → ERR_STALE_HANDLE', async () =>
 })
 
 test('a11y.gesture 上送 strokes；canPerformGestures 回门状态', async () => {
-  assert.strictEqual(await auto.a11y.canPerformGestures(), true)
+  assert.strictEqual(await auto.a11y.canPerformGestures({ channel: 'auto' }), true)
   const ok = await auto.a11y.gesture({
     strokes: [{ points: [{ x: 100, y: 800 }, { x: 100, y: 200 }], durationMillis: 300 }],
-  })
+  }, { channel: 'adb' })
   assert.strictEqual(ok, true)
-  await assert.rejects(() => auto.a11y.gesture({ strokes: [] }), (e) => e.code === 'ERR_INVALID_PARAM')
+  await assert.rejects(() => auto.a11y.gesture({ strokes: [] }, { channel: 'auto' }), (e) => e.code === 'ERR_INVALID_PARAM')
+  // 缺通道：宿主如实拒绝，JS 侧不预检、不补 auto
+  await assert.rejects(
+    () => auto.a11y.gesture({ strokes: [{ points: [{ x: 1, y: 2 }] }] }),
+    (e) => e.code === 'ERR_INVALID_PARAM',
+  )
 })
 
 test('a11y.waitFor 发 conditions 键（对偶 Kotlin waitFor 解析路径）', async () => {

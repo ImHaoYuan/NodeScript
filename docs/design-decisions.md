@@ -519,6 +519,63 @@
       **包含 16KB 对齐那条** —— 即门禁本身被反向证伪过（改坏会红），这是它可作判据的依据。取消的是
       **真机复验**，不是门禁。
 
+35. **输入通道三选一：`auto`/`adb`/`root` 平级、必须显式、绝不降级（2026-10-06，用户口径）**：
+    - **拍板**（用户原话「点击什么的不要按降级使用，脚本内传入 auto 表示启用无障碍，adb 则是 adb，
+      root 则是 root」+ 三问三答「两者都管（含节点 click）」「两者都要（按调用 + 会话级）」
+      「必须显式传，无默认」）：§9.3 的输入面从「`InputProvider` 一条实现 + 口头提过的 root/adb」
+      改成**三条平级通道 + 显式选路**。取值 `auto`（无障碍）/ `adb`（Shizuku）/ `root`（`su`）。
+    - **不是降级链，是判据**：指定的那条不可用 → `ERR_PERMISSION_DENIED`（带引导），**绝不改用
+      别的通道**。这一条与 §9.5 的 `DEGRADED` 哲学**刻意相反**（那里是「能力受限但仍可用」），
+      因为三者**可观测后果不同**：无障碍注入会被前台应用看出（`FLAG_SECURE` 类对抗、与输入法/
+      悬浮窗争抢），root 注入在系统层不留无障碍痕迹，adb 注入的进程身份是 shell。对「签到/抢购/
+      压测」这类场景，**走了哪条通道是语义的一部分**，静默换通道等于让脚本作者以为在测 A 实际在测 B。
+    - **「必须显式」落成两处**：(1) 单次调用的载荷带 `channel`；(2) 会话级 `a11y.setInputChannel`
+      设本脚本的通道。**两者都没有 → `ERR_INVALID_PARAM`**（`requiredChannel`），**不预置 `auto`
+      缺省** —— 本仓别处「不传即用缺省」的惯例在这里**刻意不成立**：缺省等于「什么都没说 = 走了
+      无障碍」，而那正是这套机制要消灭的静默。会话值是**显式选择的一种**（`setInputChannel` 是
+      脚本自己发的帧），所以它算「说过」。
+      **JS 侧不预检**（与 `engines.exec` 的 `timeoutMillis` 同一条「校验不写两遍」纪律）：
+      `ChannelOptions.channel` 在类型上仍是可选（设过会话值之后省略是**合法**写法，类型系统看不见
+      会话状态），判据只有一处 —— 宿主 handler。
+    - **会话态挂「连接」而不是「handler」**：`A11yNamespaceHandler` 是**全局单例**（一个
+      `BridgeRouter` 挂一套 handler、所有脚本共用），字段级会话态会让脚本 A 设的通道漏给脚本 B
+      —— 一个**静默的跨脚本串扰**。改为 `InputChannelSession`（`AbstractCoroutineContextElement`），
+      `NewlineFrameServer` **每连接建一个**、作为上下文元素传给该连接的所有帧任务：隔离是
+      **结构上**的（同连接共享、跨连接天然不共享），不靠人记得清。
+    - **节点动作在非 auto 通道降级为坐标注入**：`click`/`longClick`/`scroll` 在 `auto` 走节点语义
+      （`ACTION_CLICK`/`ACTION_LONG_CLICK`/`ACTION_SCROLL`）；`adb`/`root` **没有节点语义可用**
+      （shell 面只有 `input` 命令），改为解出节点 `bounds` 再注入（点中心 / 按方向在节点内划一条，
+      手指方向与内容方向相反）。语义是「点这个控件**所在的位置**」，不是「对这个控件发 action」。
+      **`copy`/`paste` 不在此列**：它们是纯语义动作、没有第二条通道可选，所以**不要求** `channel`
+      （实现上从 `nodeAction` 拆出 `refAction` —— 复用会让它们开始要一个没有意义的参数，
+      `A11yNamespaceHandlerTest` 当场抓住过）。
+    - **shell 面只有直线**：`input tap` / `input swipe` 两个原语，**没有轨迹** —— 经 `adb`/`root` 的
+      `gesture` 逐笔画串行注入、每条只取首尾两点。真轨迹要 `sendevent`（按设备事件节点写，**未落地**）。
+      这是 shell 面的**真实上限**，写在 §9.3 与 facade KDoc 里让调用方知道，而不是假装发了轨迹。
+      `canPerformGestures` 同理：`auto` 问服务能力位，`adb`/`root` **没有对应开关**（能不能用取决于
+      进程身份，而那正是该通道被接线的前提）故恒 `true`；真正的失败以**命令退出码**形式出现在动作
+      调用里，**不折成 false**（false 的语义是「系统拒绝这次注入」，与「这条通道现在没了」是两回事）。
+    - **引入 Shizuku 依赖（本项最重的一笔）**：`dev.rikka.shizuku:api` + `:provider` 13.1.5，
+      落 `gradle/libs.versions.toml`（**冻结文件**，本项即维护者授权）与
+      `platform/capabilities/build.gradle.kts`。**为什么非要它**：应用自己 fork 的 `sh` 身份仍是
+      应用 uid，`input` 注不进事件；要让注入以 **shell uid** 发生，必须借一个由 adb 启动的服务进程
+      —— Shizuku 就是那个服务。**为什么代码里走反射而不是 import**：JVM 单测跑在 mock android.jar 上，
+      碰 `Shizuku` 静态初始化即炸；反射的失败面（类不在/签名变了）**全部折成 `ERR_PERMISSION_DENIED`**
+      —— 「没装」与「版本不兼容」对用户是同一句话：去装/去更新。
+      **provider 的 `<provider>` 节点必须显式声明**（AAR 只带 meta-data 与类，不带节点；
+      解包 `provider-13.1.5.aar` 实测），authority = `${applicationId}.shizuku`（Shizuku 侧按类里
+      硬编码的 `.shizuku` 后缀找），`exported=true` + `moe.shizuku.manager.permission.API_V23`
+      （signature 级，只有 Shizuku 管理器持有）是它的**设计形态**，不是漏配 —— 这是本应用**唯一**
+      exported 且非系统绑定权限的组件。**依赖停更于 2023-09**（Maven Central `lastUpdated=20230921`），
+      锁最新版；升级 = 一件事一个提交。
+    - **未真机验证（诚实缺口）**：设备道 2026-10-06 已裁（第 34 项 / backlog B3/E3）。JVM 侧钉住的
+      是「命令怎么拼、退出码怎么判、通道怎么映射、缺席怎么拒」；**真机上装好 Shizuku 后能不能注进去、
+      bounds→坐标这条映射准不准，尚无人跑过**。真机第一次使用应当拿 `adb`/`root` 与 `auto` 对一遍行为。
+    - **`adb` 通道的接线是探测式的**：`PlatformWiring` 只在 `ShizukuInput.isAvailable()`（装了 **且**
+      服务活着，两问都要 —— 只问「类在不在」会把「装了但没启动」报成可用）为真时登记该通道；
+      `root` 恒登记（走既有 `su -c`，真无 root 时命令自己失败）；`auto` 恒登记。**登记与否只决定
+      「这条通道现在有没有」，绝不改变调用方选的那条**。
+
 2026-09-30 拍板（外部审查整改步骤 7；非 §18 编号项，原口径不涉）：
 
 13. **`images` 匹配链路提速方案**（2026-09-30 评审拍板；A2–A4 实测 ❌ 后的出路裁决）：

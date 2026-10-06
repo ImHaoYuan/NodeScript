@@ -145,7 +145,7 @@ class A11yNamespaceHandlerSeamTest {
             handler.handle(
                 a11yReq(
                     2, "click",
-                    """{"ref":{"refId":1,"generation":1}}""",
+                    """{"ref":{"refId":1,"generation":1},"channel":"auto"}""",
                 ),
             ),
         )
@@ -203,7 +203,7 @@ class A11yNamespaceHandlerSeamTest {
             handler.handle(
                 a11yReq(
                     7, "gesture",
-                    """{"strokes":[{"points":[{"x":5,"y":6}],"durationMillis":50}]}""",
+                    """{"strokes":[{"points":[{"x":5,"y":6}],"durationMillis":50}],"channel":"auto"}""",
                 ),
             ),
         )
@@ -213,7 +213,7 @@ class A11yNamespaceHandlerSeamTest {
 
         val gate = assertInstanceOf(
             BridgeResponse.Ok::class.java,
-            handler.handle(a11yReq(8, "canPerformGestures", null)),
+            handler.handle(a11yReq(8, "canPerformGestures", """{"channel":"auto"}""")),
         )
         assertEquals("true", gate.payload)
         Unit

@@ -109,7 +109,7 @@ class A11yNamespaceHandlerTest {
         val refJson = seedButton()
         val click = assertInstanceOf(
             BridgeResponse.Ok::class.java,
-            handler.handle(a11yReq(10, "click", """{"ref":$refJson}""")),
+            handler.handle(a11yReq(10, "click", """{"ref":$refJson,"channel":"auto"}""")),
         )
         assertEquals("true", click.payload)
         val text = assertInstanceOf(
@@ -146,7 +146,7 @@ class A11yNamespaceHandlerTest {
         val stale = refJson.replace(""""generation":1""", """"generation":2""")
         val resp = assertInstanceOf(
             BridgeResponse.Err::class.java,
-            handler.handle(a11yReq(20, "click", """{"ref":$stale}""")),
+            handler.handle(a11yReq(20, "click", """{"ref":$stale,"channel":"auto"}""")),
         )
         assertEquals("ERR_STALE_HANDLE", resp.errorCode)
     }
@@ -161,7 +161,7 @@ class A11yNamespaceHandlerTest {
         assertEquals("true", disposed.payload)
         val resp = assertInstanceOf(
             BridgeResponse.Err::class.java,
-            handler.handle(a11yReq(22, "click", """{"ref":$refJson}""")),
+            handler.handle(a11yReq(22, "click", """{"ref":$refJson,"channel":"auto"}""")),
         )
         assertEquals("ERR_STALE_HANDLE", resp.errorCode)
     }
@@ -195,7 +195,7 @@ class A11yNamespaceHandlerTest {
         val refJson = """{"refId":${ref.refId},"generation":${ref.generation}}"""
         val resp = assertInstanceOf(
             BridgeResponse.Ok::class.java,
-            handler.handle(a11yReq(41, "scroll", """{"ref":$refJson,"direction":"down"}""")),
+            handler.handle(a11yReq(41, "scroll", """{"ref":$refJson,"direction":"down","channel":"auto"}""")),
         )
         assertEquals("true", resp.payload)
         val ev = tree.nextEvents(0)
@@ -204,7 +204,7 @@ class A11yNamespaceHandlerTest {
         // 缺省方向 FORWARD
         val def = assertInstanceOf(
             BridgeResponse.Ok::class.java,
-            handler.handle(a11yReq(42, "scroll", """{"ref":$refJson}""")),
+            handler.handle(a11yReq(42, "scroll", """{"ref":$refJson,"channel":"auto"}""")),
         )
         assertEquals("true", def.payload)
 
@@ -213,14 +213,14 @@ class A11yNamespaceHandlerTest {
         val plainJson = """{"refId":${plain.refId},"generation":${plain.generation}}"""
         val no = assertInstanceOf(
             BridgeResponse.Ok::class.java,
-            handler.handle(a11yReq(43, "scroll", """{"ref":$plainJson}""")),
+            handler.handle(a11yReq(43, "scroll", """{"ref":$plainJson,"channel":"auto"}""")),
         )
         assertEquals("false", no.payload)
 
         // 非法方向名 → ERR_INVALID_PARAM
         val bad = assertInstanceOf(
             BridgeResponse.Err::class.java,
-            handler.handle(a11yReq(44, "scroll", """{"ref":$refJson,"direction":"斜向"}""")),
+            handler.handle(a11yReq(44, "scroll", """{"ref":$refJson,"direction":"斜向","channel":"auto"}""")),
         )
         assertEquals("ERR_INVALID_PARAM", bad.errorCode)
 
@@ -310,14 +310,14 @@ class A11yNamespaceHandlerTest {
             handler.handle(
                 a11yReq(
                     80, "gesture",
-                    """{"strokes":[{"points":[{"x":100,"y":800},{"x":100,"y":200}],"durationMillis":300}]}""",
+                    """{"strokes":[{"points":[{"x":100,"y":800},{"x":100,"y":200}],"durationMillis":300}],"channel":"auto"}""",
                 ),
             ),
         )
         assertEquals("true", resp.payload)
         val gate = assertInstanceOf(
             BridgeResponse.Ok::class.java,
-            handler.handle(a11yReq(81, "canPerformGestures", null)),
+            handler.handle(a11yReq(81, "canPerformGestures", """{"channel":"auto"}""")),
         )
         assertEquals("true", gate.payload)
     }
@@ -330,14 +330,14 @@ class A11yNamespaceHandlerTest {
             closed.handle(
                 a11yReq(
                     82, "gesture",
-                    """{"strokes":[{"points":[{"x":0,"y":0}]}]}""",
+                    """{"strokes":[{"points":[{"x":0,"y":0}]}],"channel":"auto"}""",
                 ),
             ),
         )
         assertEquals("false", resp.payload)
         val gate = assertInstanceOf(
             BridgeResponse.Ok::class.java,
-            closed.handle(a11yReq(83, "canPerformGestures", null)),
+            closed.handle(a11yReq(83, "canPerformGestures", """{"channel":"auto"}""")),
         )
         assertEquals("false", gate.payload)
     }
