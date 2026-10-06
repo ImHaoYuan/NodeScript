@@ -576,6 +576,41 @@
       `root` 恒登记（走既有 `su -c`，真无 root 时命令自己失败）；`auto` 恒登记。**登记与否只决定
       「这条通道现在有没有」，绝不改变调用方选的那条**。
 
+36. **`ui/` 与 Telegram 的关系定性更正：不是「衍生作品」，是「前端 UI 实现与风格参考」（2026-10-06，用户裁定）**：
+    - **拍板**：`ui/` 的对外定性从第 33 项写的「含**衍生自** Telegram Android 的部分」改为
+      **「前端 UI 的实现与风格参考自 Telegram Android」**；许可口径**维持 `GPL-2.0-only` 不变**，
+      只改**理由的写法**。第 33 项正文一字不动（只追加，见上），本项记这次更正与它的依据。
+    - **为什么原来的定性是过度自称**：跟踪树里**零 vendored 上游源文件** —— `find . -name '*.java'`
+      只命中 `.gradle/` 缓存、跟踪面零命中；`ui/` 全部是 Kotlin / Compose 重写（上游是 Java +
+      Android View）。实际借用的是**版式尺寸、间距层次、色值与键名、缓动控制点**，外加**少数几处
+      算法步骤**（底栏宽度分配、菜单错相浮现、删除粒子）。把这一组关系称「衍生作品」比事实更重：
+      **它把定性问题当成已决问题写进了对外文档**，而「是否构成衍生」正是本仓反复声明**不做**的
+      那个法律判断（第 33 项末句的性质声明）。
+    - **`only` 的理由随之改写（结论不变，论证换了）**：原写法是「GPL-2.0-only 与 GPL-3.0 不兼容
+      ⇒ `or later` 事实上不可行使」——**这句话把结论挂在了那个未经复核的法律判断上**，而它正是
+      本仓不做判断的那件事。新写法：**`only` 是本仓自己的保守选择** —— 在参考面未经复核前，
+      不对外附加一条可能走不通的授权路径。两处落地：`README.md` 许可段、`NOTICE` 第 1 节。
+    - **上游锚定（取代第 33 项「未做①：上游 commit 未钉死」）**：锚 **12.10.6（build 7112）**，
+      commit `f2908b14133bbffbf7ab04f641ecb5faf533242`（发布 2026-09-30T17:51:11Z）。依据是
+      「参考发生在 2026-10-02 起的批次，当时上游最新版即 12.10.6，且它至今仍是 master 最新提交」
+      —— 两端都成立，不是推测。**不用 release tag 作锚**（用户裁定）：上游 tag 命名不统一
+      （`release-9.7.6_3721` 与 `release-11.4.2-5469` 两种分隔符都出现过，且没有 `release-12.*`），
+      钉一条会漂的字符串不如钉 sha。第 33 项「未做①」据此结项，`backlog.md` A9 同步结项。
+    - **GPL-2.0 第 1 节的两件义务补进 `NOTICE` 第 2 节**：①版权声明（`Copyright (C) DrKLO/Telegram
+      项目贡献者`，来源即上游仓库 —— 上游 `LICENSE` 是 GPL-2.0 全文，**未另附**单独的版权持有人行，
+      照实写明而不是自己编一个）；②担保免责声明。这两条**与「衍生与否」无关**：只要用了受版权
+      保护的表达，就是分发时的硬性义务。第 2(a) 节要的「改动日期」一并补上（2026-10-02 起）。
+    - **许可正文随包（纯机械缺件，同批补）**：APK 的 `assets/third-party/` 此前只有
+      `THIRD_PARTY_NOTICES.md` + 七份第三方原文，**缺 `LICENSE` 与 `NOTICE`** —— 而包内那份
+      `THIRD_PARTY_NOTICES.md` 第 3 节正写着「见 `LICENSE`」「见 `NOTICE`」，**这两个链接在 APK 里
+      是断的**，同时「随附本许可副本」（§1(c)）也没兑现。`prepareNoticesAssets` 增加这两份的拷贝
+      （仓库根同名，改名即断链），断言 8 件 → **10 件**。`prepareNoticesAssets` 自己那段 KDoc 里
+      「只在仓库里放一份、装到用户手机上就没有，等于没声明」对本仓自己的两份**一字不差地成立**，
+      先前只是没想到。
+    - **未做（如实登记）**：① `ui/` 里 25 处「逐字/照抄/原样/复刻/移植」措辞未改（其中 10 处带
+      具体上游类名）—— 按本次分级，多数应写成「按 TG 的 X 规格」，但那是纯注释改动且触及 `:ui`
+      多个文件，另开一批；② 与上游**仍未逐行比对**（`NOTICE` 里的诚实登记保留）。
+
 2026-09-30 拍板（外部审查整改步骤 7；非 §18 编号项，原口径不涉）：
 
 13. **`images` 匹配链路提速方案**（2026-09-30 评审拍板；A2–A4 实测 ❌ 后的出路裁决）：
@@ -898,6 +933,7 @@
 | **APK 的 ABI 声明面**（backlog B10 待裁定：装不装得上） | `docs/backlog.md` B10；`app/build.gradle.kts`；`docs/design/03-technology.md`（§3 SDK 基线）、`docs/design/13-roadmap-budget.md`（§17 兼容矩阵） | **只留 `arm64-v8a`**（2026-10-06 拍板）：加 `ndk { abiFilters += "arm64-v8a" }`。不加这条时 APK 声明四个 ABI，而后三个（`armeabi-v7a`/`x86`/`x86_64`）**不是引擎带来的** —— 是 `libandroidx.graphics.path.so` 贡献的，引擎四件（libnoden/libnode/libc++_shared/libopencv）只在 `lib/arm64-v8a/`。声明面比交付面宽三个 ABI = 对 32 位与 x86 设备**承诺了跑不了的东西**。取「只留 arm64」而不是「维持四个」的理由：§3/§13 已把代价写明（「放弃 32 位旧机」），而「装得上、能看界面、一跑脚本才以 `ERR_FILE_NOT_FOUND` 告终」不是更友好的降级 —— 它把一次安装期就能给的答复推迟到用户配好任务之后。代价照单全收：32 位设备与 x86_64 模拟器**装不上**（Play 也按此过滤）。**P1 补 x86_64（§17 兼容矩阵）时把该 ABI 加回那一行即可**，届时引擎产物与 `prepareEngineNativeLibs` 的 ABI 子目录要同步多一份 | 2026-10-06 |
 | **SDK 基线的两处漂移**（backlog 未列，本批顺带裁定：文档写 compile/target 36 而 catalog 写 35；两份设计卷写 minSdk 24 而 catalog/CLAUDE.md/`VERSIONS.env` 写 26） | `gradle/libs.versions.toml`；`docs/design/03-technology.md:16`；`docs/design/13-roadmap-budget.md:144`；`README.md` 前置条件表 | **以文档为准，改 catalog**（2026-10-06 拍板）：`compileSdk`/`targetSdk` 35 → **36**（§3/§17 的「compile&target 36（Android 16）」是更早拍下的口径，catalog 落后于它）；`minSdk` 反向 —— **26 为准**，两份设计卷里的「minSdk 24」是过期字面（`node-runtime-build/VERSIONS.env` 的 `ANDROID_API=26` 与 `CLAUDE.md`「API 26 = minSdk 冻结值」同口径，且 24 与 26 之间没有任何一项设计依赖 API 24/25）。连带：`ci.yml`（×2）与 `e2e-nightly.yml`（×1）的 SDK 组件装 `platforms;android-36` + `build-tools;36.0.0`；README 前置条件表同步。**APK 侧实证**：`aapt2 dump badging` 出 `compileSdkVersion='36'` / `minSdkVersion:'26'` / `targetSdkVersion:'36'` | 2026-10-06 |
 | **CI 出的 APK 不含引擎二进制**（backlog B5：怎么把「真形态 APK」做成可复现的门） | `docs/backlog.md` B5；`.github/workflows/ci.yml`（android-build job）；`engine/node-process/scripts/build-native.sh`；`build-logic/src/main/kotlin/autoscript.engine-natives.gradle.kts` | **新开独立 workflow `engine-native.yml`，`ci.yml` 一字不动**（2026-10-06 拍板）。B5 的真堵点不是「取不到产物」而是「**没有任何 workflow 产出 `noden` / `bridge_native.node`**」：node-slice（libnode + npm）与 image-native（libopencv）的 artifact 都在且未过期，可跨 workflow 取；只有这两个引擎件从来没有生产者。所以新 workflow 自己跑 `build-native.sh`（NDK r28c + Node 头文件包），再取上述两条 artifact 喂 `LIBNODE`/`NPM_CLI_ROOT`/`LIBOPENCV` 起 `assembleDebug`，最后断言 `lib/arm64-v8a/` 四件齐 + npm 素材件数 + `aapt2 dump badging` 的 ABI 只有 arm64。**不进 `ci.yml` 的理由是分钟预算**：Node 头文件包 + NDK 722MB 下载与 C++ 交叉编译是分钟级，塞进 PR 门会把「秒级红绿」变成「十分钟才知道」—— PR 门仍由 `ci.yml` 的 assembleDebug（无引擎件、装配期只 warn）守着，真形态 APK 是独立可点的门。**诚实边界**：该 workflow 取的是 node-slice/image-native 的**最新成功 artifact**，与本次 commit 的源码未必同源 —— 它的断言对象是「装配链能不能把四件摆对、ABI 面收没收敛」，不是「引擎二进制的可复现构建」（后者归 node-slice/image-native 自己的门） | 2026-10-06 |
+| **`ui/` 是「衍生自 Telegram Android 的部分」**（本文件第 33 项的定性，2026-10-06 上午） | `README.md` 许可段；`NOTICE` 第 2 节；本表上方第 33 项那行 | **改称「前端 UI 的实现与风格参考自 Telegram Android」**（2026-10-06，用户裁定，口径全文见本文件**第 36 项**）：跟踪树里**零 vendored 上游源文件**（`find . -name '*.java'` 跟踪面零命中），`ui/` 是 Kotlin/Compose 重写，借用的只是版式尺寸 / 色值键名 / 缓动控制点 + 少数几处算法步骤。原定性把**本仓自己声明不做**的那个法律判断（「是否构成衍生」）当成已决写进了对外文档。**许可口径不变**（仍 `GPL-2.0-only`），只把 `only` 的**理由**从「上游逼的（不兼容 GPL-3.0）」改成「本仓自己的保守选择」。第 33 项正文一字不动 | 2026-10-06 |
 ### 附：§12.2 被反转口径原文照抄（2026-09-30 步骤 6 摘录前的原文）
 
 > - **语义层**（handler）住 `:platform:capabilities` 的 `SystemNamespaces.kt`，纯 JVM 可测（假 SPI 注入即可跑）：参数校验（spec 守卫、必填字段、`timeout > 0`）、枚举字面量解析（`ShellMode`/`DialogMode`，拼错即报错不静默套默认）、默认值（shell 超时 30s）、错误分类**透传**（`AutojsException.error` 原码回桥）、响应形状编码（与 `extras.ts` 逐字对齐）；

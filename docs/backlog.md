@@ -24,7 +24,7 @@
 | ~~**A6**~~ | 已完成（2026-10-02）—— 叙事见 [`docs/log/2026-10-02.md`](log/2026-10-02.md) （本条不留历史；口径变更另见 [`design-decisions.md`](design-decisions.md)） | — | ✅ | — | — |
 | **A8** | **能力中心的引导文案与三态读数会自相矛盾**（2026-10-02 批 18 真机截图发现）：「精确闹钟」那一行状态标 **可用**（`AndroidSystemStateReader` 的 `exactAlarmAllowed()` 在这台机器上回 true → `CapabilityState.GRANTED`），紧接着那行引导文案却是 **「精确闹钟未允许：请前往「设置 → 应用 → AutoScript → 闹钟和提醒」允许…」**。根因不是版式：`CapabilityScreen` 的 KDoc 明写引导文案**恒显示**（「含 GRANTED 时那句『当前可用』——不按三态去猜该不该显示」），而 `PermissionCenter.guideText` 的八条里**六条是按拒绝态写的**（`ACCESSIBILITY` / `SCHEDULE_EXACT_ALARM` / `OVERLAY` / `NOTIFICATION` / `POST_NOTIFICATIONS` / `ROOT` 都以「未开启/未允许/未检测到」起句），只有 `SCREEN_CAPTURE` 那条是状态无关的说明。即那条 KDoc 描述的是**意图**（文案里自带有「当前可用」那句），而数据没兑现。要裁定的是改哪一头：① 文案改成状态无关（「这项能力是干什么的 + 怎么开」），显示逻辑不动；② 保留文案、让 GRANTED 那档不显示它（**推翻** `CapabilityScreen` 的「永远显示」口径）。①更小且不动口径，但八条文案要逐条重写，契约侧（§9.5 引导文案）与 `:app-service:permission-center` 的测试断言要同批跟 | `ui/src/main/kotlin/com/autoscript/ui/screens/CapabilityScreen.kt`（`CapabilityRow` 的 KDoc + 渲染）；`app-service/permission-center/.../PermissionCenter.kt`（`guideText` 八条）；`app/src/main/kotlin/com/autoscript/shell/AndroidSystemStateReader.kt:90-91` | ✅ 2026-10-02（真机截图存现场；`guideText` 八条逐条实读；`CapabilityScreen` 的「永远显示」口径逐字实读）；⛔ **展示面矛盾批 47 后已无处发生**（2026-10-05）：`CapabilityScreen.kt` 已不存在（能力中心并入设置页）、批 47 起设置页**不再渲染 `guide`**（用户口径「去除各个权限的描述」），「同条目同时说可用与未允许」不出现了 —— ①/② 文案口径本身仍待裁定（若将来再渲染），裁定前不排期 | 界面在同一条目里同时说「可用」与「未允许」——用户没法判断该不该去设置；P2（展示面撤下后降 P3） | S–M（待裁定改哪一头；不急） |
 
-| **A9** | **`NOTICE` 里 Telegram Android 上游 commit 未钉死**（2026-10-06 第三轮外审 L1 处置时暴露）：本仓 `ui/` 含衍生自 DrKLO/Telegram（GPL-2.0-only）的部分 —— `MenuPopup.kt` 的 `cascade()` 自称「逐字移植」、`TabBarMeasure.kt` 的 `onMeasure` 自称「逐句对着写」、`Particles.kt`/`DeletionParticles.kt` 参考 `ThanosEffect`、`Theme.kt` 取色值与键名 —— 但移植发生在 2026-10-02 起的批次，**当时没记上游 commit**，[`NOTICE`](../NOTICE) 里如实写「待补」。GPL-2.0 第 1 节要求分发时随附适当的版权声明与担保免责，精确到 commit 的来源说明是它的应有形态。**待做两件**：① 定位并钉死上游 commit（本机 `github.com` 不可达，`gh` 亦无该仓权限，须维护者侧操作）；② 借那次比对**核实 `NOTICE` 表里「逐字/逐句」的说法** —— 若核实为「按语义重写」，表内相应行降级为「语义参考」 | [`NOTICE`](../NOTICE)；`ui/src/main/kotlin/com/autoscript/ui/{components/MenuPopup.kt,state/TabBarMeasure.kt,state/Particles.kt,theme/Theme.kt}` | 待核实（本仓 KDoc 自述，未与上游逐行比对） | 分发时的 GPL 合规面；不分发则只是署名精度 | S（有网络与上游访问权时） |
+| **A9** | **`NOTICE` 表里「逐字 / 逐句」的说法未与上游核实**（2026-10-06 重写；原第①半「上游 commit 未钉死」同日结项，口径见 [`design-decisions.md`](design-decisions.md) **第 36 项**，本行不再复述）：`MenuPopup.kt` 的 `cascade()` 自称「逐字移植」、`TabBarMeasure.kt` 的 `onMeasure` 自称「逐句对着写」、`Particles.kt`/`DeletionParticles.kt` 参考 `ThanosEffect`、`Theme.kt` 取色值与键名 —— 这些**都是本仓 KDoc 的自述**，没跟上游对过。上游已锚 **12.10.6（build 7112）/ `f2908b14133bbffbf7ab04f641ecb5faf533242`**，比对有靶子了。**待做**：逐处比对后按实情降级措辞（真逐字 → 保留；只是按语义/规格重写 → 改成「按 TG 的 X 规格」），并同批改 `ui/` 里那 25 处「逐字/照抄/原样/复刻/移植」措辞（其中 10 处带具体上游类名）。**更正一条过期口径**：原行写「本机 `github.com` 不可达，`gh` 亦无该仓权限」—— 2026-10-06 实测**两端都通**（`git ls-remote https://github.com/DrKLO/Telegram.git` 与 `api.github.com` 均 200），该句作废 | [`NOTICE`](../NOTICE)；`ui/src/main/kotlin/com/autoscript/ui/{components/MenuPopup.kt,state/TabBarMeasure.kt,state/Particles.kt,theme/Theme.kt}` | 待核实（本仓 KDoc 自述，未与上游逐行比对） | 署名精度（措辞可能比事实重）；许可义务那两件已于第 36 项补齐 | S–M（本机可做，不再依赖维护者侧） |
 
 ## B. CI / 工程基建
 
@@ -83,7 +83,7 @@
 
 ## F. 建议批次（一次一批，每批跑完整 CI 同源门）
 
-**已排期的批次全部做完**（批 1–53，2026-10-01 起）。逐批的完整叙述（做了什么、
+**已排期的批次全部做完**（批 1–62，2026-10-01 起）。逐批的完整叙述（做了什么、
 门跑出什么、当场露出的新口子）在流水切片里，按批次号可检索：
 
 | 批 | 切片 |
@@ -92,7 +92,7 @@
 | 8–19 | [`docs/log/2026-10-02.md`](log/2026-10-02.md) |
 | 23–26、30、34–38 | [`docs/log/2026-10-04.md`](log/2026-10-04.md) |
 | 39–48 | [`docs/log/2026-10-05.md`](log/2026-10-05.md) |
-| 49–53 | [`docs/log/2026-10-06.md`](log/2026-10-06.md) |
+| 49–62 | [`docs/log/2026-10-06.md`](log/2026-10-06.md) |
 
 （批 20–22、27–29、31–32 只存在于已归档的分支上，**不在本仓的流水切片里** ——
 要追溯得去远端那些分支，别在本仓里找。）
