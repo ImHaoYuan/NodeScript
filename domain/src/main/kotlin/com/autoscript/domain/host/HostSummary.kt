@@ -180,9 +180,10 @@ data class InstallSize(
 /**
  * 能力中心的一行。
  *
- * @property guide 引导文案（`PermissionCenter.guideText` 的同一份）—— 被拒/降级时
- *   用户要看到"去哪开、开了之后是什么态"。GRANTED 时也有（文案本身已说明当前态），
- *   呈现层不按三态去猜该不该显示它。
+ * @property guide 引导文案（`PermissionCenter.guideText` 的同一份）—— 三态通用：
+ *   每条只答"这项能力是干什么的 + 怎么让它可用"，**不按拒绝态起句**（backlog A8 的
+ *   裁定，2026-10-07），所以 GRANTED/DEGRADED/DENIED 下都成立，呈现层不按三态去猜
+ *   该不该显示它。当前态由 [state] 表达，文案不重复说它。
  */
 data class CapabilityRow(
     val capability: Capability,

@@ -70,28 +70,58 @@ class PermissionCenter(
     }
 
     companion object {
-        /** 能力中心引导文案（P0 引导页消费：告诉用户去哪里开、开了之后是什么态）。 */
+        /**
+         * 能力引导文案（`CapabilityRow.guide` 与 [ensure] 的拒绝 detail 共用**同一份**）。
+         *
+         * **与三态无关**（backlog A8 的裁定，2026-10-07）：每条只回答「这项能力是干什么的 +
+         * 怎么让它可用」，**不按拒绝态起句**。于是同一份文案在 GRANTED/DEGRADED/DENIED
+         * 三态下都成立，呈现层不需要按态猜该不该显示它 —— 这正是
+         * `CapabilityRow.guide` 那句「呈现层不按三态去猜」要的数据形态。
+         *
+         * 反面教材是 A8 的现场：文案写死「精确闹钟未允许：请前往…」，而同一行的三态读数
+         * 是「可用」；`CapabilityRow.guide` 的 KDoc 描述的是**意图**（文案自带有当前态那句），
+         * 而八条里六条是按拒绝态写的 —— 意图与数据对不上。改数据这一头（显示逻辑不动）。
+         *
+         * 另一条纪律：文案里承诺的行为必须与代码一致。批 61（§9.3 三通道三选一）之后
+         * **不存在降级链** —— 指定 adb/root 而该通道不可用就是 `ERR_PERMISSION_DENIED`，
+         * 绝不改用别的通道，所以 `ADB_INPUT` 那条不能再写「未就绪时输入走无障碍手势」。
+         */
         fun guideText(ability: Capability): String = when (ability) {
             Capability.ACCESSIBILITY ->
-                "无障碍服务未开启：请前往「设置 → 无障碍 → AutoScript」开启，开启后能力为 GRANTED"
+                "无障碍服务：读界面树、执行点击与滑动的通道。" +
+                    "在「设置 → 无障碍 → AutoScript」开启；未开启时 a11y.* 如实回 " +
+                    "ERR_SERVICE_DISABLED —— 这条通道没有替代路径"
             Capability.SCREEN_CAPTURE ->
-                "屏幕采集：无障碍截图通道随无障碍服务可用（无需录屏授权，333ms 节流）；" +
-                    "MediaProjection 高清会话接入后，首次会话将弹系统录屏授权，同意后本会话 GRANTED"
+                "屏幕采集：截屏帧源。无障碍截图通道随无障碍服务可用（无需录屏授权，333ms 节流）；" +
+                    "MediaProjection 高清会话接入后，首次会话由系统弹录屏授权，同意后本会话可用"
             Capability.OVERLAY ->
-                "悬浮窗权限未授予：请前往「设置 → 应用 → AutoScript → 悬浮窗/显示在其他应用上层」开启；未开启时对话框走通知回调降级路径"
+                "悬浮窗：脚本对话框浮在其他应用之上。" +
+                    "在「设置 → 应用 → AutoScript → 悬浮窗/显示在其他应用上层」开启；" +
+                    "未开启时对话框走通知回调降级路径，a11y 服务在跑时也经可信窗口显示"
             Capability.NOTIFICATION ->
-                "通知权限未授予：请前往「设置 → 应用 → AutoScript → 通知」开启；未开启时任务提醒不可达"
+                "通知（任务提醒）：任务状态与提醒的送达通道。" +
+                    "在「设置 → 应用 → AutoScript → 通知」开启；" +
+                    "未开启时任务提醒不可达，其余功能不受影响"
             Capability.SCHEDULE_EXACT_ALARM ->
-                "精确闹钟未允许：请前往「设置 → 应用 → AutoScript → 闹钟和提醒」允许；未允许时定时任务降级为 setWindow（可能偏差，UI 标注）"
+                "精确闹钟：定时任务按点触发。" +
+                    "在「设置 → 应用 → AutoScript → 闹钟和提醒」允许；" +
+                    "未允许时定时任务降级为 setWindow（可能偏差，任务中心逐条标注）"
             Capability.ROOT ->
-                "未检测到 root：root 相关能力（sendevent 输入等）不可用，不降级渲染为禁用"
+                "root：a11y 的 root 输入通道（`su -c` 注入与 shell）。" +
+                    "由用户在本应用之外准备（设备上 `su` 可用即可）；探测不到时该通道如实回 " +
+                    "ERR_PERMISSION_DENIED —— 不会改用别的通道"
             Capability.ADB_INPUT ->
-                "ADB 输入（Shizuku）未就绪：请确保 Shizuku 运行且已授权 AutoScript；未就绪时输入走无障碍手势"
+                "ADB 输入（Shizuku）：a11y 的 adb 输入通道，注入事件的进程身份是 shell。" +
+                    "需先安装 Shizuku、启动它，并在其中授权本应用；" +
+                    "未就绪时该通道如实回 ERR_PERMISSION_DENIED —— 不会改用别的通道"
             Capability.POST_NOTIFICATIONS ->
-                "通知发送未允许：请前往系统设置允许通知；拒绝后任务完成提醒静默丢弃并在 UI 明示"
+                "通知发送权限：脚本主动发通知（`auto.notification.post`）。" +
+                    "在系统设置里允许通知；未允许时 post 抛 ERR_PERMISSION_DENIED，" +
+                    "任务完成提醒静默丢弃并在 UI 明示"
             Capability.USAGE_ACCESS ->
-                "使用情况访问权限未授予：请前往「设置 → 应用 → 特殊访问权限 → 使用情况访问权限" +
-                    "」允许 AutoScript；未允许时 auto.app.currentPackage 如实返回 null"
+                "使用情况访问权限：`auto.app.currentPackage` 读当前前台应用。" +
+                    "在「设置 → 应用 → 特殊访问权限 → 使用情况访问权限」允许 AutoScript；" +
+                    "未允许时如实返回 null"
         }
     }
 }

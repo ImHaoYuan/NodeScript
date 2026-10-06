@@ -16,6 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
 import com.autoscript.platform.capabilities.device.AutoScriptAccessibilityService
+import com.autoscript.platform.capabilities.device.ShizukuInput
 
 /**
  * 三态查询的系统接触面（docs §9.5）—— [AndroidSystemStateReader] 唯一的 Android 依赖点，
@@ -45,6 +46,12 @@ interface CapabilityProbes {
 
     /** `PACKAGE_USAGE_STATS`（使用情况访问）是否已授予 —— AppOps 的 GET_USAGE_STATS 是否 MODE_ALLOWED。 */
     fun usageAccessGranted(): Boolean
+
+    /**
+     * adb 输入通道（§9.3 三通道之一）是否就绪 —— Shizuku 装了**且**服务活着。
+     * 与其余探针同一条纪律：只回答事实，不判三态。
+     */
+    fun adbInputAvailable(): Boolean
 }
 
 /**
@@ -64,9 +71,13 @@ interface CapabilityProbes {
  * - `SCREEN_CAPTURE` 无活动会话 = `DEGRADED` —— §9.5 把 GRANTED 定义成"含会话型
  *   MediaProjection **已激活**"，而"还没问过用户"不等于被拒（首次截图时才弹授权，§9.2）；
  * - `ROOT` 探测不到 = `DENIED`（§9.3：无 root 不降级渲染为禁用）；
- * - `ADB_INPUT` = `DEGRADED` 常量：Shizuku 尚未集成，但引导文案承诺的降级路径
- *   （"未就绪时输入走无障碍手势"）真实存在，故不是 DENIED。**也不谎报 GRANTED** ——
- *   本类不查任何 Shizuku 状态，因为平台上还没有那条通道可查；
+ * - `ADB_INPUT` 没就绪 = `DENIED`（批 61 起，2026-10-06）：三通道三选一之后
+ *   **不存在降级链** —— 脚本指定 adb 而该通道不可用就是 `ERR_PERMISSION_DENIED`，
+ *   绝不改用别的通道（§9.3，口径见 `design-decisions.md` 第 35 项）。此前这里恒
+ *   `DEGRADED`（"未就绪时输入走无障碍手势"），那条承诺随三通道裁定一起作废：
+ *   它描述的降级路径已经不存在了，再报 DEGRADED 就是拿旧口径骗人。
+ *   Shizuku 在跑但**尚未授权本应用**时也如实 `DENIED`（`isAvailable` 的 binder 问询
+ *   在未授权下拿不到服务），文案因此把"授权本应用"与"装/启动 Shizuku"并列写；
  * - `USAGE_ACCESS` 没开 = `DENIED`（批 48）—— `auto.app.currentPackage` 没有降级路径：
  *   未授权就查不到，引导文案逐字承诺"如实返回 null"，不走"编个空串假装查了"那条路。
  *
@@ -108,7 +119,9 @@ class AndroidSystemStateReader(
                 CapabilityState.DENIED
             }
 
-        Capability.ADB_INPUT -> CapabilityState.DEGRADED
+        // Shizuku 的反射探测失败面很宽，但它不阻塞（不 spawn 进程），不必切线程。
+        Capability.ADB_INPUT ->
+            if (probes.adbInputAvailable()) CapabilityState.GRANTED else CapabilityState.DENIED
 
         Capability.USAGE_ACCESS ->
             if (probes.usageAccessGranted()) CapabilityState.GRANTED else CapabilityState.DENIED
@@ -190,6 +203,13 @@ class AndroidCapabilityProbes(context: Context) : CapabilityProbes {
             appContext.packageName,
         ) == AppOpsManager.MODE_ALLOWED
     }
+
+    /**
+     * adb 输入通道的就绪判定（§9.3）：**唯一**的 Shizuku 接触点是
+     * [com.autoscript.platform.capabilities.device.ShizukuInput]，本探针只转问一句，
+     * 不自己碰 `rikka.shizuku.*`（那是平台模块的职责，且它已把反射失败面全折成"不可用"）。
+     */
+    override fun adbInputAvailable(): Boolean = ShizukuInput.isAvailable()
 
     private companion object {
         const val ROOT_PROBE_TIMEOUT_MILLIS = 1_500L
