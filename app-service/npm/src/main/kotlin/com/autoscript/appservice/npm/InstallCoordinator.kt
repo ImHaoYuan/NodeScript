@@ -295,7 +295,18 @@ class InstallCoordinator(
         if (!Files.isRegularFile(src)) {
             throw AutojsException(ErrorCode.ERR_FILE_NOT_FOUND, "离线 bundle 不存在：$uri（SAF 副本是否已落地？）")
         }
-        val result = importer.import(src, resolveCacheDir())
+        val result = try {
+            importer.import(src, resolveCacheDir())
+        } catch (e: NpmOfflineBundleImporter.BundleTooLargeException) {
+            // **超限是参数问题**（选错了文件 → 去重选），不是「文件不见了」（→ 去查 SAF
+            // 副本有没有落地）—— 两者对用户的下一步动作完全不同，所以分错误码。原文
+            // （实际字节数与上限）照原样带给用户；超限同样入史，不留痕等于没发生。
+            history?.record(InstallHistory.Op.IMPORT, projectId, false, e.message ?: "")
+            throw AutojsException(ErrorCode.ERR_INVALID_PARAM, e.message ?: "离线 bundle 超过上限", e)
+        } catch (e: IllegalArgumentException) {
+            // 其余 IllegalArgumentException = 导入件对「文件不在那儿」的既有口径（§10.2）。
+            throw AutojsException(ErrorCode.ERR_FILE_NOT_FOUND, e.message ?: "离线 bundle 读取失败：$uri", e)
+        }
         if (!result.clean) {
             // §10.5-3 禁止静默：有拒收条目必须说，否则用户以为整包都进来了
             history?.record(

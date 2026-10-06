@@ -519,6 +519,35 @@ class InstallCoordinatorTest {
     }
 
     @Test
+    fun `bundle 导入：超上限 → ERR_INVALID_PARAM（「选错文件」不是「文件不见」）`() = runBlocking {
+        // 造一个**真超顶**的包：cacache 内容寻址要求条目名 = 内容摘要，所以小载荷只能
+        // 靠「很多条小条目」把整包撑过 512 MiB —— 那正是这条路径的真实形态
+        // （用户从 Downloads 里挑了一个不是 bundle 的大 zip）。声明大小不是判据，
+        // 判据是文件系统上的字节数，所以这里必须真写这么多字节。
+        val blob = ByteArray(1 shl 20) { 3 }        // 1 MiB，可压缩性无关紧要（stored）
+        val zip = dir.resolve("huge-bundle.zip")
+        ZipOutputStream(Files.newOutputStream(zip)).use { z ->
+            z.setLevel(java.util.zip.Deflater.NO_COMPRESSION)
+            for (i in 0 until 513) {                // 513 × 1 MiB > 512 MiB 顶
+                z.putNextEntry(ZipEntry("_cacache/content-v2/sha512/ff/ee/part-$i"))
+                z.write(blob)
+                z.closeEntry()
+            }
+        }
+        assertTrue(Files.size(zip) > 512L * 1024 * 1024, "前提：包真的超顶")
+
+        val h = newHistory()
+        val c = coordinator(executor = FakeExecutor { }, history = h, bundleImporter = NpmOfflineBundleImporter)
+        val e = assertThrows(AutojsException::class.java) {
+            runBlocking { c.importOfflineBundle("p1", zip.toString()) }
+        }
+        assertEquals(ErrorCode.ERR_INVALID_PARAM, e.error, "超限是**参数**问题（去重选文件），不是找不到文件")
+        assertTrue(e.message!!.contains("超过上限"), "原文（含实际字节数与上限）要保留给用户：${e.message}")
+        val failed = h.all().single { !it.success }
+        assertEquals(InstallHistory.Op.IMPORT, failed.op, "超限也要留痕")
+    }
+
+    @Test
     fun `registry 变更入史（可审计）`() = runBlocking {
         val h = newHistory()
         coordinator(history = h).config("p1", com.autoscript.domain.npm.NpmConfigKey.REGISTRY, "https://registry.npmjs.org")
