@@ -9,6 +9,10 @@ import { runtimeBridge } from './runtime'
  *
  * TTL 缺省 60s（归档可大可慢，5s 默认必超）；错误原样抛 AutojsError
  * （`ERR_FILE_NOT_FOUND`/`ERR_IO`/`ERR_INVALID_PARAM` 不折叠）。
+ *
+ * **解压有体积上限**（§9.6）：单条目 256 MiB、整包合计 1 GiB，超限抛
+ * `ERR_INVALID_PARAM`（整次拒绝，不返回部分结果）。这是给「一个 1 MB 的包写出
+ * 10 GB」兜底的 —— 包是脚本自己给的路径，脚本作者通常不会想到要防它。
  * 方法名只有 `compress`/`extract` —— 没约定过的别名（如 `unzip`）不提供，
  * 宿主对未知方法如实 ERR_NOT_IMPLEMENTED。
  */

@@ -5,6 +5,8 @@ import com.autoscript.domain.core.ErrorCode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.IOException
+import java.io.InputStream
+import java.io.OutputStream
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.Path
@@ -36,8 +38,22 @@ import java.util.zip.ZipOutputStream
  *    不留半截 zip 冒充成品。
  * 3. **空目录以目录条目保留**：只拷文件不落目录条目的写法会让空目录消失
  *    （naive 实现的常见缺斤短两），这里目录条目显式 createDirectories。
+ * 4. **体积上限（2026-10-06 补，backlog B13）**：见 [MAX_ENTRY_BYTES] / [MAX_TOTAL_BYTES]。
+ *    与 zip-slip 同层 —— 都是「解压一个不可信归档」这条路上的契约级底线，所以同样
+ *    **先验后写**（诚实的炸弹在写任何字节之前就被拦下），撒谎的声明由第二拍的计数闸兜住。
  */
-class JdkZipArchiver : ZipArchiver {
+class JdkZipArchiver(
+    /**
+     * 两个上限做成**构造参数**（缺省即下面那两个常量）：生产走 `SystemSpis.of` 的
+     * 无参构造，测试把上限压到可测的规模。
+     *
+     * 为什么要这个缝：边界要按真值测就得造 256 MiB+ 的条目，而**为一条不该落盘的条目
+     * 先写满 256 MiB 磁盘**是拿边界的坑去测边界（同 `NpmOfflineBundleImporter` 的
+     * 上限缝，2026-10-06 backlog B12）。缝只开在上限上 —— 解包/校验/落盘一条不分叉。
+     */
+    private val maxEntryBytes: Long = MAX_ENTRY_BYTES,
+    private val maxTotalBytes: Long = MAX_TOTAL_BYTES,
+) : ZipArchiver {
 
     override suspend fun compress(source: Path, archive: Path): Unit = withContext(Dispatchers.IO) {
         if (!Files.exists(source)) {
@@ -93,20 +109,44 @@ class JdkZipArchiver : ZipArchiver {
             ZipFile(archive.toFile()).use { zf ->
                 val all = zf.entries().asSequence().toList()
 
-                // ── 第一拍：全包条目名校验，任何一条越界都没开始写 ──
-                for (entry in all) resolveIn(targetRoot, entry.name)
+                // ── 第一拍：全包条目名 + **声明体积**校验，任何一条不合格都没开始写 ──
+                var declaredTotal = 0L
+                for (entry in all) {
+                    resolveIn(targetRoot, entry.name)
+                    // 声明为 -1（zip 未写该字段）不拦：那类条目由第二拍的计数闸兜住。
+                    if (entry.size > maxEntryBytes) {
+                        throw tooLarge(entry.name, entry.size, maxEntryBytes, "单条目")
+                    }
+                    if (entry.size > 0) declaredTotal += entry.size
+                }
+                if (declaredTotal > maxTotalBytes) {
+                    throw tooLarge("(整包合计)", declaredTotal, maxTotalBytes, "总解压量")
+                }
 
                 // ── 第二拍：逐条复验 + 落字节（写它之前再验一次；同一 ZipFile 会话内
-                //    中央目录已固定，两拍之间不存在换文件窗口） ──
+                //    中央目录已固定，两拍之间不存在换文件窗口）。体积在这里**按真读出来的
+                //    字节数**再判一次 —— 第一拍读的是包的声明，声明可以撒谎。 ──
+                var writtenTotal = 0L
                 for (entry in all) {
                     val out = resolveIn(targetRoot, entry.name)
                     if (entry.isDirectory || entry.name.endsWith('/')) {
                         Files.createDirectories(out)
                     } else {
                         Files.createDirectories(out.parent)
-                        zf.getInputStream(entry).use { ins ->
-                            Files.copy(ins, out, StandardCopyOption.REPLACE_EXISTING)
+                        val written = try {
+                            zf.getInputStream(entry).use { ins ->
+                                Files.newOutputStream(out).use { os ->
+                                    copyCapped(ins, os, entry.name, writtenTotal)
+                                }
+                            }
+                        } catch (e: AutojsException) {
+                            // 半截文件不留：这一条已经确定是废的，留着它只会让用户以为
+                            // "解出来一部分"。先前条目留在盘上 —— 那与任何中途 IO 失败同形，
+                            // 本类不改这个既有语义（诚实炸弹在第一拍就零写入，走不到这里）。
+                            Files.deleteIfExists(out)
+                            throw e
                         }
+                        writtenTotal += written
                     }
                 }
             }
@@ -118,6 +158,51 @@ class JdkZipArchiver : ZipArchiver {
             throw AutojsException(ErrorCode.ERR_IO, "解压失败: ${e.message}", e)
         }
     }
+
+    /**
+     * 抄字节，**边抄边数**：单条目超 [MAX_ENTRY_BYTES] 或累计超 [MAX_TOTAL_BYTES] 即停并抛。
+     *
+     * 这是本类唯一一处「内存/磁盘还没被写出去」的地方，所以上限必须落在这里 ——
+     * `Files.copy` 不行，它对字节数无上限，而 `ZipEntry.getSize()` 是包自己声明的数。
+     * 缓冲是一个固定大小的块，与条目真实大小无关；到顶即抛，不留半截。
+     *
+     * @param priorTotal 本次 [extract] 此前已落盘的字节数（总量的闸要连它一起算）。
+     * @return 本条实际写出的字节数。
+     */
+    private fun copyCapped(
+        ins: InputStream,
+        os: OutputStream,
+        entryName: String,
+        priorTotal: Long,
+    ): Long {
+        val buf = ByteArray(COPY_CHUNK_BYTES)
+        var entryBytes = 0L
+        while (true) {
+            val n = ins.read(buf)
+            if (n < 0) break
+            entryBytes += n
+            if (entryBytes > maxEntryBytes) {
+                throw tooLarge(entryName, entryBytes, maxEntryBytes, "单条目")
+            }
+            if (priorTotal + entryBytes > maxTotalBytes) {
+                throw tooLarge(entryName, priorTotal + entryBytes, maxTotalBytes, "总解压量")
+            }
+            os.write(buf, 0, n)
+        }
+        return entryBytes
+    }
+
+    /**
+     * 超限的统一出口。**如实报真值**（哪一条、解出来多少、上限多少）—— 与 zip-slip
+     * 同码 `ERR_INVALID_PARAM`：两者都是「这个归档本身不合格」，是**输入**的问题，
+     * 不是目标盘的问题（后者才是 `ERR_DISK_FULL`，判据不在本类）。
+     */
+    private fun tooLarge(what: String, actual: Long, limit: Long, kind: String): AutojsException =
+        AutojsException(
+            ErrorCode.ERR_INVALID_PARAM,
+            "$kind 超过解压上限（疑似压缩炸弹）: $what 解出 $actual 字节 > $limit 上限",
+            null,
+        )
 
     /**
      * 条目名 → 目标根内的绝对路径；越界（`../` 逃逸 / 绝对路径条目）抛
@@ -137,5 +222,37 @@ class JdkZipArchiver : ZipArchiver {
             )
         }
         return resolved
+    }
+
+    companion object {
+        /**
+         * 单条目解压后上限（[extract] 强制）。
+         *
+         * **为什么需要它**：`auto.zip.extract` 的调用方是**脚本**，输入是一个 zip 路径 ——
+         * 脚本作者不会想到要防「一个 1 MB 的包写出 10 GB」。这不是假想：zip 的压缩比可以到
+         * 1000:1（全零/全同字节），而 [java.util.zip.ZipEntry.getSize] 是**包自己声明的数**，
+         * 可以撒谎。所以真正的上限只能落在**字节流经过的地方**（[copyCapped]），声明那道只是
+         * 便宜的早退。
+         *
+         * **为什么是 256 MiB**：合法用途是「解一个下载下来的资源/模型包」，实测这类包的单件
+         * 在数十 MiB 量级；256 MiB 对合法用途是够不着的余量，只拦「这个包根本不是给我解的」。
+         * 真要解更大的包，改这个常量即可 —— 它是**策略**，不是物理限制。
+         *
+         * **为什么不查剩余空间**：那是**配额面**的事（判据在安装会话 / 包大小管理页，见 §10.9
+         * UX 5），不是解压器的。这里管的是「输入本身离谱」，与目标盘还剩多少无关 ——
+         * 两件事混在一起会让「盘满了」和「包是炸弹」报同一个错，用户没法判断该删东西还是换文件。
+         */
+        const val MAX_ENTRY_BYTES: Long = 256L * 1024 * 1024
+
+        /**
+         * 整包解压后总上限（[extract] 强制，**声明与实读各判一次**）。
+         *
+         * 单条目上限挡不住「一万个小条目」——每个都不超顶、加起来写满盘。所以两道都要有：
+         * 单条目的闸防「一个巨物」，总量的闸防「一群小东西」。
+         */
+        const val MAX_TOTAL_BYTES: Long = 1024L * 1024 * 1024
+
+        /** 抄字节的块大小（[copyCapped]）；与 `ShellCaptureLimit` 的读块同量级。 */
+        private const val COPY_CHUNK_BYTES = 64 * 1024
     }
 }
