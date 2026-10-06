@@ -14,8 +14,8 @@ class SchedulerTest {
         val fires = mutableListOf<Pair<Long, String>>()   // (fireAt, taskId)
         val cancels = mutableListOf<String>()
         override suspend fun registerTrigger(targetFireAtMillis: Long, taskId: String): TriggerHandle {
-            fires += targetFireAtMillis to taskId
-            return TriggerHandle { cancels += taskId }
+            synchronized(this) { fires += targetFireAtMillis to taskId }
+            return TriggerHandle { synchronized(this) { cancels += taskId } }
         }
         override suspend fun cancelTrigger(handle: TriggerHandle) = handle.cancel()
     }
