@@ -31,6 +31,14 @@ object ShizukuInput {
     /** Shizuku 主类的全名（`dev.rikka.shizuku` 的公开入口）。 */
     private const val SHIZUKU_CLASS = "rikka.shizuku.Shizuku"
 
+    /**
+     * 服务接口的全名（`newProcess` 从**它**上面取，见 [run] 里那段注释）。
+     *
+     * 这一条与 [SHIZUKU_CLASS] 一样是"按字符串找类"，**release 包上必须留名**
+     * （R8 看不见）—— 见 `app/proguard-rules.pro` 第 1b 条。
+     */
+    private const val IShizuku_SERVICE = "moe.shizuku.server.IShizukuService"
+
     /** 单条注入命令的超时（与 `ShellInputProvider.DEFAULT_TIMEOUT_MILLIS` 同量级）。 */
     const val DEFAULT_TIMEOUT_MILLIS = 5_000L
 
@@ -51,9 +59,16 @@ object ShizukuInput {
             stub.getMethod("asInterface", android.os.IBinder::class.java).invoke(null, binder)
         }
         val process = step("Shizuku newProcess 调用失败（服务版本不兼容？）") {
-            service.javaClass
-                .getMethod("newProcess", Array<String>::class.java, Array<String>::class.java, String::class.java)
-                .invoke(service, arrayOf("sh", "-c", command), null, null)
+            // **方法必须从公开接口取，不能从 `service.javaClass` 取**：`asInterface` 返回的是
+            // AIDL 生成的 `IShizukuService$Stub$Proxy`，那个类是**包内可见**的（`javap` 可见
+            // `class moe.shizuku.server.IShizukuService$Stub$Proxy`，无 `public`）。在它上面
+            // `getMethod` 拿到的 `Method` 带着"声明类不可见"的访问检查，`invoke` 抛
+            // `IllegalAccessException`（不是 `NoSuchMethodException`，故不会被当成"版本不兼容"，
+            // 而是被 [step] 折成同一句拒绝 —— 症状是 adb 通道**永远不可用**，且没有任何提示
+            // 指向真因）。在**公开接口**上取同一个方法签名则声明类可见，invoke 正常分派到实现类。
+            val api = Class.forName(IShizuku_SERVICE)
+            api.getMethod("newProcess", Array<String>::class.java, Array<String>::class.java, String::class.java)
+                .invoke(service, arrayOf("sh", "-c", command), arrayOf<String>(), null)
         }
         return try {
             drain(process, timeoutMillis)
