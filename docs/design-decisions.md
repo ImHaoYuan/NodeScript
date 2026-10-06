@@ -466,6 +466,35 @@
     - **未做**：未加 `COPYING`/`LICENSE` 双份、未在源文件头加 SPDX 注释块（全仓现状是零文件头声明）、
       未改 `SECURITY.md`（其内容与许可无关）。这些留作将来的可选项，本次不铺开。
 
+33. **对外许可由 `GPL-2.0-or-later` 收窄为 `GPL-2.0-only` + 源码面署名（2026-10-06，第三轮外审 L1）**：
+    - **拍板**：本仓对外分发许可改 **`GPL-2.0-only`**（GNU GPL 第 2 版，**不含**「或任何更新版本」）。
+      落地六处：`README.md` 许可段、`bridge/js/package.json` 的 `license` 字段、`bridge/js/package-lock.json`
+      的根包条目、`THIRD_PARTY_NOTICES.md` 第 3 节（生成物，改的是 `gen-notices.mjs` 后重跑）、新增
+      `NOTICE`（源码面署名，手写）、本项。
+    - **为什么收窄（这是第 32 项 `or later` 口径的推翻，原口径不删，见上）**：本仓 `ui/` 含**衍生自
+      Telegram Android** 的部分（`MenuPopup.kt` 的 `cascade()` 自称「逐字移植」、`TabBarMeasure.kt`
+      「逐句对着写」、`Particles.kt`/`DeletionParticles.kt` 的 `ThanosEffect` 形态参考、`Theme.kt` 的
+      色值常量与键名），而 DrKLO/Telegram 是 **GPL-2.0-only**（无 "or later"）。GPL-2.0-only 与 GPL-3.0
+      **不兼容**，两者合成的整体无法合法按 GPL-3.0 再分发 ⇒ 第 32 项选 `or later` 的理由（"保留将来
+      单向升 GPLv3 的路"）**在事实上不可行使**，继续对外宣称它等于给下游一个走不通的授权路径。
+      `only` 是**如实陈述**，不是许可收紧 —— 下游本来就没有那条路。
+    - **第 32 项里那句「未抄任何 TG 源码」同日证伪**：它写在第 32 项落地当天，而同一批次的
+      `MenuPopup.kt`（批 38，2026-10-04）自称逐字移植 —— 两处口径互斥。**成因**：第 32 项当时的
+      依据只有批 13 那批（`Theme.kt` 确实只取色值），后来的批次把参考面推到了函数体。教训与
+      backlog D14 那条同型：**「未抄/看不见/不查」这类断言，写下时只覆盖了当时看到的面**。
+    - **新增 `NOTICE`（为什么不是往 `THIRD_PARTY_NOTICES.md` 加一行）**：后者是 `gen-notices.mjs`
+      从 `VERSIONS.env` 生成的**随包二进制清单**，第 3/4 节明确不含开发期参考件，手写条目会被
+      `--check` 同步门判漂移。故源码面署名另立 `NOTICE`（手写，不分发清单）：上游 URL 与许可、
+      逐文件来源与关系（逐字移植 / 逐句对着写 / 形态参考 / 取色值）、修改说明（GPL-2.0 第 2(a) 节
+      要求的"显著通知"）。`gen-notices.mjs` 第 3 节加一句指针指过来（生成物因此仍与事实同源）。
+    - **未做（如实登记）**：① **上游 commit 未钉死** —— 移植发生在 2026-10-02 起的批次，当时没记
+      commit，`NOTICE` 里如实写「待补」；② `NOTICE` 表里「逐字/逐句」是本仓 KDoc 自己的说法，
+      **未与上游逐行比对**，补 commit 时一并核；③ `LICENSE` 文件本身未动（GPL v2 全文两种口径共用，
+      不区分 only/or-later，区分靠声明）；④ 未在源文件头加 SPDX 块（全仓零文件头声明的现状不变）。
+      ① 已登记 [`backlog.md`](backlog.md)。
+    - **性质声明**：本项与 `NOTICE` 的文本是**工程侧的事实陈述与署名**，不是法律意见；分发前若需
+      法律判断（衍生认定、GPL-2.0-only 与 GPL-3.0 的兼容性边界），应由维护者请人复核。
+
 2026-09-30 拍板（外部审查整改步骤 7；非 §18 编号项，原口径不涉）：
 
 13. **`images` 匹配链路提速方案**（2026-09-30 评审拍板；A2–A4 实测 ❌ 后的出路裁决）：
@@ -771,6 +800,7 @@
 | 能力中心**明示安装体积**（决策 20「接受 + 明示」的 UI 披露面：设置页单列一段「安装体积 xxx」，2026-10-02 拍板并落地） | 决策 20（本文件第 20 项）+ §15 表注 + `backlog.md` E1 | **设置页撤下这段渲染**（批 47 用户口径「安装体积xxx那个文字去掉」）：撤的只是 UI —— 「接受超支」的预算记账、§15 证据链、`InstallSizeRead` 实测链、`InstallSizeState` 字段与 `text()` 换算**全部保留**（`CapabilityCenterStateTest` 仍钉着文案），「明示」这一半按用户口径作废；将来要再披露从 `text()` 同源取 | 2026-10-05 |
 | vendored npm CLI 的**幂等锚 = 单入口 `bin/npm-cli.js` 的 sha256，命中即整目录跳过（开机路径零 IO）**（§10.2 存储布局 `files/npm/` 原文口径 + `NpmCliDeployer` KDoc） | §10.2；`docs/design-status.md` §11.2 T2/§10.2 行 | **改为「全树清单身份 + 落盘逐件复核」**（2026-10-06，backlog B9）：构建期 `prepareNpmCliAssets` 随包出 `assets/npm-manifest.json`（count/bytes/files[path,sha256]），部署侧以**规范化全树摘要**（`DirSizer.sha256` 覆盖排序后的 path+sha256 列表）为幂等身份，且**命中前先复核落盘文件集合与每件摘要**。理由：旧锚只看一个入口文件，「入口没变、依赖树被剪裁或写坏」正是 B9 要防的形态（aapt2 `<dir>_*` 那次就是整个目录消失而入口完好）。**代价明写**：开机路径不再是零 IO —— 每次启动读一遍 ~1.6k 件 / ~10MB 做摘要复核（换来的是「APK 被剪裁」在部署期就响亮失败，而不是设备上 `require` 时才炸）。清单缺失/不可读/摘要不符一律拒绝部署并保留旧树，**不退回旧校验、不降级放行** | 2026-10-06 |
 | **覆盖率门设不设阈值**（backlog B6 待批项） | `docs/backlog.md` B6；`build-logic/` | **只出报告，不设阈值**（2026-10-06 批 52）：存量覆盖率未知（全仓此前零 jacoco），设门必红、红在一个没人打算立刻补的数字上，只会训练出「加豁免」的习惯。本批的交付是**让盲区看得见**（15 个模块的报告 + CI artifact）；要设阈值是**另一件事**，得先有基线数字与「哪几个模块纳入」的口径，届时按本表另起一行 | 2026-10-06 |
+| 对外许可 `GPL-2.0-or-later`（本文件第 32 项，2026-10-02 拍板） | `README.md` / `THIRD_PARTY_NOTICES.md` / `bridge/js/package.json` | **收窄为 `GPL-2.0-only`**（2026-10-06，第三轮外审 L1）：`ui/` 含衍生自 Telegram Android（**GPL-2.0-only**）的部分，GPL-2.0-only 与 GPL-3.0 不兼容 ⇒ 合成的整体无法合法按 GPL-3.0 再分发，"or later" 这个选项**事实上不可行使**。原口径保留在上方第 32 项（含它当时那句「未抄任何 TG 源码」—— 该句同日证伪，批 38 的 `MenuPopup.kt` 自称逐字移植）。口径全文见本表下方第 33 项 | 2026-10-06 |
 | **静态分析用什么工具**（backlog B8） | `build-logic/`；`bridge/js` | **detekt（Kotlin）+ ESLint（facade），不引 ktlint**（2026-10-06 批 52）：detekt 的 `formatting` ruleset 能覆盖 ktlint 的同一面，同时引两个只多一处版本与 baseline 口径；Kotlin 侧走 **baseline + 新增即红**（存量豁免、新违规当场红，实测证伪过），JS 侧走**规则集首日即绿**（等价语义，不引 baseline 机制）。**全仓格式化不在本批范围内**（不做存量重排）—— 要格式化另起一批，走 detekt `formatting` 或 ktlint | 2026-10-06 |
 ### 附：§12.2 被反转口径原文照抄（2026-09-30 步骤 6 摘录前的原文）
 
