@@ -6,28 +6,15 @@
 
 **脊梁：vendored 真 npm CLI（npm 12.x 系，要求 Node≥24.15，由 24.21.0 满足）在专用安装会话进程内「进程内执行」。**
 
-> ~~**接线现状（2026-10-01）**：素材来源已拍板为 **Node 源码树自带的 `deps/npm`**~~
-> ~~（随 libnode 同批出库：`node-runtime-build` 的 `OUT/npm` → gradle `prepareNpmCliAssets`
-> 随包 `assets/npm/` → 启动期 `AssetTreeCliSource` 幂等落位 `files/npm/` → 注入
-> `HostNodeExecutor`），口径见 [`design-decisions.md`](../design-decisions.md#已推翻--已改口径)。~~
-> ~~**代价必须写明**：Node 24.21.0 携带的是 **npm 11.19.0**，低于本行写的「npm 12.x 系」
-> —— 落差、补偿与升级路径见 §10.12 风险表该行与 [`backlog.md`](../backlog.md)（升级是独立一件事）。
-> 且 2026-10-01 实测 `nodejs.org/dist/index.json`：**868 条官方发布里没有任何一条携带 npm 12.x**
-> （最新 v26.10.0 / 2026-09-21 带的是 npm 11.19.1）—— 所以「等 Node 线携带 12.x」这条升级路径
-> **原理上不成立**，要 12.x 只能另找素材来源。~~
-> **作废（2026-10-02 批 9 换源）**：素材来源已换 **registry 发布态 tarball `npm@12.2.0`** ——
-> 「从 Node 源码树取 `deps/npm`」与「Node 24.21.0 携带 11.19.0」两句**都不再是现状**（原文保留作历史）。
-> **接线链不变**（`node-runtime-build` 的 `OUT/npm` → gradle `prepareNpmCliAssets` 随包
-> `assets/npm/` → 启动期 `AssetTreeCliSource` 幂等落位 `files/npm/` → 注入 `HostNodeExecutor`），
-> 换的只是**素材怎么来的**。详见下一段。
->
-> **已兑现（2026-10-02，backlog A6 落地）**：另找的素材来源 = **registry 发布态
-> tarball `npm@12.2.0`**（sha1 `9b58e3ad…` 钉 `VERSIONS.env`，`fetch-and-build.sh` §9
-> 下载 + 双闸校验后同管线收敛出库，与 libnode 同一 artifact）—— 上面的「代价」段
-> 随之成为历史（原文保留）。「钉死 + 全链回归」纪律不降级：改 `NPM_CLI_VERSION` /
-> `NPM_CLI_SHA1` 即命中 node-slice paths 触发面。同批 `test/`、`tap-snapshots/`
-> 因发布态本来就没有而天然消失（backlog E4，素材 1846 → 1674 文件、表观 11 → 9MiB、占盘 18M → 16M），
-> 裁决见 [`design-decisions.md`](../design-decisions.md) 第 26 项。
+> **素材来源（2026-10-02 起）**：**registry 发布态 tarball `npm@12.2.0`**（sha1 `9b58e3ad…`
+> 钉 `VERSIONS.env`，`fetch-and-build.sh` §9 下载 + 双闸校验后同库收敛出库，与 libnode 同一
+> artifact）。此前的「从 Node 源码树取 `deps/npm`」口径已作废（那一路只能拿到 11.19.0，低于
+> 本行脊梁；2026-10-01 实测 `nodejs.org/dist/index.json` 868 条官方发布无一条携带 12.x，
+> 「等 Node 线携带」原理上不成立）—— 沿革见 [`design-decisions.md`](../design-decisions.md)
+> 第 26 项。**接线链不变**：`OUT/npm` → gradle `prepareNpmCliAssets` 随包 `assets/npm/` →
+> 启动期 `AssetTreeCliSource` 幂等落位 `files/npm/` → 注入 `HostNodeExecutor`。
+> **钉死 + 全链回归纪律不降级**：改 `NPM_CLI_VERSION` / `NPM_CLI_SHA1` 即命中 node-slice
+> paths 触发面。发布态天然无 `test/`、`tap-snapshots/`（素材 1846 → 1674 文件）。
 
 - **零 spawn 是实证事实**：`npm install` 的实质 = `@npmcli/arborist reify()` + pacote 下载/解包/链接；本机 strace 实测 `npm install --ignore-scripts` 全程 **0 次 execve**。纯 JS 生态（axios/dayjs/lodash/cheerio/ws/express ≈99% 用例）根本不需要子进程。
 - **用真 CLI 而非重造轮子**：lockfile v3、audit、~~`approve-scripts`~~ **`install-scripts`（12.2.0 实名，`npm install-scripts approve <pkg>` 放行）**、`replace-registry-host`、`--prefer-offline` 免费获得且可审计。npm 12 默认「拒绝~~全部~~ **依赖** lifecycle + allow-git=none + allow-remote=none」，把 child_process 缺失从 workaround 变成**官方默认语义**。~~（**现状是 npm 11.19.0**：这层「官方默认」当前不存在，护栏由硬编码 `--ignore-scripts` 单独承担 —— 见 §10.12 风险表。）~~（**2026-10-02 A6 落地后，素材 npm 12.2.0 逐字实测**：**依赖** lifecycle 默认拒 —— `allow-scripts` 白名单缺省为空，拦时带 `npm warn install-scripts` 播报（列出被拦包与脚本名，不静默）+ `install-scripts approve` 放行通道；`allow-git=none`、`allow-remote=none` 实测吻合；**项目自身** lifecycle 仍执行（历代如此）→ 硬编码 `--ignore-scripts` 是主控、继续担另一半，不撤。）

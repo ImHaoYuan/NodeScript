@@ -11,124 +11,104 @@
 
 ## 切片
 
-| 日期 | 条目 | 主题 | 文件 |
-|---|---|---|---|
-| 2026-10-06 | 4 | 批 49–52：设置页两组纯文字 +「权限」改名「权限列表」；A7 取消语义与安装收尾；B9 随包 npm 素材端到端对账；B6 覆盖率报告 + B8 静态分析（全走约定插件） | [`2026-10-06.md`](2026-10-06.md) |
-| 2026-10-05 | 10 | 批 39–48：任务栏/任务中心按 TG 重做（联系人页版式 → 搜索框几何三次纠偏 → 改名 → 回执改浮层）；管理面板与设置页重写；设置页「权限」进子页 + 补第九项 `USAGE_ACCESS` | [`2026-10-05.md`](2026-10-05.md) |
-| 2026-10-04 | 6 | 批 34–38：项目页目录下钻与选择模式；拆掉下拉刷新；底栏按 TG 重做（含一次勘误）；菜单圆角、开关动画与描边 | [`2026-10-04.md`](2026-10-04.md) |
-| 2026-10-02 | 19 | 批 9–19 + 文档面批：npm 素材换 registry `12.2.0`；`:ui` Telegram 质感重构与三轮返工；保活服务进程级真错；本机出真形态 APK；C6 分片 + C9 总索引；A2b/E1/E2/E5 拍板落地 | [`2026-10-02.md`](2026-10-02.md) |
-| 2026-10-01 | 17 | 外审整改收尾、批 1–7、两次外审建议入池 | [`2026-10-01.md`](2026-10-01.md) |
-| 2026-09-30 | 15 | 外审整改步骤 1–8、图像提速三案、A 组真机实测 | [`2026-09-30.md`](2026-09-30.md) |
-| 2026-09-29 | 1 | 真机垂直切片红测（非 root） | [`2026-09-29.md`](2026-09-29.md) |
-| 2026-09-25 及更早 | — | 自 §19 结语整段外迁 | [`../archive/status-2026-09-25.md`](../archive/status-2026-09-25.md) |
+**按日期的汇总表不在这里**（原有一份与 [`design-status.md`](../design-status.md) 的流水目录
+逐行同构，2026-10-06 去重后只留那一份，且两份的条目计数已经漂过一次）。本文件只做**逐条索引**。
 
 ## 逐条索引
 
+**一条一行、只留摘要与指针**：完整叙事在切片文件里，这里不复述。
+（本表与切片文件的 `###` 标题一一对应，条数写在每个日期的小标题里。）
+
 ### [2026-10-06](2026-10-06.md)（5 条，最新在最上）
 
-- 2026-10-06 —— 批 53：第三轮外审整改 —— 24 条逐条对着当前 HEAD 复核，**约一半证伪**（D1 SDK 35/36 矛盾不存在、D2 表格 5 单元格不存在、L2 的 `engine-native.yml` 不存在、L3/L12 前提已过期、L9 半条被流式 replay 化解）；改三条：**D3 文档链接门零链接即红**（空 git 仓里原本 exit 0 假绿）、**L7 盘符检疫**（`isUnsafePath` 的 KDoc 承诺 > 实现，补 `DRIVE_LETTER` + 2 例测试）、**D4 状态页两表超长行**（10-04/10-05/10-02 三行 2,137/2,450 字符违反本页自订的 >200 字下沉规则 → 改一行摘要，长行移入 10-06 切片；`design-status.md` 最长行 2,450 → 297）；**L1 许可已按裁定落地**（新增 `NOTICE` 源码面署名 + 对外许可收窄为 `GPL-2.0-only`，六处声明同批；上游 commit 待钉，登记 A9）
-
-- 2026-10-06 —— 批 52：B6 覆盖率报告（jacoco 约定插件，不设阈值）+ B8 静态分析（detekt baseline + facade ESLint + `.editorconfig`）；A7 同类吞异常由 detekt `SwallowedException`/`TooGenericExceptionCaught` 机械守住（分支 `chore/b6-b8-quality-gates`）
-
-
-- 2026-10-06 —— 批 51：B9 随包 npm 素材端到端对账；清单生成、APK 检疫、全树幂等与落盘修复（分支 `feat/b9-npm-asset-manifest`）
-
-- 2026-10-06 —— 批 50：A7 取消语义与安装收尾 —— 运行探针、调度停止、开机恢复、权限读取、应用启动、悬浮窗、桥帧、UI 异步读写不吞协程取消；安装重操作/T1 收尾及等待锁取消不造无起点事务（分支 `fix/a7-cancellation-passthrough`）
-
-- 2026-10-06 —— 批 49：设置页两组纯文字 + 「权限」改名「权限列表」 —— 顶页 = 头部标识区 + 卡一（权限列表 / 语言切换 / 帮助文档） + 卡二（反馈 / 关于 / 检查更新），行全部无图标无副标题（`SettingsCellRow` 的 `colors`/`glyph` 改可空、批 48 副标题档整参数删除）；未开放入口点击 toast「尚未开放」不画空页；子页顶栏同改「权限列表」，读态只在子页空态如实说；卡间 `SectionGap` 12dp（TG `ShadowSectionCell` 缺省高，原 4dp `CardGap` 替换）（分支 `rough-robin`）
+- 批 53：第三轮外审整改（先证伪，再改三条）
+- 批 52：B6 覆盖率报告 + B8 静态分析（全走约定插件）
+- 批 51：B9 随包 npm 素材端到端对账
+- 批 50：A7 取消语义与安装收尾
+- 批 49：设置页两组纯文字 + 「权限」改名「权限列表」
 
 ### [2026-10-05](2026-10-05.md)（10 条，最新在最上）
 
-- 2026-10-05 —— 批 48：设置页「权限」入口进子页 + 补列使用情况访问权限 —— 顶层 = 头部标识区 + 一条「权限」入口（副标题挂读态 `Status.of`；`SettingsCellRow` 新增副标题档 60dp / 13sp，TG twoLines 档）；子页 = 顶栏「‹ + 权限」、九权限同卡无分隔线、行尾三态值、可授权整行可点；读态从头部挪到入口副标题位；`rememberSaveable` + `BackHandler` 系统返回先关子页；新能力 `USAGE_ACCESS`（`Capability` 第九项，manifest 早已声明的 `PACKAGE_USAGE_STATS` —— AskUserQuestion 答「还要补未列出的权限」）：`CapabilityProbes.usageAccessGranted()` 走 `AppOpsManager.checkOpNoThrow(OPSTR_GET_USAGE_STATS)`、三态只有 GRANTED/DENIED（currentPackage 无降级路径，出厂 DENIED 集合 3→4）、`GrantPage.USAGE_ACCESS` → `ACTION_USAGE_ACCESS_SETTINGS`（无定位 extra）、`guideText` 第九条；新字形 `CHART` + 粉色对；`currentPackage` 宿主接线不在本批（如实不假装已通）（分支 `rough-robin`）
-- 2026-10-05 —— 批 47：设置页按 TG 重写 + 管理分组去横线 —— 顶栏只留右上 `⋮`（`Chrome.kt` 的 `title` 放宽可空；菜单挂主题切换，TG 同位挂退出登录）；头部标识区 188dp 随列表滚动（软件图标 90dp 正圆 + `NodeScript` 22sp 粗体，读态占副标题位、读到不说话）；权限合一张卡、无分隔线、不再渲染 `guide`；安装体积渲染整段撤下（决策 20 的 UI 披露面进已推翻表，字段/换算/测试保留）；刷新钮与 `onRefresh` 参数删除；管理面板三处 `Separator` 删除，两屏共用 `SettingsCellRow` 抽出（分支 `rough-robin`）
-- 2026-10-05 —— 批 46：管理面板重写 + 控制台改为独立入口 —— 四项管理入口依序同卡，控制台单独成卡；共用 TG 设置卡片与图标块，四项待实现功能用 toast 提示；控制台子页支持顶栏/系统返回，切页保存层级、进入现取日志（分支 `rough-robin`）
-- 2026-10-05 —— 批 45：任务中心顶栏去副标题 + 两组缺省收起 —— `ActionBar` 不再传 `subtitle`/`subtitleTone`，`Status.count` 计算与 `Status` 导入一并删除（「共 N 条任务（含已停用）」整条摘掉；读账仍由卡内 `InCardHint` 如实说，条数两张卡自己数）；`runsExpanded`/`tasksExpanded` 的初值 `true`→`false`（进屏两张干净的卡）（分支 `rough-robin`）
-- 2026-10-05 —— 批 44：任务中心改名 + 两处间距对齐 TG + 空组可收放 + 回执改浮层 —— 「任务栏」→「任务中心」（`ActionBar` 标题 + KDoc；页签「任务」不动）；列表 `contentPadding.top` 52→60dp（搜索框↔首卡 14dp）；两卡灰缝 8→12dp（TG 多 section 页组间 `ShadowSectionCell` 的缺省高，`setSections` 的 12 是左右边距）；`GroupHeader.hasContent` 整个删掉（恒有三角、恒可点，批 41 的「空组不给三角」作废）；三屏回执（`CopyNotice` + 6/2/3 条 `FeedbackLine`）改走外壳浮层 —— 新组件 `ToastAction`/`LocalToast`/`ToastHost`/`ToastNotice`（TG `Bulletin` 版式：最小高 48dp/内边距 16·8/圆角 16dp/14sp/1.6s），判读在纯层 `state/OpToast.kt`（失败>回执>挂起，新增 `OpToastTest` 5 例），主题加 `toastBackground`/`toastText`（深色不照抄 TG night 的近屏底色）（分支 `rough-robin`）
-- 2026-10-05 —— 批 43：搜索框几何再纠偏 + 首行间距 + 首页搜索框对齐 —— 批 42 漏了药丸背景那层 `InsetDrawable(…, 3,3,3,3)`，补上后真实药丸 = 屏宽 −24dp、高 40dp、距屏边 12dp（槽位 padding 9→12dp、药丸 46→40dp）；列表 `contentPadding.top` 54→52dp（药丸底 40 + 12dp 净留白）；圆角 20dp 落在 40dp 高 = 两端全圆；首页 `ProjectScreen` 搜索框对齐 TG `DialogsActivity` 档（`GlyphKind.SEARCH`→`SEARCH_FIELD`、槽位 12/6、高 40dp、灰框无投影）（分支 `rough-robin`）
-- 2026-10-05 —— 批 42：搜索框尺寸修正 + 搜索框下空隙 + 两组拆两卡 —— `SearchField` 药丸补上 `setSectionBackground()` 的 3dp 自缩（~~屏宽 −18dp~~，此前宽了 6dp —— ~~作废：批 43 补第二层内缩后为 屏宽 −24dp/高 40dp~~）；列表 `contentPadding.top` 44→~~54dp~~（药丸下 8dp 空隙 —— ~~作废：批 43 改 52dp~~）；批 40「同卡」口径作废，运行中/定时各自一张白卡、卡间 8dp 灰缝（TG 多 section 本来就是各卡各缝）（分支 `rough-robin`）
-- 2026-10-05 —— 批 41：任务栏按用户口径收窄 —— 删右上「刷新」（`onRefresh` 参数一并摘除，`TabReloadEffect`/`performTaskOp` 现取照旧）；副标题「读到了，没有」换空串；顶栏传 `ActionBar.background = surfaceMuted` 跟页面同灰；恢复账/未结算两块全删；分组头换 CollapseTextCell 白底 46dp + 右端 CHEVRON 三角（340ms EASE_OUT_QUINT，收起尖朝下/展开尖朝上），空组不给三角、`pressable(enabled=false)` 点不开；「无在途执行」「读到了没有已登记」两行占位提示摘除；搜索框挪进列表 Box `align(TopCenter)` 最后画（TG 叠层同款），`contentPadding.top = 44dp`，Glyphs 新增 CHEVRON/SEARCH_FIELD 两字形（分支 `rough-robin`）
-- 2026-10-05 —— 批 40：任务栏重做（TG 联系人页复刻）—— TaskCenterScreen 全量重写：标题「任务栏」+ 排序切换钮（两态字形）/「搜索任务」白药丸/灰底上一张白卡（运行中 + 定时任务两组，GraySection 头可展开收起）/UserCell call 样式行（行尾播放三角，挂起中转圈）/点行弹操作面板/登记收进 FAB；状态层加 TaskSort/sortedTasks/matches/opTargetTaskId（分支 `rough-robin`）
-- 2026-10-05 —— 批 39：拆掉顶栏底部的全宽分割线 —— `ActionBar` 末尾的 `Separator(indentDp = 0)` 是四屏顶栏底下那条全宽 1dp 线，TG 的 `ActionBar` 底下没有分割线（内容直接接栏底）；列表行间分隔线不动（分支 `electric-crocodile`）
+- 批 48：设置页「权限」入口进子页 + 补列使用情况访问权限
+- 批 47：设置页按 TG 重写 + 管理分组去横线
+- 批 46：管理面板重写 + 控制台改为独立入口
+- 批 45：任务中心顶栏去副标题 + 两组缺省收起
+- 批 44：任务中心改名 + 两处间距对齐 TG + 空组可收放 + 回执改浮层
+- 批 43：搜索框几何再纠偏（补第二层内缩）+ 首行间距 + 首页搜索框对齐
+- 批 42：搜索框尺寸修正 + 搜索框下空隙 + 两组拆两卡
+- 批 41：任务栏按用户口径收窄（九处界面裁定）
+- 批 40：任务栏重做（TG 联系人页复刻）
+- 批 39：拆掉顶栏底部的全宽分割线
 
-### [2026-10-04](2026-10-04.md)（5 条，最新在最上）
+### [2026-10-04](2026-10-04.md)（6 条，最新在最上）
 
-- 2026-10-04 —— 批 38：菜单开/关动画 + 间隙渐变 + 投影环描边 —— M3 `DropdownMenu` 的进出场硬编码（120/75ms scale+fade）改不了，自建 `MenuPopup` 壳：打开 = `150+16×可见项`ms 线性 + `backScaleY`/`backAlpha` + 子项 cascade（`AndroidUtilities.cascade(t,pos,count,4)`，disabled 终值 alpha 0.5）；关闭 = 150ms `translationY ∓5dp` + 淡出；间隙补上 `GapView.onDraw` 叠的 `greydivider` 上下渐变（峰值 14/255 —— 批 37 只画实色条所以「宽度不够」）；描边从 1dp 硬边改为 9-patch 实测的 5dp 渐变投影环（贴边 33/255，5 层阶梯）
-- 2026-10-04 —— 批 37：控件圆角/颜色按 TG 校准 —— 菜单圆角 11→12dp（`popup_fixed_alert4.9.png` 四档实测 11.88–11.93dp）；菜单项按压圆角的「12 还是 6」之争由读源码定案（实际走 `updateRadialSelectors()`，字段默认 `selectorRad=12`）；撤掉用负 padding 抵消 M3 `DropdownMenuVerticalPadding` 的自伤写法；`ThemeMode.next(isDark)` 修掉 SYSTEM 档的死 tap；补回 `Menus.kt` 的 `MaterialTheme` 与 `ProjectScreen.kt` 的两个 slide 动画 import（分支 `electric-crocodile`）
-- 2026-10-04 —— 批 36 勘误：底栏高亮块的底色被 blend 成了灰 —— `Theme.multAlpha(colorSelected, 0.09f * alpha)` **只改 alpha 通道**，色相恒为选中蓝；我写成了 `lerp(selected, unselected, f)`，f=0.5 时是蓝与近黑的中点（一坨灰）。同批把透明度那一路对齐成 TG 的**双 DECELERATE**（`0.09f * (1-(1-f)²)`），并把「两套 attheme 都没设 `glass_tab*` 三个键 + 各自回退落点」写进 `Theme.kt` 的 KDoc（分支 `electric-crocodile`）
-
-- 2026-10-04 —— 批 36：底栏整条按 TG 重做（`MainTabsLayout.onMeasure` 的三趟试排 + 文字宽自适应分格抽成 `state/TabBarMeasure.kt`；`glass_tab*` 三键与两条 blend；选中/未选中换字重 Medium↔ExtraBold；删掉自加的按压态与恒为 null 的 `TabItem.badge` 槽位）（分支 `electric-crocodile`）
-
-- 2026-10-04 —— 批 35：拆掉下拉刷新 —— 参考项目没有这个手势（`RefreshableBox` 去掉 action 参数、实现从 M3 `PullToRefreshBox` 换成裸 `Box`；`RefreshAction` 保留但不再对外暴露 `isRefreshing`；顺带把「标志先立后 launch」从派发器细节里解出来）（分支 `electric-crocodile`）
-
-- 2026-10-04 —— 批 34：项目页「一层一层走」—— 目录下钻 / 选择模式 / 底部操作面板（`childrenOf` 全路径前缀 + 搜索跨层 `poolFor` + 长按进多选 + `ActionBottomSheet` 首次接线；`ActionBar` 加 `backGlyph`）（分支 `electric-crocodile`）
+- 批 38：菜单开/关动画 + 间隙 + 描边按 TG 重做
+- 批 37：菜单圆角精确到12dp，修复主题切换死区及多处UI细节
+- 批 36 勘误：底栏高亮块的底色被 blend 成了灰（用户实测点名）
+- 批 36：底栏整条按 TG 重做（不等宽分格 / 三键各自 blend / 删掉自加的按压态）（分支 `electric…
+- 批 35：拆掉下拉刷新 —— 参考项目没有这个手势（分支 `electric-crocodile`）
+- 批 34：项目页「一层一层走」—— 目录下钻 / 选择模式 / 底部操作面板（分支 `electric-crocodil…
 
 ### [2026-10-02](2026-10-02.md)（19 条，最新在最上）
 
-- 2026-10-02 —— 批 19：冷启两行红字不会自己变绿（首屏加一条**有界**重问 `HomeRetryEffect`；`summaryWired == false` 立即停；真机 5s 红 → 11s 自己绿）（分支 `rich-owl`）
-
-- 2026-10-02 —— 批 18：`:ui` 三处返工（边到边 inset / 底栏改回 TG 底栏语法（图标+文字、无指示线）/ 切页每帧重组的收口）（分支 `rich-owl`）
-- 2026-10-02 —— 批 17：保活服务的进程级真错（装配层投的 `ACTION_START` 不带契约 → 服务拒收 → 5 秒窗口无人认领 → 系统连进程一起杀；真机复验 `isForeground=true`）（分支 `rich-owl`）
-- 2026-10-02 —— 批 16：本机出「真形态」APK（引擎三件首次随包）+ 随包资产被 aapt2 缺省忽略表静默剪裁的真错 + 内置示例脚本与门禁（分支 `rich-owl`）
-- 2026-10-02 —— 批 15：TG 手势与动效补齐（页签切换 / 删除粒子 / 下拉刷新 / 长按菜单）（分支 `rich-owl`）
-- 2026-10-02 —— 批 14：`:ui` 命名去参考项目前缀 + 补齐三处动效（分支 `rich-owl`）
-- 2026-10-02 —— 批 13：许可改 GPL-2.0-or-later + `:ui` 重构为 Telegram 质感（深浅双主题 / 状态层三态收敛）（分支 `rich-owl`）
-- 2026-10-02 —— 批 12：D5 贡献门槛拆分（快速开始 + AI 署名迁 CLAUDE.md）· B7 `INTERNET` 真机 A/B 冒烟 · D14 `ModuleGraphTest`「看不见」证伪（分支 `hellish-shrimp`）
-
-- 2026-10-02 —— 结构面批：D9 `HostNpm` 两份并成一份（testFixtures 注源）· D10 `bridge/README.md` · D12 `.github/CODEOWNERS` + 指名维护者（分支 `hellish-shrimp`）
-
-- 2026-10-02 —— 文档面改进批：C10 契约侧 npm 版本过期叙述订正 · D2 状态页加「怎么读」 · D7-② `autojspro-docs.txt` 入档 `docs/reference/` · `CLAUDE.md` 可见性口径改 public
-
-- 2026-10-02 —— 第二轮外审处置：证伪 2 条 / 收窄 1 条 / 立刻改 1 条（README 如实警告）/ 登记 backlog 九条（A7、B7、B8、C10、D9–D13）/ 有意不采信 1 条 —— 口径见 `design-decisions.md` 第 28 项
-
-- 2026-10-02 —— 批 10：C7 脚本 API 参考（typedoc 生成物入库 + 零 diff 门）+ B4 依赖供应链面（分支 `hellish-shrimp`）
-
-- 2026-10-02 —— 批 9：A6+E4 落地 —— vendored npm 素材换 registry `npm@12.2.0`（脊梁 12.x 兑现，测试件随换源消失）（分支 `hellish-shrimp`）
-
-- 2026-10-02 —— E5 拍板：48×48 形态判据放宽 <100ms（64.43ms 接受转绿），E2 全收口（分支 `hellish-shrimp`）
-- 2026-10-02 —— E2 落地：`matchTemplate` 拆 std/相位双门 + 负结果精确兜底（backlog E2 裁决「修」；分支 `hellish-shrimp`）
-- 2026-10-02 —— C9 落地：`docs/README.md` 总索引（「文档边界」表搬家，不是并列）（分支 `hellish-shrimp`）
-- 2026-10-02 —— C6 落地：`design-status.md` 拆「当前状态页 + 按日期流水切片 + 实现注记」（分支 `hellish-shrimp`）
-- 2026-10-02 —— A2b 拍板落地：shell 捕获输出超限改「静默截断 + Warning + 截断标志」（分支 `hellish-shrimp`）
-- 2026-10-02 —— E1 拍板落地：接受 APK 超支 + 能力中心明示实测安装体积（分支 `hellish-shrimp`）
+- 批 19：冷启那两行红字不会自己变绿 —— 首屏加一条**有界**的重问（分支 `rich-owl`）
+- 批 18：`:ui` 三处返工 —— 文字顶到状态栏、底栏抄错了 TG 的哪一条栏、切页每帧重组（分支 `rich-ow…
+- 批 17：保活服务的**进程级**真错 —— 装配层投的 Intent 不带契约，服务只能拒收，代价是系统连整个进程一起…
+- 批 16：本机出「真形态」APK（引擎三件随包）+ 随包资产被静默剪裁的真错（分支 `rich-owl`）
+- 批 15：TG 的手势与动效补齐（页面切换 / 删除粒子 / 下拉刷新 / 长按菜单）（分支 `rich-owl`）
+- 批 14：命名去 `Tg` 前缀 + 补齐 TG 的三处动效（分支 `rich-owl`）
+- 批 13：许可改 GPL-2.0-or-later + `:ui` 前端重构（Telegram 质感 · 深浅双主题）（…
+- 批 12（D5 + B7 + D14）：贡献门槛拆分 · INTERNET 权限真机 A/B 冒烟 · ModuleGr…
+- 结构面批（backlog D9 + D10 + D12）：`HostNpm` 两份并成一份 · `bridge/READ…
+- 文档面改进批（backlog C10 + D2 + D7-②）：契约侧过期叙述订正 · 状态页可扫性 · 未归位参考件入…
+- 第二轮外审处置：能证伪的先证伪（INTERNET 影响面收窄）· 立刻改 1 条（README 如实警告）· 登记 ba…
+- 批 10：C7 脚本 API 参考（typedoc 生成物入库 + 零 diff 门）+ B4 依赖供应链面（分支 `h…
+- 批 9：A6+E4 落地 —— vendored npm 素材换 registry `npm@12.2.0`（脊梁 12…
+- E5 拍板：48×48 形态判据放宽 <100ms（64.43ms 接受转绿），E2 全收口（分支 `hellish-s…
+- E2 落地：`matchTemplate` 拆 std/相位双门 + 负结果精确兜底（backlog E2 裁决「修」；…
+- C9 落地：`docs/README.md` 总索引（「文档边界」表搬家，不是并列）（分支 `hellish-shrim…
+- C6 落地：`design-status.md` 拆「当前状态页 + 按日期流水切片 + 实现注记」（分支 `helli…
+- A2b 拍板落地：shell 捕获输出超限改「静默截断 + Warning + 截断标志」（分支 `hellish-sh…
+- E1 拍板落地：接受 APK 超支 + 能力中心明示实测安装体积（分支 `hellish-shrimp`）
 
 ### [2026-10-01](2026-10-01.md)（17 条，最新在最上）
 
-- 2026-10-01 —— CI 红的两例 AppShellTest：裁决输入借了宿主 `/proc`（分支 `hellish-shrimp`）
-- 2026-10-01 —— 批 7（三项 S 级）：D8 许可声明 / D6 命名面 / D1 模块归属（分支 `hellish-shrimp`）
-- 2026-10-01 —— 批 6：**D3/D5 platform 子包对齐 + D7 大文件拆分**（分支 `hellish-shrimp`）
-- 2026-10-01 —— 批 5：**B1 CI 覆盖收口**（Android Lint / APK 构建进 PR 门；真 npm E2E 进 nightly + 验尸门；分支 `hellish-shrimp`）
-- 2026-10-01 —— 批 4 后半：**A1 npm 生产装配接线收口**（素材随包 → 启动期落位 → 注入执行体；分支 `hellish-shrimp`）
-- 2026-10-01 —— 批 4 前半：**A1c 接缝形状**（`secretKey(): SecretKey`；分支 `hellish-shrimp`）
-- 2026-10-01 —— backlog **C2** 收口（机器路径出跟踪文件；分支 `hellish-shrimp`）
-- 2026-10-01 —— C4 收口（维护者已开通 GitHub 私密上报；分支 `hellish-shrimp`）
-- 2026-10-01 —— 待办池**批 3**（C1 / C5；C4 复核；分支 `hellish-shrimp`）
-- 2026-10-01 —— 待办池**批 2**（B2 / C3 / D4 / D2；分支 `hellish-shrimp`）
-- 2026-10-01 —— 待办池**批 1**（A2 / A3 / A1b / A4；分支 `hellish-shrimp`）
-- 2026-10-01 —— 第二次外审：建议落进新建的 **[`docs/backlog.md`](../backlog.md)**（待办池）
-- 2026-10-01 —— 外审整改·文档侧收尾 + 四处稳健性修复（5+1+4；`0e42ed3`…`08e89a6`，分支 `hellish-shrimp`）
-- 2026-10-01 —— npm P1 T1 放行门禁的**存盘移植**（`node-slice` 两提交 → `feat/npm-t1-lifecycle`）
-- 2026-10-01 —— §8.5/§8.6 收口：无人 await 的 run 自带期限（`feat/fastpath-16x`）
-- 2026-10-01 —— 三大形态修复：matchTemplate 大模板 / findFeature 恒假 / findColor 全帧（commits `a78515c`/`34fd80e`/`f6cb926`，`feat/fastpath-16x` 叠在 `8d20500` 之上）
-- 2026-10-01 —— FastPath 12a + 场景端粗筛缓存（commits `a22fbfd`/`8d20500`，PR #13）
+- CI 红的两例 AppShellTest：裁决输入借了宿主 `/proc`（分支 `hellish-shrimp`）
+- 批 7（三项 S 级）：D8 许可声明 / D6 命名面 / D1 模块归属（分支 `hellish-shrimp`）
+- 批 6：**D3/D5 platform 子包对齐 + D7 大文件拆分**（分支 `hellish-shrimp`）
+- 批 5：**B1 CI 覆盖收口**（Android Lint / APK 构建进 PR 门；真 npm E2E 进 n…
+- 批 4 后半：**A1 npm 生产装配接线收口**（素材随包 → 启动期落位 → 注入执行体；分支 `hellish-…
+- 批 4 前半：**A1c 接缝形状**（`secretKey(): SecretKey`；分支 `hellish-shr…
+- backlog **C2** 收口（机器路径出跟踪文件；分支 `hellish-shrimp`）
+- C4 收口（维护者已开通 GitHub 私密上报；分支 `hellish-shrimp`）
+- 待办池**批 3**（C1 / C5；C4 复核；分支 `hellish-shrimp`）
+- 待办池**批 2**（B2 / C3 / D4 / D2；分支 `hellish-shrimp`）
+- 待办池**批 1**（A2 / A3 / A1b / A4；分支 `hellish-shrimp`）
+- 第二次外审：建议落进新建的 **[`docs/backlog.md`](../backlog.md)**（待办池）
+- 外审整改·文档侧收尾 + 四处稳健性修复（5+1+4；`0e42ed3`…`08e89a6`，分支 `hellish-s…
+- npm P1 T1 放行门禁的**存盘移植**（`node-slice` 两提交 → `feat/npm-t1-life…
+- §8.5/§8.6 收口：无人 await 的 run 自带期限（`feat/fastpath-16x`）
+- 三大形态修复：matchTemplate 大模板 / findFeature 恒假 / findColor 全帧（com…
+- FastPath 12a + 场景端粗筛缓存（commits `a22fbfd`/`8d20500`，PR #13）
 
 ### [2026-09-30](2026-09-30.md)（15 条，最新在最上）
 
-- 2026-09-30 —— 相位探针门 + 自适应 K（评审二轮原型移植，commit `0ec6ef4`，PR #12）
-- 2026-09-30 —— 评审 patch 验证轮 → 采纳（commit `852fb45`；粗筛下限 48px + kMinCoarseSide 12 + needle 缓存）
-- 2026-09-30 —— `images` 匹配提速：金字塔粗筛 + `region` + 计算出锁（评审拍板案，两提交）
-- 2026-09-30 —— A2–A4 优化后真机复测（同日第二次；run1 金字塔 vs run2 强制精确 A/B）
-- 2026-09-30 —— A2–A4 真机性能实测（恢复自挂起；云手机 Android 13/API 33/arm64/4KB，OpenCV 4.14）
-- 2026-09-30 —— 外部审查整改·步骤 8：framework-design.md 拆 12 卷 + 机器读者/文档漂移修缮
-- 2026-09-30 —— 外部审查整改·步骤 7：单一 schema 生成契约 + dist 出库
-- 2026-09-30 —— 外部审查整改·步骤 6：platform 按能力重组 + Wm/Power 移出 `:app`（零新模块，模块表 15 不动）
-- 2026-09-30 —— 外部审查整改·步骤 5：拆 `:app-service:npm`（模块 14 → 15）
-- 2026-09-30 —— 外部审查整改·步骤 3：JSON 只留一个（DomainJson 合一）
-- 2026-09-30 —— 外部审查整改·步骤 1：机器路径 18 处清零 + 原生暂存入约定 + `:engine:sandbox` 空壳摘除
-- 2026-09-30 —— 外部审查整改·步骤 4：删 \*Lite + RpcNamespaceHandler 基类承接解码与错误映射
-- 2026-09-30 —— 外部审查整改·步骤 2/4 先行：build-logic 约定插件 + JVM 插件纠偏 + 共享架构门
-- 2026-09-30 —— A 组第一批实测（云手机，Android 13 / API 33 / arm64 / PAGE_SIZE=4096）
-- 2026-09-30 —— 等设备的那笔账：真机红测可执行清单（未执行，只列账）
+- 相位探针门 + 自适应 K（评审二轮原型移植，commit `0ec6ef4`，PR #12）
+- 评审 patch 验证轮 → 采纳（commit `852fb45`；粗筛下限 48px + kMinCoarseSid…
+- `images` 匹配提速：金字塔粗筛 + `region` + 计算出锁（评审拍板案，两提交）
+- A2–A4 优化后真机复测（同日第二次；run1 金字塔 vs run2 强制精确 A/B）
+- A2–A4 真机性能实测（恢复自挂起；云手机 Android 13/API 33/arm64/4KB，OpenCV 4.…
+- 外部审查整改·步骤 8：framework-design.md 拆 12 卷 + 机器读者/文档漂移修缮
+- 外部审查整改·步骤 7：单一 schema 生成契约 + dist 出库
+- 外部审查整改·步骤 6：platform 按能力重组 + Wm/Power 移出 `:app`（零新模块，模块表 15…
+- 外部审查整改·步骤 5：拆 `:app-service:npm`（模块 14 → 15）
+- 外部审查整改·步骤 3：JSON 只留一个（DomainJson 合一）
+- 外部审查整改·步骤 1：机器路径 18 处清零 + 原生暂存入约定 + `:engine:sandbox` 空壳摘除
+- 外部审查整改·步骤 4：删 \*Lite + RpcNamespaceHandler 基类承接解码与错误映射
+- 外部审查整改·步骤 2/4 先行：build-logic 约定插件 + JVM 插件纠偏 + 共享架构门
+- A 组第一批实测（云手机，Android 13 / API 33 / arm64 / PAGE_SIZE=4096）
+- 等设备的那笔账：真机红测可执行清单（未执行，只列账）
 
 ### [2026-09-29](2026-09-29.md)（1 条，最新在最上）
 
-- 2026-09-29 —— 真机垂直切片红测（非 root shell，Android 13 / API 33 / arm64-v8a / PAGE_SIZE=4096）
+- 真机垂直切片红测（非 root shell，Android 13 / API 33 / arm64-v8a / PAGE…
