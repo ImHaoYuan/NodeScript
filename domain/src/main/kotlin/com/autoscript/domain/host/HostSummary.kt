@@ -150,8 +150,11 @@ interface HostSummary {
      * 等于损坏用户文件，宁可如实拒绝。上限由实现方定，本契约只要求"拒绝时抛"。
      *
      * @param projectId 所属项目（`files/scripts/` 下第一级目录名）。
-     * @param relPath 项目内相对路径（[ScriptFileRow.relPath]，**不是**单段名字 ——
-     *   子文件夹里的文件靠它定位；实现方必须防越界）。
+     * @param relPath **`files/scripts/` 之下的相对路径**（= [ScriptFileRow.relPath]，首段就是
+     *   [projectId]；**不是**单段名字，也不是"项目根之下"——子文件夹里的文件靠它定位）。
+     *   实现方必须防越界，并**校验首段与 [projectId] 一致**：两者对不上就是调用方写错了，
+     *   当场抛比静默读到另一个文件强（2026-10-06 实测：把"项目内相对路径"按"项目根之下"
+     *   拼，编辑器报"不是文件：demo/main.js"——被拼成了 `files/scripts/demo/demo/main.js`）。
      */
     suspend fun readScriptFile(projectId: String, relPath: String): String
 
@@ -259,8 +262,10 @@ data class ScriptFilesSnapshot(
  * 一个脚本文件行（项目页文件列表的一行 = TG 会话列表的一行会话）。
  *
  * @property projectId 所属项目（`files/scripts/` 下第一级目录名）。
- * @property relPath 相对项目根的路径 —— 列表显示名（同名的 `main.js` 靠它区分）；
- *   目录以 `/` 结尾（与文件行区分，呈现层不用再另判）。
+ * @property relPath **`files/scripts/` 之下的**相对路径（首段 = [projectId]）—— 列表显示名
+ *   （同名的 `main.js` 靠它区分）；目录以 `/` 结尾（与文件行区分，呈现层不用再另判）。
+ *   **不是**"相对项目根"：`ScriptFilesRead` 从 `files/scripts/` 起算（`root.relativize`），
+ *   这条路径直接喂给 [HostSummary.readScriptFile]/[HostSummary.saveScriptFile]。
  * @property name 文件名（不含目录；目录 = 最后一段目录名）。
  * @property ext 小写扩展名（无扩展名 = ""；文件类型图标用它取色/取字。目录恒 ""）。
  * @property isDirectory 是文件夹还是文件（TG 文件页"目录排最前"的判据源）。

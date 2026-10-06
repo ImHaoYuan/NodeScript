@@ -71,7 +71,11 @@ object ScriptFileOps {
         val size = Files.size(target)
         require(size <= MAX_EDIT_BYTES) { "文件太大（$size 字节，上限 $MAX_EDIT_BYTES）：编辑器不打开" }
         val bytes = Files.readAllBytes(target)
-        require(bytes.none { it == 0.toByte() }) { "二进制文件不能当文本编辑：$relPath" }
+        require(bytes.none { it == 0.toByte() }) {
+            // 原文给 UI：这句会**逐字**显示在编辑器里，所以把"能开什么"也写进去 ——
+            // 用户手里的 .js/.txt 打不开时，这句话本身就是答复。
+            "这不是文本文件（含二进制字节）：$relPath —— 编辑器只开 UTF-8 文本（.js/.txt/.json/.md 等）"
+        }
         return String(bytes, StandardCharsets.UTF_8)
     }
 
@@ -111,16 +115,31 @@ object ScriptFileOps {
     }
 
     /**
-     * `files/scripts/<projectId>/<relPath>`：**读取侧也防越界**（不只写入侧）。
+     * `relPath` → 绝对路径：**`files/scripts/` 之下的相对路径**（首段 = 项目名）。
      *
-     * [ScriptPaths.scriptFile] 刻意不做逃逸校验（它服务的是调度侧的不透明透传），
-     * 而本入口的 relPath 来自呈现层 —— 走 [DeployPath.resolveIn] 做 `..`/绝对路径
-     * 与"规范化后仍在项目根之下"两道校验。
+     * 为什么不是"项目根之下的相对路径"：呈现层手里那条是 [com.autoscript.domain.host.ScriptFileRow.relPath]，
+     * 它由 `ScriptFilesRead` 从 `files/scripts/` 起算（`root.relativize(path)`），**首段就是**
+     * `projectId`。契约按"列表给什么就收什么"写，实现按"首段必须等于 [projectId]"校验 ——
+     * 两者说不到一块（比如传了项目内相对路径 `lib/main.js`）当场抛，而不是静默拼成
+     * `files/scripts/demo/lib/main.js` 去读另一个文件。**2026-10-06 实测踩过这个坑**：
+     * 编辑器报"不是文件：demo/main.js"，因为被拼成了 `files/scripts/demo/demo/main.js`。
+     *
+     * 三道校验：[DeployPath.resolveIn] 防 `..`/绝对路径/越界（[ScriptPaths.scriptFile] 刻意
+     * 不做逃逸校验 —— 它服务的是调度侧的不透明透传）、首段与项目名一致、项目目录存在。
      */
     private fun resolveInProject(filesDir: Path, projectId: String, relPath: String): Path {
-        val root = ScriptPaths.projectRoot(filesDir, projectId)
-        require(Files.isDirectory(root)) { "项目不存在: $projectId" }
-        return DeployPath.resolveIn(root, relPath)
+        // 目录行的 relPath 以 / 结尾（契约约定），读写只服务文件 —— 先削掉再校验，
+        // 好让"目录不是文件"这句原文浮出来，而不是报一句路径非法。
+        val rel = relPath.trimEnd('/')
+        val base = ScriptPaths.projectsRoot(filesDir).toAbsolutePath().normalize()
+        val target = DeployPath.resolveIn(base, rel)
+        val owner = base.relativize(target).firstOrNull()?.toString()
+        require(owner == projectId) {
+            "relPath 与项目不一致：$relPath 不在项目 $projectId 下" +
+                "（relPath 是 files/scripts/ 之下的相对路径，首段应为项目名）"
+        }
+        require(Files.isDirectory(ScriptPaths.projectRoot(filesDir, projectId))) { "项目不存在: $projectId" }
+        return target
     }
 
     /** 名字 → `files/scripts/<projectId>/<name>`：合法性裁决 + 落位唯一出口。 */
