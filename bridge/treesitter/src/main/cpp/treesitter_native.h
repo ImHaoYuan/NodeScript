@@ -3,36 +3,36 @@
 
 #include <cstdint>
 
-// 计算核 API（零 JNI 依赖，纯 C）
+// 零 JNI 依赖的计算核；每个文档独占会话，由调用方串行调用。
+struct TsHighlightSession;
+
+// 加载 JavaScript grammar；分配或语言初始化失败时返回 nullptr。
+TsHighlightSession* ts_create_session();
+
+// 释放 parser、语法树和源码快照；nullptr 合法。
+void ts_destroy_session(TsHighlightSession* session);
 
 /**
- * 初始化 parser（加载 JS grammar）。
- * 必须在第一次调用 ts_parse_and_highlight 之前调用。
+ * 增量解析 JavaScript，输出按源码顺序排列、互不重叠的 [start, end, kind] 三元组。
+ * start/end 是 UTF-8 字节偏移，end 不含；UTF-16 换算由桥面负责。
+ * kind 与 domain SyntaxKind.wireCode 对齐：0 KEYWORD、1 STRING、2 COMMENT、
+ * 3 NUMBER、4 FUNCTION_NAME、5 OPERATOR、6 TYPE。
+ *
+ * out_spans 至少容纳 max_spans * 3 个 int32_t；out_count 必填，入口先置 0，
+ * 返回时为实际写入条数（包括容量不足时的部分结果），始终不超过 max_spans。
+ * source_len/max_spans 不可为负；source_len 为 0 时 source_utf8 可空，
+ * max_spans 为 0 时 out_spans 可空。空源码与零容量组合合法。
+ *
+ * 返回 0 成功、-1 空会话、-2 解析器失败、-3 容量不足、-4 参数非法。
+ * 语法错误由 tree-sitter 恢复，不等于解析器失败；容量不足后可扩大缓冲重试。
  */
-void ts_init_parser();
-
-/**
- * 解析 JavaScript 源码并提取高亮区间。
- * 
- * @param source_utf8  UTF-8 编码的源码
- * @param source_len   源码字节数
- * @param out_spans    输出数组 [start, end, kind, start, end, kind, ...]
- * @param max_spans    out_spans 数组最多容纳几个 span（每个 span 占 3 个 int32）
- * @param out_count    实际提取的 span 数（写入 out_spans 的 span 数）
- * 
- * @return 0=OK, 负数=错误码（-1=未初始化, -2=解析失败, -3=buffer 太小）
- */
-int32_t ts_parse_and_highlight(
+int32_t ts_highlight(
+    TsHighlightSession* session,
     const char* source_utf8,
     int32_t source_len,
     int32_t* out_spans,
     int32_t max_spans,
     int32_t* out_count
 );
-
-/**
- * 释放 parser 资源。
- */
-void ts_cleanup_parser();
 
 #endif  // AUTOSCRIPT_TREESITTER_NATIVE_H
