@@ -9,8 +9,8 @@
 > 缺陷。支持范围、密钥管理、已知缺口都在 [`SECURITY.md`](SECURITY.md)，请先读那一份。
 
 **本项目处于开发期，不发行正式版**（§18 第 3 项）。「哪些能用、哪些还是接口期」以
-[`docs/design-status.md`](docs/design-status.md) 的**接口期表**为准 —— 例如 npm 生产装配尚未接线，
-真机安装会如实回 `ERR_NOT_IMPLEMENTED`；QuickJS 沙箱引擎已裁。别把设计文档里的**目标形态**读成现状。
+[`docs/design-status.md`](docs/design-status.md) 的**接口期表**为准 —— 例如 npm 生产装配**只接上了一道**（执行体已接，签名/快照与脚本门禁未接，
+缺素材的 APK 会如实回 `ERR_NOT_IMPLEMENTED`）；QuickJS 沙箱引擎已裁。别把设计文档里的**目标形态**读成现状。
 
 ## 仓库里有什么
 

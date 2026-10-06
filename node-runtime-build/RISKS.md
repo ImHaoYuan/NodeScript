@@ -1,6 +1,6 @@
 # node-runtime-build 风险清单
 
-> 对应设计 §777「Node-on-Android 升级依赖自持管线」与 §16/§778 门禁。**升级 = 改 `VERSIONS.env` → CI 一键全链重跑**，管线减至「换版本号→跑一次→回归」。
+> 对应设计 §16 风险表的「Node-on-Android 升级依赖自持管线」与「16KB 页 / ELF 对齐」两行门禁。**升级 = 改 `VERSIONS.env` → CI 一键全链重跑**，管线减至「换版本号→跑一次→回归」。
 
 ## 1. 上游停更，长期自持（高）
 nodejs-mobile 停更于 2021（真实验证：仓库最后推送 2021-10-27，默认分支 `mobile-master`，对应 Node 18.x 且 ELF 4KB 对齐）。本管线 fork 其 **configure 语法**（`--dest-cpu/--dest-os/--cross-compiling/--shared/--openssl-no-asm/--with-intl=none`（**现改 `small-icu`，见 §3**），实抓自其 `android-configure`），但工具链路径完全替换：上游用已废弃的 NDK pre-r19 `make-standalone-toolchain.sh`，我们直连 NDK r28 的 clang wrapper（`aarch64-linux-android${API}-clang`）。维护责任转为内部：每 Node LTS 升级必须回归。
@@ -37,7 +37,7 @@ nodejs-mobile 停更于 2021（真实验证：仓库最后推送 2021-10-27，�
 曾经的口径是"再议"，现已拍板执行，本节从"待议"改为"已改 + 待实测"。
 
 ## 4. ABI 锁步：NODE_MODULE_VERSION=137（高）
-`libnode.so.<137>` + V8 快照 + `process.versions.modules=137` 三者必须同源同构（设计 §583）。预编译 `.node` addon（napi-rs/NDK 交叉产物）必须 `NODE_MODULE_VERSION==137` 且 `--dest-os=android`，否则 dlopen 即崩。CI 侧静态断言（`config.gypi` 的 JSON 键 + 文件名）只是**前置护栏**；`process.platform==='android' / process.arch==='arm64'` 的运行时断言归属垂直切片（设计 §844 里程碑）。
+`libnode.so.<137>` + V8 快照 + `process.versions.modules=137` 三者必须同源同构（§7.8 启动序）。预编译 `.node` addon（napi-rs/NDK 交叉产物）必须 `NODE_MODULE_VERSION==137` 且 `--dest-os=android`，否则 dlopen 即崩。CI 侧静态断言（`config.gypi` 的 JSON 键 + 文件名）只是**前置护栏**；`process.platform==='android' / process.arch==='arm64'` 的运行时断言归属垂直切片（设计 §844 里程碑）。
 
 ## 5. 16KB 兼容的排查路径（中）
 链接链任一处（我们自己的 so / 预编译 so / assets 里的模型）非 16KB 对齐，在新设备 dlopen 直接崩。排查序：`adb shell getconf PAGE_SIZE` 确认设备（16384）→ 逐 so 跑 `llvm-objdump -p | grep LOAD` 看 align → APK 侧 `zipalign -v -c -P 16 4`（Packager 模块 P0 承接）。本模块只保证 **libnode.so 这条链**。
@@ -46,7 +46,7 @@ nodejs-mobile 停更于 2021（真实验证：仓库最后推送 2021-10-27，�
 对称/非对称加解密走 C 实现，较汇编有损耗；换取跨编译器可复现（上游同款选择）。后续可按需开 asm，前提是 NDK clang 汇编器验证通过。
 
 ## 7. minSdk/API 对齐（低）
-`ANDROID_API=26` 与根 Gradle catalog 冻结 minSdk 26 一致（设计文本 §72 写 24，以冻结基线为准）。升降 minSdk 必须同步改 `VERSIONS.env`（bionic 符号面变化会影响 Node 的 `uv`/`zlib` 编译期探测）。
+`ANDROID_API=26` 与根 Gradle catalog 冻结 minSdk 26 一致（§3 技术选型表 2026-10-06 前写的 minSdk 24 已订正为 26，以冻结基线为准）。升降 minSdk 必须同步改 `VERSIONS.env`（bionic 符号面变化会影响 Node 的 `uv`/`zlib` 编译期探测）。
 
 ## 8. Node 版本快照策略
 未启用 `--without-node-snapshot`：arm64 + 现代 V8 默认可用。若垂直切片出现快照/JIT 相关崩溃，先试 `--without-node-snapshot` 再定位（一次提交+全量回归，符合纪律）。
