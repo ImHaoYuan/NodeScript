@@ -182,17 +182,20 @@ jobs:
           NODE_VERSION="$(sed -n 's/^NODE_VERSION=//p' "$V")"
           [ -n "$NODE_VERSION" ] || { echo "VERSIONS.env 缺 NODE_VERSION"; exit 1; }
           DL="$WORK_DIR/dl"; mkdir -p "$DL"
-          TARBALL="node-v$NODE_VERSION-headers.tar.gz"
+          # **NODE_VERSION 自带前导 `v`**（`VERSIONS.env` 里是 `v24.21.0`，与
+          # fetch-and-build.sh 的 `node-$NODE_VERSION.tar.xz` 同约定）—— 别再补一个 `v`，
+          # 那会拼成 `vv24.21.0` 打到 404（2026-10-06 本 workflow 首跑就栽在这）。
+          TARBALL="node-$NODE_VERSION-headers.tar.gz"
           if [ -f "$DL/$TARBALL" ]; then
             echo "[skip] $TARBALL 已在（下载层缓存命中）"
           else
-            curl -fsS --retry 3 -o "$DL/$TARBALL" "https://nodejs.org/dist/v$NODE_VERSION/$TARBALL"
+            curl -fsS --retry 3 -o "$DL/$TARBALL" "https://nodejs.org/dist/$NODE_VERSION/$TARBALL"
           fi
-          curl -fsS --retry 3 -o "$DL/SHASUMS256.txt" "https://nodejs.org/dist/v$NODE_VERSION/SHASUMS256.txt"
+          curl -fsS --retry 3 -o "$DL/SHASUMS256.txt" "https://nodejs.org/dist/$NODE_VERSION/SHASUMS256.txt"
           ( cd "$DL" && grep " $TARBALL\$" SHASUMS256.txt | sha256sum -c - ) \
             || { echo "::error::headers tarball 与官方 SHASUMS256.txt 不符"; exit 1; }
           tar -xzf "$DL/$TARBALL" -C "$RUNNER_TEMP"
-          HDR="$RUNNER_TEMP/node-v$NODE_VERSION/include/node"
+          HDR="$RUNNER_TEMP/node-$NODE_VERSION/include/node"
           [ -f "$HDR/node_api.h" ] || { echo "::error::headers 包里没有 node_api.h: $HDR"; exit 1; }
           # build-native.sh 的契约是 $NODE_SRC/src/node_api.h；headers 包的布局是
           # include/node/ —— 用一层软链把两者接上（不复制、不改脚本、机器路径不入库）。
