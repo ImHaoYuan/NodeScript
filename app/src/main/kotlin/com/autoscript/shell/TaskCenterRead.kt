@@ -80,6 +80,8 @@ object TaskCenterRead {
                 state = record.state,
                 startedAtMillis = record.startedAtMillis,
                 finishedAtMillis = record.finishedAtMillis,
+                exitCode = record.exitCode,
+                crashSummary = record.crashSummary,
             )
         },
         recovery = recovery?.let { recoveryRow(it.records, it.failure) },

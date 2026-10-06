@@ -6,6 +6,7 @@ import com.autoscript.domain.engine.EngineRunReceipt
 import com.autoscript.domain.engine.EngineRunRequest
 import com.autoscript.domain.engine.EngineStatus
 import com.autoscript.domain.engine.KillCause
+import com.autoscript.domain.engine.RunSummary
 import com.autoscript.domain.engine.ScriptEngine
 import com.autoscript.domain.engine.StopResult
 import java.util.concurrent.atomic.AtomicLong
@@ -38,6 +39,9 @@ class FakeEngine(
      */
     var statusThrowable: Throwable? = null
 
+    /** [ScriptEngine.lastRunSummary] 的返回值（backlog B11）：默认 null = 无事实；测试驱动。 */
+    var summaryToReturn: RunSummary? = null
+
     override suspend fun execute(run: EngineRunRequest): EngineRunReceipt {
         if (failOnExecute) throw IllegalStateException("fake boot failure")
         executed += run
@@ -67,4 +71,6 @@ class FakeEngine(
         if (blowStatus) throw IllegalStateException("模拟宿主探针失败")
         return statusToReturn
     }
+
+    override suspend fun lastRunSummary(): RunSummary? = summaryToReturn
 }

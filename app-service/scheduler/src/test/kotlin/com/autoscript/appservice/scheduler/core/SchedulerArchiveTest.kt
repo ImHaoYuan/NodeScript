@@ -9,6 +9,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
 
 /**
@@ -182,9 +183,35 @@ class SchedulerArchiveTest {
             s.onTrigger("t-$outcome", scheduledAtMillis = now)
             return archive.recordsOfIntent(log.all().single().runId).single().state
         }
-        assertEquals(RunState.FAILED, stateOf(RunOutcome.Failed))
+        assertEquals(RunState.FAILED, stateOf(RunOutcome.Failed()))
         assertEquals(RunState.CRASHED, stateOf(RunOutcome.Crashed("看门狗强杀")))
         assertEquals(RunState.CANCELLED, stateOf(RunOutcome.Cancelled))
+    }
+
+    @Test
+    fun `B11 诊断字段随 outcome 折进档案：退出码与崩溃摘要`() = runBlocking {
+        suspend fun recordOf(outcome: RunOutcome): RunRecord {
+            val archive = InMemoryRunArchive()
+            val log = freshLog()
+            val s = scheduler(log, archive, LinkingDispatcher(engineLink, outcome))
+            s.schedule(ScheduledTask("t-diag", "任务", "p", "a.js", TimedSchedule.Once(0)))
+            s.onTrigger("t-diag", scheduledAtMillis = now)
+            return archive.recordsOfIntent(log.all().single().runId).single()
+        }
+
+        val crashed = recordOf(
+            RunOutcome.Crashed("引擎异常结算", exitCode = 3, crashSummary = "TypeError: x is not a function"),
+        )
+        assertEquals(3, crashed.exitCode, "退出码折进 RunRecord")
+        assertEquals("TypeError: x is not a function", crashed.crashSummary, "stderr 尾部折进 RunRecord")
+
+        val failed = recordOf(RunOutcome.Failed(exitCode = 1, crashSummary = "Error: 软停没排净"))
+        assertEquals(1, failed.exitCode)
+        assertEquals("Error: 软停没排净", failed.crashSummary)
+
+        val ok = recordOf(RunOutcome.Succeeded)
+        assertNull(ok.exitCode, "成功路径无诊断字段 → 如实 null")
+        assertNull(ok.crashSummary)
     }
 
     @Test

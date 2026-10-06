@@ -36,11 +36,11 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - name: 安装 Android SDK 组件（platform-35 + build-tools）
+      - name: 安装 Android SDK 组件（platform-36 + build-tools）
         run: |
           yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
           "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
-            "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+            "platform-tools" "platforms;android-36" "build-tools;36.0.0"
       # Node 24：既是 facade dist 的构建器（jvm-tests 同款），也是**被测的宿主**
       # —— HostNpm 从 `node -p process.execPath` 推 prefix 找 npm-cli.js，
       # setup-node 把 node 装进 /opt/hostedtoolcache/node/<ver>/x64/，旧写法

@@ -7,6 +7,7 @@ import com.autoscript.domain.engine.EngineRunReceipt
 import com.autoscript.domain.engine.EngineRunRequest
 import com.autoscript.domain.engine.EngineStatus
 import com.autoscript.domain.engine.KillCause
+import com.autoscript.domain.engine.RunSummary
 import com.autoscript.domain.engine.ScriptEngine
 import com.autoscript.domain.engine.StopResult
 import java.util.concurrent.atomic.AtomicLong
@@ -28,6 +29,12 @@ class FakeEngineForDispatcher(
     var killCalls = 0
     var statusToReturn: EngineStatus = EngineStatus.IDLE
 
+    /**
+     * [autoExitAfterMillis] 到期后宿主自报的状态：缺省 STOPPED（脚本跑完），
+     * 置 CRASHED 即模拟"脚本崩了"（B11 摘要那条路要走到 awaitCompletion 的 CRASHED 分支）。
+     */
+    var statusAfterAutoExit: EngineStatus = EngineStatus.STOPPED
+
     override suspend fun execute(run: EngineRunRequest): EngineRunReceipt {
         if (failOnExecute) throw IllegalStateException("fake boot failure")
         executed += run
@@ -42,7 +49,7 @@ class FakeEngineForDispatcher(
                 } catch (_: InterruptedException) {
                     return@Thread
                 }
-                if (statusToReturn == EngineStatus.RUNNING) statusToReturn = EngineStatus.STOPPED
+                if (statusToReturn == EngineStatus.RUNNING) statusToReturn = statusAfterAutoExit
             }, "fake-engine-autoexit-$runId").also { it.isDaemon = true }.start()
         }
         receiptRunIds += runId
@@ -64,6 +71,11 @@ class FakeEngineForDispatcher(
     }
 
     override suspend fun status(): EngineStatus = statusToReturn
+
+    override suspend fun lastRunSummary(): RunSummary? = summaryToReturn
+
+    /** [ScriptEngine.lastRunSummary] 的返回值（backlog B11）：默认 null = 无事实；测试驱动。 */
+    var summaryToReturn: RunSummary? = null
 }
 
 /**

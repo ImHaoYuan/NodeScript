@@ -18,7 +18,9 @@ import java.nio.file.StandardOpenOption
  * 与 [JournalFileStore] 同构的崩溃持久纪律（docs §8.5）：
  * - 持久形态：`<dir>/run-archive.jsonl`，每行一条 record：
  *   `{"op":"put","id":N,"projectId":"…","scriptPath":"…","runNonce":"…","state":"…",`
- *   `"startedAt":M|null,"finishedAt":M|null,"intentRunId":K|null}`；
+ *   `"startedAt":M|null,"finishedAt":M|null,"intentRunId":K|null,`
+ *   `"exitCode":N|null,"crashSummary":"…"|null}`（后两个为 backlog B11 诊断字段，
+ *   append 式新增：parse 用 optLong/optStr —— 旧行自动缺省 null，replay 不需迁移）；
  * - 每次写后 `FileChannel.force(true)`；启动 replay 全量重建内存索引，容忍最后一条半行；
  * - 状态机裁定（终态不可改写/复活、link 不一致拒绝、关联成立不改写）与
  *   `InMemoryRunArchive` 逐字一致 —— 本类是"同一语义换了存储引擎"，不是第二套语义。
@@ -158,6 +160,12 @@ class FileRunArchive(private val dir: Path) : RunArchive, AutoCloseable {
             if (r.finishedAtMillis == null) append("null") else append(r.finishedAtMillis)
             append(""","intentRunId":""")
             if (intentRunId == null) append("null") else append(intentRunId)
+            append(""","exitCode":""")
+            if (r.exitCode == null) append("null") else append(r.exitCode)
+            append(""","crashSummary":""")
+            // 先用局部变量接住再判空：crashSummary 是跨模块 public API 属性，Kotlin 拒绝 smart cast。
+            val crash = r.crashSummary
+            if (crash == null) append("null") else append(q(crash))
             append("}\n")
         }
 
@@ -175,6 +183,9 @@ class FileRunArchive(private val dir: Path) : RunArchive, AutoCloseable {
                     state = RunState.valueOf(fields.str("state")),
                     startedAtMillis = fields.optLong("startedAt"),
                     finishedAtMillis = fields.optLong("finishedAt"),
+                    // backlog B11：optLong/optStr —— 旧行（无常字段）自动缺省 null，向后兼容。
+                    exitCode = fields.optLong("exitCode")?.toInt(),
+                    crashSummary = fields.optStr("crashSummary"),
                 ),
                 intentRunId = fields.optLong("intentRunId"),
             )

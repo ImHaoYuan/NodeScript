@@ -1,7 +1,9 @@
 package com.autoscript.engine.nodeprocess
 
+import com.autoscript.domain.engine.RunSummary
 import java.io.IOException
 import java.io.InputStream
+import java.nio.charset.StandardCharsets
 import java.nio.file.Path
 import java.util.concurrent.TimeUnit
 
@@ -41,6 +43,16 @@ interface SpawnedProcess {
 
     /** 等待退出，[timeoutMillis] 内退出回 true，超时回 false（不抛）。 */
     fun waitFor(timeoutMillis: Long): Boolean
+
+    /**
+     * 已捕获的 stderr 尾部（backlog B11 诊断面）：排水线程在自己的读通道里保留的
+     * **有界尾部摘要**（utf-8、截断至 [com.autoscript.domain.engine.RunSummary.MAX_DETAIL]）。
+     * 读取方取「当前缓冲」（进程已退净后即最终态；未捕获 = ""）。
+     *
+     * 与 stdout 严格区分：**stdout 仍读即弃** —— 捕获的成本是内存，给 stdout 也留
+     * 一份会翻倍无界的风险；病因诊断的权威面是 stderr（脚本/宿主都往这里写错）。
+     */
+    val stderrTail: String
 }
 
 /**
@@ -54,13 +66,22 @@ private val jdkProcessPidMethod: java.lang.reflect.Method? = try {
 }
 
 /**
- * 真起进程（`ProcessBuilder`）。stdout/stderr 合流进 PIPE 并由守护排水线程读到 EOF ——
- * 不排水会把管道写满、把子进程卡死在 write 上（经典 pipe 反压死锁），丢弃内容不丢进程。
+ * 真起进程（`ProcessBuilder`）。stdout 读即弃、**stderr 捕获有界尾部**（backlog B11）——
+ * 不排水会把管道写满、把子进程卡死在 write 上（经典 pipe 反压死锁）：stdout 那条通道
+ * 仍然只管排空，不存内容；stderr 在排空时顺带写入环形尾 buffer，诊断要用的是"崩了之后
+ * 那几行"，不是全量。
  *
- * `Process.pid()` **在 android.jar 桩面（compileSdk 35）根本不存在**——直接调用编译不过
- * （本机 Android SDK 编译门抓出；此前"compileSdk 35 可见"的判断是被 JDK 的 `java.lang.*`
- * 遮蔽后的误判，javap 不解包就看到的是 JDK 自己的类）。故取 pid 走反射探测：桌面 JDK 恒有
- * 真 pid；Android 运行时有该方法则取，没有如实回 null（§8.4 noPid 路径，不是崩溃、不是 0/自身）。
+ * 为什么**不做** `redirectErrorStream(true)` 再合并捕获：合流会丢失"这是 stderr 写的"
+ * 的分辨，而病因诊断（原生层 fprintf/addon 报错/脚本 throw）几乎全在 stderr ——
+ * 合流后想把"真病因"从"常规输出"里捞出来多一次无谓的串扰。
+ *
+ * `Process.pid()` **不在 Android 平台 API 表**里 —— `platforms/android-3{5,6}/data/api-versions.xml`
+ * 的 `java/lang/Process` 只有 `destroyForcibly`/`isAlive`/`waitFor(…,TimeUnit)`（均 since 26），
+ * **没有 `pid`**；`java/lang/ProcessHandle` 整类也缺席。故直接调用会被 lint 的 `NewApi` 抓
+ * （全模块 `lintDebug` 的 `checkDependencies`，见 `.github/workflows/ci.yml` 的 android-build job）。
+ * 注意**不是** javac 抓的：android.jar 桩面里 `pid()` 其实**有**（libcore 派生），javac 放行 ——
+ * 这也正是"看着能用"的错觉来源。故取 pid 走反射探测：桌面 JDK 恒有真 pid；Android 运行时有该
+ * 方法则取，没有如实回 null（§8.4 noPid 路径，不是崩溃、不是 0/自身）。
  */
 class ProcessBuilderLauncher : ProcessLauncher {
 
@@ -69,14 +90,19 @@ class ProcessBuilderLauncher : ProcessLauncher {
             .directory(workingDir.toFile())
             .apply {
                 environment().putAll(env)
-                redirectErrorStream(true)   // 合流成一条，一条排水线程即可防写满
+                redirectErrorStream(false)   // 分开两条通道：stdout 排空、stderr 捕获尾部（见类 KDoc）
             }
             .start()
+        // stderr 尾部缓冲（有界、只增到上限后丢最老）。单进程单写者（排水线程），
+        // 读取侧在进程已退净后读 —— 退净 → 排水线程已把管道读到 EOF → tail 即最终态，
+        // 天然 happens-before（`Process.waitFor` 返回）无内存可见性问题。
+        val tail = StderrTail(RunSummary.MAX_DETAIL)   // 上限与 :domain 摘要契约同值
         val drain = Thread {
             try {
-                process.inputStream.use { input: InputStream ->
+                // stdout：读即弃（防反压死锁的排空主路，不存内容 —— 病因在 stderr 面）
+                process.inputStream.use { input ->
                     val buf = ByteArray(8192)
-                    while (input.read(buf) != -1) { /* 读即弃：诊断面尚未接 SPI，先保不卡死 */ }
+                    while (input.read(buf) != -1) { /* 排空：不卡子进程在 write 上 */ }
                 }
             } catch (_: Exception) {
                 // 进程退出后管道关闭引发的读异常：排水线程的正常终点
@@ -86,12 +112,34 @@ class ProcessBuilderLauncher : ProcessLauncher {
             name = "node-engine-drain-${process.hashCode()}"
             start()
         }
-        return JdkSpawnedProcess(process, drain)
+        // stderr 排水（捕获尾部）：与 stdout 同一原则（读不完会卡死子进程），
+        // 只是路上把字节喂给有界尾 buffer。进程退净 → 本线程读到 EOF 自然退出。
+        val drainErr = Thread {
+            try {
+                process.errorStream.use { input ->
+                    val buf = ByteArray(8192)
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n == -1) break
+                        tail.append(buf, n)
+                    }
+                }
+            } catch (_: Exception) {
+                // 进程退出后管道关闭引发的读异常：排水线程的正常终点
+            }
+        }.apply {
+            isDaemon = true
+            name = "node-engine-drain-err-${process.hashCode()}"
+            start()
+        }
+        return JdkSpawnedProcess(process, drain, drainErr, tail)
     }
 
     private class JdkSpawnedProcess(
         private val process: Process,
         @Suppress("unused") private val drain: Thread,   // 持引用防 GC 提前回收排水线程句柄
+        @Suppress("unused") private val drainErr: Thread,
+        private val tail: StderrTail,
     ) : SpawnedProcess {
         override val pid: Int? = try {
             (jdkProcessPidMethod?.invoke(process) as? Long)?.toInt()
@@ -105,6 +153,8 @@ class ProcessBuilderLauncher : ProcessLauncher {
 
         override fun exitValue(): Int? = if (process.isAlive) null else process.exitValue()
 
+        override val stderrTail: String get() = tail.snapshot()
+
         override fun destroy() = process.destroy()
 
         override fun destroyForcibly() {
@@ -113,5 +163,59 @@ class ProcessBuilderLauncher : ProcessLauncher {
 
         override fun waitFor(timeoutMillis: Long): Boolean =
             process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS)
+    }
+}
+
+/**
+ * 有界环形尾 buffer（字节级，按 [capacityBytes] 只留最尾）：供排水线程写入、
+ * [snapshot] 取 utf-8 尾部字符串。
+ *
+ * **分段解码**：`snapshot` 只对**当前缓冲**解码，drain 线程跨 read 切分写入的
+ * 多字节字符不会跨界损坏 —— 因为我们保留的是字节尾巴，取快照时才一次性 UTF-8 解码，
+ * 头部若是半个多字节字符（截断所致）解码为 U+FFFD，尾端永远干净。
+ * 同理 [dropOldest] 按字节丢最老：可能丢进一个字符中间，但那只是一两字节的代价，
+ * 与「保住病因那几行」的主目标相比可忽略。
+ */
+private class StderrTail(
+    private val capacityBytes: Int,
+) {
+    private val ring = ByteArray(capacityBytes)
+    private var start = 0
+    private var length = 0
+
+    @Synchronized
+    fun append(src: ByteArray, n: Int) {
+        var off = 0
+        while (off < n) {
+            val space = capacityBytes - length
+            if (space > 0) {
+                val take = minOf(space, n - off)
+                val ringPos = (start + length) % capacityBytes
+                System.arraycopy(src, off, ring, ringPos, take)
+                length += take
+                off += take
+            } else if (dropOldest()) {
+                // 满：丢最老给新字节腾位（dropOldest 已推进 start/length）
+            } else {
+                return
+            }
+        }
+    }
+
+    /** 丢最老一字节；buf 为空时无可丢。返回是否真的有东西可丢。 */
+    private fun dropOldest(): Boolean {
+        if (length == 0) return false
+        start = (start + 1) % capacityBytes
+        length -= 1
+        return true
+    }
+
+    /** 当前缓冲的 utf-8 尾部快照（空 = ""）。 */
+    @Synchronized
+    fun snapshot(): String {
+        if (length == 0) return ""
+        val out = ByteArray(length)
+        for (i in 0 until length) out[i] = ring[(start + i) % capacityBytes]
+        return String(out, StandardCharsets.UTF_8)
     }
 }

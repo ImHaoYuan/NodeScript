@@ -27,6 +27,34 @@ interface ScriptEngine {
 
     /** 当前状态快照（事件推送走 bridge EventBus，不在此轮询建模）。 */
     suspend fun status(): EngineStatus
+
+    /**
+     * **进程边界诊断**（backlog B11，契约见 docs §8.5 末段）：上次执行的引擎侧事实
+     * （退出码 + 捕获的 stderr 尾部）。**exit 0 的干净退出也会有**摘要（它只是诊断读口，
+     * 状态归类不看它）；未执行 / 尚未退净 / 被强杀或请求停止（137/143 不是病因）回 null
+     * —— 填充时机见 `:engine:node-process` 的实现 KDoc。
+     *
+     * 数据面语义与 ConsoleCollector 区分：桥 console 是全量异步通道（可丢包，且崩溃时
+     * 桥可能也断了）；本摘要是**排水线程里那半个字节**的保留（尾部、有界、utf-8）——
+     * 两个面一起看才能拼出完整诊断。**两者互不替代**：这里不做全量日志。
+     *
+     * 默认实现回 null：与 FakeEngine/UnavailableEngine 等替身成对 —— 替身没有进程边界，
+     * 没捕获就不假装有摘要。真实现覆盖。
+     */
+    suspend fun lastRunSummary(): RunSummary? = null
+}
+
+/** 一次执行的进程侧事实（崩溃摘要载体；见 [ScriptEngine.lastRunSummary]）。 */
+data class RunSummary(
+    /** 子进程退出码；仍存活为 null（进程还没退）。 */
+    val exitCode: Int? = null,
+    /** 捕获的 stderr 尾部（utf-8，截断至 [MAX_DETAIL]；无内容为 null）。 */
+    val stderrTail: String? = null,
+) {
+    companion object {
+        /** 摘要上限：够看病因，不吞内存（崩溃日志动辄几 KB，拿前 4KB 已覆盖诊断）。 */
+        const val MAX_DETAIL: Int = 4096
+    }
 }
 
 data class EngineId(val poolIndex: Int)

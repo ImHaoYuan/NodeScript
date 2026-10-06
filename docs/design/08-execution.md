@@ -94,6 +94,19 @@ interface EnginePool {                                // 实现在 :app-service:
 **实现注记已外迁**：`JournalFileStore`/`FileRunArchive` 的持久形态与两条孤儿结算路，逐字见 [`design-status.md` §8.5 实现注记](../design-status.md#实现注记自各分卷外迁逐字保留)。
 `DispatchReport.link` 在门禁拒绝/排队超时/启动失败时如实为 null。接线在 `:app` 的 `ControllerRunDispatcher`（拿到 Receipt 后生成 link）+ `AppShell`（scheduler 持 `RunArchive`）。
 
+**进程边界诊断（`RunRecord.exitCode` / `RunRecord.crashSummary`，backlog B11 落地）**：引擎宿主的排水线程不再对子进程 stderr「读即弃」——
+`ProcessBuilderLauncher` **不做** `redirectErrorStream(true)`（合流会丢失「这是 stderr 写的」的分辨，而病因几乎全在 stderr），
+stdout 那条通道**仍然只排空、不存内容**（它存在的唯一目的是防管道写满反压），stderr 在排空时顺带写入**有界环形尾 buffer**
+（字节级、上限 `RunSummary.MAX_DETAIL` = 4096、满了丢最老、取快照时才整体 UTF-8 解码，故跨 read 的多字节字符不会撕裂）。
+摘要经 `ScriptEngine.lastRunSummary(): RunSummary?`（`:domain` 契约，缺省实现回 null）取出，**只在 `status()` 判出「自然退出」时填充**
+（含 exit 0 —— 摘要只是诊断读口，状态归类不看它）；**请求停止（143）与强杀（137）如实不填** —— 那两个退出码是终止手段的产物，不是病因。摘要的落点分两层：
+`RuntimeController.Completed` 的失败类（`StopTimeout`/`Killed`/`UnknownRun`）在**槽位收走前**带上快照（收走后同槽可能已被下一次 execute 复用），
+`:app` 的 dispatcher 把它**摊平**成 `RunOutcome.{Failed,Crashed}` 的 `exitCode`/`crashSummary` 两个裸字段
+（scheduler 的架构门禁止依赖 `com.autoscript.domain.engine..`，故不折 `RunSummary` 整体），最终由 `Scheduler.recordLink` 折进 `RunRecord`。
+`FileRunArchive` 的两个新字段是 **append 式新增**（parse 走 `optLong`/`optStr`）：旧 journal 行无需迁移即可 replay，缺字段如实为 null。
+**本层不做去抖/首行忽略**：只做确定性截断（保留最尾 4 KiB）—— Node 启动噪声的治理等见了真数据再调。
+**诚实边界**：这是「尾部摘要」不是「全量日志」；全量 stdout/stderr 的流式通道（桥 `console` namespace）是另一条面，两者互不替代。
+
 ### 8.6 调度系统
 - 触发源五类：`定时(cron/alarm) `、`Intent/广播`、`事件(无障碍/通知)`、`用户点击`、`引擎内部 engines.exec`。
 - **SchedulerProvider SPI**：同一接口后 P1 可切 `WorkManager` 之外的实现（保活场景自持 alarm + 注册 receiver）。触发→拉起引擎进程→注入 API→归日志。

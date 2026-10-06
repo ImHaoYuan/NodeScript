@@ -141,7 +141,7 @@
 
 | 维度 | 决策 |
 |---|---|
-| SDK | minSdk 24（Android 7）· target/compile **36**（Android 16 · 2025/26 基线）；arm64-v8a 首发，x86_64/模拟器 P1 补 |
+| SDK | minSdk **26**（Android 8.0）· target/compile **36**（Android 16 · 2025/26 基线）；arm64-v8a 首发，x86_64/模拟器 P1 补 |
 | 页对齐 | 16KB ELF 对齐为 CI 硬门禁（§16） |
 | 无障碍 | API 31+ 需启用手势 → 能力中心引导；hidden API 在黑名单 → 不 curl，用 Safe-mode 替代路径 |
 | 前台服务 | API 34 起必须带 type → specialUse；API 35 6h 超时对 specialUse 不适用（但要声明 subtype） |

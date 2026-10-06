@@ -17,7 +17,10 @@ bridge/js/dist/
 
 # node-runtime-build 构建产物（大体积二进制）
 node-runtime-build/work/
-node-runtime-build/out/          # libnode.so / node / npm 素材（14MB 级）
+# libnode.so / node / npm 素材（14MB 级）—— **注释必须独占一行**：gitignore 的行内注释
+# 只在行首 `#` 生效，`out/   # 注释` 会被当成**字面模式**（含那一串空格与中文），
+# 于是这条规则**从来没生效过**（2026-10-06 实测 `git check-ignore` 不匹配）。
+node-runtime-build/out/
 node-runtime-build/out-opencv/
 
 # misc

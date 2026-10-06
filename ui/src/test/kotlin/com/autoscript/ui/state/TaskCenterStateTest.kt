@@ -146,6 +146,42 @@ class TaskCenterStateTest {
     }
 
     @Test
+    fun `崩溃摘要优先于套话：有病因说病因，没病因退回原句`() {
+        assertEquals(
+            "崩溃：TypeError: x is not a function",
+            RunStateText.describe(RunState.CRASHED, "TypeError: x is not a function"),
+            "B11：拿到进程侧摘要就报病因原文，而不是让用户看「被杀/OOM/看门狗」猜",
+        )
+        assertEquals(
+            "崩溃（被杀/OOM/看门狗）",
+            RunStateText.describe(RunState.CRASHED, null),
+            "无摘要（旧档案 / 引擎没捕获到）如实退回套话",
+        )
+        assertEquals(
+            "崩溃（被杀/OOM/看门狗）",
+            RunStateText.describe(RunState.CRASHED, "   "),
+            "空白摘要不算病因（isNullOrBlank）",
+        )
+        assertEquals(
+            "成功",
+            RunStateText.describe(RunState.SUCCEEDED, "不该被用上的摘要"),
+            "非 CRASHED 不拼摘要 —— 摘要是崩溃病因，不是通用附注",
+        )
+    }
+
+    @Test
+    fun `RunRowState 透出崩溃摘要（数据面字段）`() {
+        val row = RunRow(
+            engineRunId = 1, intentRunId = 2, projectId = "p", scriptPath = "a.js",
+            state = RunState.CRASHED, startedAtMillis = 0, finishedAtMillis = 1,
+            exitCode = 3, crashSummary = "TypeError: boom",
+        )
+        val state = RunRowState.of(row, nowMillis = 0, zone = ZoneId.of("UTC"))
+        assertEquals("TypeError: boom", state.crashSummary)
+        assertEquals("崩溃：TypeError: boom", state.stateLabel, "崩溃行的念法走摘要那一支，不是套话")
+    }
+
+    @Test
     fun `恢复账三笔分开 重投数由 domain 判据算`() {
         val ok = RecoveryRowState.of(RecoveryRow(total = 3, expired = 1, failureText = null))
         assertEquals(3, ok.total)

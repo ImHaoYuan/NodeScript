@@ -50,7 +50,7 @@ class JournalFileStoreTest {
         val a = start(log, "n1")
         val committed = log.commit(a.runId, RunOutcome.Succeeded)!!
         assertEquals(RunOutcome.Succeeded, committed.outcome)
-        val again = log.commit(a.runId, RunOutcome.Failed)!!
+        val again = log.commit(a.runId, RunOutcome.Failed())!!
         assertEquals(RunOutcome.Succeeded, again.outcome, "首次 COMMIT 结果不可被二次覆盖")
         assertTrue(log.uncommitted().isEmpty())
         assertTrue(log.isCommitted("n1"))

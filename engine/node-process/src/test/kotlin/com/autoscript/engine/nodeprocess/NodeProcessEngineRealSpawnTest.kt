@@ -6,6 +6,7 @@ import com.autoscript.domain.engine.EngineId
 import com.autoscript.domain.engine.EngineRunRequest
 import com.autoscript.domain.engine.EngineStatus
 import com.autoscript.domain.engine.KillCause
+import com.autoscript.domain.engine.RunSummary
 import com.autoscript.domain.engine.StopResult
 import java.nio.file.Files
 import java.nio.file.Path
@@ -62,8 +63,9 @@ class NodeProcessEngineRealSpawnTest {
     }
 
     /**
-     * 自身 pid（仅本桌面单测用）：`ProcessHandle` 同样不在 android.jar 桩面（compileSdk 35），
-     * 直接引用会把 gradle/CI 的 testDebugUnitTest 编译炸掉 —— 反射取，拿不到回 null（断言仍成立但弱化）。
+     * 自身 pid（仅本桌面单测用）：`ProcessHandle` 同样**不在 Android 平台 API 表**里
+     * （`api-versions.xml` 整类缺席，与 `Process.pid()` 同因，见 `ProcessLauncher.kt` KDoc），
+     * 直接引用会被 lint 的 `NewApi` 抓 —— 反射取，拿不到回 null（断言仍成立但弱化）。
      */
     private fun selfPid(): Long? = try {
         val ph = Class.forName("java.lang.ProcessHandle")
@@ -97,6 +99,46 @@ class NodeProcessEngineRealSpawnTest {
         runBlocking { e.execute(request()) }
         val settled = runBlocking { awaitStatus(e, EngineStatus.CRASHED) }
         assertEquals(EngineStatus.CRASHED, settled, "自然退出 ≠0 → CRASHED")
+    }
+
+    /**
+     * B11 主体：真 node 往 stderr 写病因后非零退出 —— 排水线程捕获的尾部必须能被
+     * [ScriptEngine.lastRunSummary] 读到（假缝钉不了"真管道真排水真环形缓冲"这一条）。
+     */
+    @Test
+    fun `真起 node——stderr 尾部被捕获，lastRunSummary 带退出码与病因`() {
+        writeScript(
+            "process.stderr.write('TypeError: boom is not a function\\n'); process.exit(3)",
+        )
+        val e = engine()
+        runBlocking { e.execute(request()) }
+        assertEquals(EngineStatus.CRASHED, runBlocking { awaitStatus(e, EngineStatus.CRASHED) })
+
+        val summary = runBlocking { e.lastRunSummary() }
+        assertEquals(3, summary?.exitCode, "退出码随摘要出来（真 wait 语义）")
+        assertTrue(
+            summary?.stderrTail?.contains("TypeError: boom is not a function") == true,
+            "stderr 尾部被排水线程捕获（stdout 那条仍然读即弃）：${summary?.stderrTail}",
+        )
+    }
+
+    /**
+     * B11 边界：stdout 仍然读即弃 —— 只往 stdout 写、stderr 干净的崩溃，摘要里不得出现 stdout 内容
+     * （`redirectErrorStream(false)` 的意义就在这条：合流会把 stdout 噪声当成病因）。
+     */
+    @Test
+    fun `真起 node——stdout 仍读即弃，不进摘要`() {
+        writeScript("process.stdout.write('NOISE-ON-STDOUT\\n'); process.exit(4)")
+        val e = engine()
+        runBlocking { e.execute(request()) }
+        assertEquals(EngineStatus.CRASHED, runBlocking { awaitStatus(e, EngineStatus.CRASHED) })
+
+        val summary = runBlocking { e.lastRunSummary() }
+        assertEquals(4, summary?.exitCode)
+        assertTrue(
+            summary?.stderrTail?.contains("NOISE-ON-STDOUT") != true,
+            "stdout 内容不得混进 stderr 摘要：${summary?.stderrTail}",
+        )
     }
 
     @Test

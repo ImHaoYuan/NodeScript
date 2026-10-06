@@ -413,6 +413,9 @@ class Scheduler(
             state = outcomeState(outcome),
             startedAtMillis = now,
             finishedAtMillis = now,
+            // backlog B11 诊断面：dispatcher 从引擎侧摘的进程摘要（退出码 + stderr 尾部）折进档案。
+            exitCode = outcome.diagExitCode,
+            crashSummary = outcome.diagCrashSummary,
         )
         a.put(record, link)
     }
@@ -427,7 +430,7 @@ class Scheduler(
      */
     private fun outcomeState(outcome: RunOutcome): RunState = when (outcome) {
         RunOutcome.Succeeded -> RunState.SUCCEEDED
-        RunOutcome.Failed -> RunState.FAILED
+        is RunOutcome.Failed -> RunState.FAILED
         is RunOutcome.Crashed -> RunState.CRASHED
         RunOutcome.Cancelled -> RunState.CANCELLED
         RunOutcome.Interrupted -> RunState.CANCELLED
