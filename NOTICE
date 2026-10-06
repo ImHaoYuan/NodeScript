@@ -1,10 +1,7 @@
 AutoScript —— 第三方参考件与版权署名（NOTICE）
 =============================================
 
-本文件是**源码面**的署名与许可说明。随包分发的第三方**二进制与素材**清单不在这里 ——
-那份在 `THIRD_PARTY_NOTICES.md`（生成物，版本事实来源 `node-runtime-build/VERSIONS.env`，
-手改会被 CI 的同步门判漂移）。两份分工：本文件管"源码里有哪些不是我们写的"，
-那份管"APK 里装了哪些别人的二进制"。两份都随 APK 出（`assets/third-party/`）。
+本文件是源码面的第三方署名与许可说明。APK 内第三方二进制与素材清单见 `THIRD_PARTY_NOTICES.md`（生成物，版本源为 `node-runtime-build/VERSIONS.env`，手改会被 CI 判漂移）。本文件管源码层第三方署名，该文件管 APK 内第三方二进制/素材。两份均随 APK 发布（`assets/third-party/`）。
 
 --------------------------------------------------------------------------------
 1. 本仓版权与许可
@@ -12,51 +9,29 @@ AutoScript —— 第三方参考件与版权署名（NOTICE）
 
 Copyright (C) 2026 Ventus-Pluviam
 
-AutoScript 自身的 Kotlin / C++ / TypeScript 源码以 **GPL-2.0-only** 发布 ——
-GNU General Public License **第 2 版**，**不含**"或任何更新版本"。全文见 `LICENSE`。
-`bridge/js` 这个 npm 包（标 private、不发布到 registry）同许可，见其 `package.json`
-的 `license` 字段。
+AutoScript 自身的 Kotlin / C++ / TypeScript 源码以 **GPL-2.0-only** 发布：GNU GPL 第 2 版，不含“或任何更新版本”。全文见 `LICENSE`。`bridge/js` npm 包（private，不发布到 registry）同许可，见其 `package.json` 的 `license` 字段。
 
-**为什么是 `only` 而不是 `or-later`**（口径与代价见 `docs/design-decisions.md` 第 33、36 项）：
-本仓 `ui/` 的前端实现与风格参考自 Telegram Android（**GPL-2.0-only**，见下节）。
-**这是否构成"衍生作品"属法律判断，本仓不做该判断** —— 本文件是工程侧的事实陈述，不是法律意见。
-在未经复核前，不对外附加一条可能走不通的授权路径（GPL-2.0-only 与 GPL-3.0 不兼容），
-是保守且如实的做法。`only` 因此是**本仓自己的选择**，不是被上游"逼"出来的结论。
+采用 `only` 而非 `or-later`（见 `docs/design-decisions.md` 第 33、36 项）：`ui/` 参考 Telegram Android（GPL-2.0-only，见下节）。是否构成衍生作品属法律判断，本文件不作判断；本文件为工程事实陈述，非法律意见。未经复核，不附加可能不可行的授权路径（GPL-2.0-only 与 GPL-3.0 不兼容）。`only` 是本仓选择，非上游强制。
 
 --------------------------------------------------------------------------------
 2. 前端 UI 的实现与风格参考自 Telegram Android（GPL-2.0-only）
 --------------------------------------------------------------------------------
 
-本仓 `ui/` 的前端实现与视觉风格**参考自 Telegram Android 客户端**
-（<https://github.com/DrKLO/Telegram>，许可 **GPL-2.0-only**），包括版式尺寸、间距层次、
-色值与键名、缓动曲线控制点，以及少数几处算法（底栏宽度分配、菜单错相浮现、删除粒子）。
+本仓 `ui/` 的前端实现与视觉风格参考自 Telegram Android 客户端（<https://github.com/DrKLO/Telegram>，GPL-2.0-only），包括版式尺寸、间距层次、色值与键名、缓动曲线控制点，以及少量算法（底栏宽度分配、菜单错相浮现、删除粒子）。
 
-**参考的上游版本**：**12.10.6（build 7112）**，commit
-`f2908b14133bbffbf7ab04f641ecb5faf533242`。本仓的参考发生在 **2026-10-02 起**的若干批次
-（`docs/log/2026-10-02.md` 批 13 起、`2026-10-04.md`、`2026-10-05.md`），当时上游最新版即
-12.10.6，故按它锚定。
+参考版本：12.10.6（build 7112），commit `f2908b14133bbffbf7ab04f641ecb5faf533242`。参考发生于 2026-10-02 起若干批次（`docs/log/2026-10-02.md` 批 13 起、`2026-10-04.md`、`2026-10-05.md`），当时上游最新版为 12.10.6，故锚定该版本。
 
-**上游版权与担保免责**（GPL-2.0 第 1 节要求随副本发布的两件）：Copyright (C) DrKLO/Telegram
-项目贡献者，来源见上列仓库（上游仓库的 `LICENSE` 是 GPL-2.0 全文，未另附单独的版权持有人行）。
-本仓与其上游**均不提供任何担保**，包括但不限于适销性与特定用途适用性的默示担保 ——
-免责全文见本仓 `LICENSE` 的 GPL-2.0 第 11、12 节。
+上游版权与担保免责（GPL-2.0 第 1 节）：Copyright (C) DrKLO/Telegram 项目贡献者，来源见上列仓库。上游 `LICENSE` 为 GPL-2.0 全文，未另附版权持有人行。本仓与上游均不提供担保，包括适销性与特定用途适用性的默示担保；免责全文见本仓 `LICENSE` 的 GPL-2.0 第 11、12 节。
 
-**修改说明**（GPL-2.0 第 2(a) 节要求对改动过的文件作显著通知）：本仓 `ui/` 是 Kotlin /
-Compose 重写（上游是 Java + Android View 体系），**不是上游文件的原样副本**，且**未 vendored
-任何上游源文件**（跟踪树里零 `.java` —— `find . -name '*.java'` 只命中 `.gradle/` 缓存）。
-逐文件的上游对应类与差异，各文件 KDoc 里逐处标注；主要落点见下表。
+修改说明（GPL-2.0 第 2(a) 节）：本仓 `ui/` 为 Kotlin / Compose 重写（上游为 Java + Android View），非原样副本，未 vendored 上游源文件；跟踪树无 `.java`（仅 `.gradle/` 缓存命中）。逐文件对应与差异见各文件 KDoc，主要落点如下：
 
 | 本仓文件 | 参考的上游 |
 |---|---|
 | `ui/.../theme/Theme.kt` | `day/night.attheme`、`ThemeColors.java`（色值与键名） |
 | `ui/.../components/Motion.kt` | `CubicBezierInterpolator` 的缓动常量 |
-| `ui/.../components/MenuPopup.kt` | `AndroidUtilities.cascade`（错相浮现的算法） |
+| `ui/.../components/MenuPopup.kt` | `AndroidUtilities.cascade`（错相浮现算法） |
 | `ui/.../state/TabBarMeasure.kt` | `MainTabsLayout.onMeasure`（底栏宽度分配） |
-| `ui/.../state/Particles.kt`、`components/DeletionParticles.kt` | `Components/ThanosEffect.java`（删除粒子的形态） |
-| `ui/.../screens/`、`ui/.../components/` 的其余版式 | `DialogsActivity` / `ContactsActivity` / `ActionBar` / Cell / `Bulletin` 等 |
+| `ui/.../state/Particles.kt`、`components/DeletionParticles.kt` | `Components.ThanosEffect.java`（删除粒子形态） |
+| `ui/.../screens/`、`ui/.../components/` 其余版式 | `DialogsActivity` / `ContactsActivity` / `ActionBar` / Cell / `Bulletin` 等 |
 
-**未逐行比对（诚实登记）**：上表的对应关系来自本仓 KDoc 的自述与人工核对，**未与上游逐行比对**。
-抽查过的几处（`cascade()`、`MainTabsLayout.onMeasure`、缓动常量、`SIZE = 48`、缩放时长）与上游
-12.10.6 一致；「逐处核实并据此降级措辞」这件事经裁定**不做**，理由见
-`docs/design-decisions.md` 第 37 项。
-
+未逐行比对：上表对应关系来自本仓 KDoc 与人工核对，未与上游逐行比对。抽查项（`cascade()`、`MainTabsLayout.onMeasure`、缓动常量、`SIZE = 48`、缩放时长）与上游 12.10.6 一致；逐处核实并降级措辞经裁定不做，理由见 `docs/design-decisions.md` 第 37 项。
