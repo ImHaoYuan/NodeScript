@@ -934,6 +934,7 @@
 | **SDK 基线的两处漂移**（backlog 未列，本批顺带裁定：文档写 compile/target 36 而 catalog 写 35；两份设计卷写 minSdk 24 而 catalog/CLAUDE.md/`VERSIONS.env` 写 26） | `gradle/libs.versions.toml`；`docs/design/03-technology.md:16`；`docs/design/13-roadmap-budget.md:144`；`README.md` 前置条件表 | **以文档为准，改 catalog**（2026-10-06 拍板）：`compileSdk`/`targetSdk` 35 → **36**（§3/§17 的「compile&target 36（Android 16）」是更早拍下的口径，catalog 落后于它）；`minSdk` 反向 —— **26 为准**，两份设计卷里的「minSdk 24」是过期字面（`node-runtime-build/VERSIONS.env` 的 `ANDROID_API=26` 与 `CLAUDE.md`「API 26 = minSdk 冻结值」同口径，且 24 与 26 之间没有任何一项设计依赖 API 24/25）。连带：`ci.yml`（×2）与 `e2e-nightly.yml`（×1）的 SDK 组件装 `platforms;android-36` + `build-tools;36.0.0`；README 前置条件表同步。**APK 侧实证**：`aapt2 dump badging` 出 `compileSdkVersion='36'` / `minSdkVersion:'26'` / `targetSdkVersion:'36'` | 2026-10-06 |
 | **CI 出的 APK 不含引擎二进制**（backlog B5：怎么把「真形态 APK」做成可复现的门） | `docs/backlog.md` B5；`.github/workflows/ci.yml`（android-build job）；`engine/node-process/scripts/build-native.sh`；`build-logic/src/main/kotlin/autoscript.engine-natives.gradle.kts` | **新开独立 workflow `engine-native.yml`，`ci.yml` 一字不动**（2026-10-06 拍板）。B5 的真堵点不是「取不到产物」而是「**没有任何 workflow 产出 `noden` / `bridge_native.node`**」：node-slice（libnode + npm）与 image-native（libopencv）的 artifact 都在且未过期，可跨 workflow 取；只有这两个引擎件从来没有生产者。所以新 workflow 自己跑 `build-native.sh`（NDK r28c + Node 头文件包），再取上述两条 artifact 喂 `LIBNODE`/`NPM_CLI_ROOT`/`LIBOPENCV` 起 `assembleDebug`，最后断言 `lib/arm64-v8a/` 四件齐 + npm 素材件数 + `aapt2 dump badging` 的 ABI 只有 arm64。**不进 `ci.yml` 的理由是分钟预算**：Node 头文件包 + NDK 722MB 下载与 C++ 交叉编译是分钟级，塞进 PR 门会把「秒级红绿」变成「十分钟才知道」—— PR 门仍由 `ci.yml` 的 assembleDebug（无引擎件、装配期只 warn）守着，真形态 APK 是独立可点的门。**诚实边界**：该 workflow 取的是 node-slice/image-native 的**最新成功 artifact**，与本次 commit 的源码未必同源 —— 它的断言对象是「装配链能不能把四件摆对、ABI 面收没收敛」，不是「引擎二进制的可复现构建」（后者归 node-slice/image-native 自己的门） | 2026-10-06 |
 | **`ui/` 是「衍生自 Telegram Android 的部分」**（本文件第 33 项的定性，2026-10-06 上午） | `README.md` 许可段；`NOTICE` 第 2 节；本表上方第 33 项那行 | **改称「前端 UI 的实现与风格参考自 Telegram Android」**（2026-10-06，用户裁定，口径全文见本文件**第 36 项**）：跟踪树里**零 vendored 上游源文件**（`find . -name '*.java'` 跟踪面零命中），`ui/` 是 Kotlin/Compose 重写，借用的只是版式尺寸 / 色值键名 / 缓动控制点 + 少数几处算法步骤。原定性把**本仓自己声明不做**的那个法律判断（「是否构成衍生」）当成已决写进了对外文档。**许可口径不变**（仍 `GPL-2.0-only`），只把 `only` 的**理由**从「上游逼的（不兼容 GPL-3.0）」改成「本仓自己的保守选择」。第 33 项正文一字不动 | 2026-10-06 |
+| backlog **A9**「`NOTICE` 表里『逐字 / 逐句』的说法未与上游核实」（2026-10-06 登记） | `docs/backlog.md` A9（已移除）；本文件第 36 项 | **不做了，整行移除**（2026-10-07，用户裁定，口径全文见本文件**第 37 项**）：那是**署名措辞的精度**问题，不是许可义务 —— 第 1 节要的版权声明与担保免责、第 2(a) 节的修改说明与日期已于第 36 项补齐并随 APK 出。核实做了一半就停：抽查的几处（`cascade()` / `onMeasure` / 缓动常量 / `SIZE = 48` / 缩放时长）**都站得住**，但抽查出两处**上游不存在的类名**（`TopicsLayoutSwitcher`、`ReverseOrder`）也一并「不追」（同属注释举例，非署名义务），如实记在第 37 项 | 2026-10-07 |
 ### 附：§12.2 被反转口径原文照抄（2026-09-30 步骤 6 摘录前的原文）
 
 > - **语义层**（handler）住 `:platform:capabilities` 的 `SystemNamespaces.kt`，纯 JVM 可测（假 SPI 注入即可跑）：参数校验（spec 守卫、必填字段、`timeout > 0`）、枚举字面量解析（`ShellMode`/`DialogMode`，拼错即报错不静默套默认）、默认值（shell 超时 30s）、错误分类**透传**（`AutojsException.error` 原码回桥）、响应形状编码（与 `extras.ts` 逐字对齐）；
@@ -949,3 +950,22 @@
 §7.7 的 `TM_CCOEFF_NORMED` 长篇实测注记（2026-09-25）目前仍在契约正文里。
 它**读起来像决策**（「口径改了」在末句），但主体是「为什么 CCOEFF 而不是 CCORR」
 的判据论证。这一轮不动；下次迁移时按「判据留契约、变更进本文件」切开。
+
+37. **`NOTICE` 与 `ui/` 的「逐字 / 逐句」措辞不再逐处核实（2026-10-07，用户裁定；backlog A9 据此结项）**：
+    - **拍板**：**不做**「拿上游源码逐处核对 `ui/` KDoc 里那些『逐字移植 / 逐句对着写 / 逐字抄』
+      的说法、并按实情降级措辞」这件事，`ui/` 里那 25 处措辞**原样保留**。`backlog.md` A9 整行移除。
+    - **理由**：这是**署名措辞的精度**问题，不是许可义务问题 —— GPL-2.0 第 1 节要的两件（版权声明、
+      担保免责）与第 2(a) 节的「修改说明 + 日期」已于**第 36 项**补齐并随 APK 出（`assets/third-party/`）；
+      剩下的只是「本仓自述的口径比事实重不重」。花一批工时逐处比对去调这个，收益不抵成本。
+    - **本项落地前已做的核实（留档，免得将来有人以为没核过）**：把上游 12.10.6
+      （`f2908b14133bbffbf7ab04f641ecb5faf533242`）部分克隆到本机后抽查了几处 ——
+      `cascade()` 与上游 `AndroidUtilities.java:5215` **逐字一致**（连行号都对得上）、
+      `MainTabsLayout.onMeasure` 的三趟试排 / `maxTabTextWidthIfEq` / 两端夹逼与 `TabBarMeasure.kt`
+      **一一对应**、`EASE_OUT_QUINT = (.23, 1, .32, 1)` 与 `FragmentFloatingButton.SIZE = 48` 一致、
+      `ScaleStateListAnimator.apply(view, .1f, 1.5f)` 的 80ms 线性 / 350ms `OvershootInterpolator(1.5)`
+      一致。**同时抽查出两处上游不存在的类名**：`TopicsLayoutSwitcher`（`Motion.kt` 的 KDoc 引用）
+      与 `ReverseOrder`（`ProjectScreen.kt:416` 的 KDoc 引用）在上游 12.10.6 全树**零命中**。
+    - **那两处不存在的类名怎么处置**：**本项一并明确「不追」**（同上理由 —— 那是注释里的举例，
+      不是署名义务）。如实记在这里，不散在 `ui/` 的 KDoc 里改来改去。
+    - **性质声明**（与第 33/36 项同）：本项是**工程侧的成本裁定**，不是法律意见；若将来因分发形态
+      变化需要更精确的署名，届时按本表另起一行。

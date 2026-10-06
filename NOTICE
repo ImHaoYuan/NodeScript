@@ -56,5 +56,7 @@ Compose 重写（上游是 Java + Android View 体系），**不是上游文件�
 | `ui/.../screens/`、`ui/.../components/` 的其余版式 | `DialogsActivity` / `ContactsActivity` / `ActionBar` / Cell / `Bulletin` 等 |
 
 **未逐行比对（诚实登记）**：上表的对应关系来自本仓 KDoc 的自述与人工核对，**未与上游逐行比对**。
-登记见 `docs/backlog.md`。
+抽查过的几处（`cascade()`、`MainTabsLayout.onMeasure`、缓动常量、`SIZE = 48`、缩放时长）与上游
+12.10.6 一致；「逐处核实并据此降级措辞」这件事经裁定**不做**，理由见
+`docs/design-decisions.md` 第 37 项。
 
