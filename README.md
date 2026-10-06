@@ -126,7 +126,8 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 > ③ 脚本侧本来就不受影响（桥走 abstract unix socket，`auto.*` 没有 HTTP 面）。
 
 运行期已实测过的部分（非 root 设备、Android 13 / arm64）：引擎冷启、桥往返、无障碍读屏与手势、
-截屏帧源；**未**实测：16KB 页设备、SELinux enforcing、`targetSdk` 提取策略、MediaProjection 高清会话。
+截屏帧源；**未**实测：SELinux enforcing、`targetSdk` 提取策略、MediaProjection 高清会话
+（16KB 页设备**已裁定不测** —— 装载风险由构建期 ELF 对齐门禁承接，见 `docs/design-decisions.md` 第 34 项）。
 逐条记在 [`docs/design-status.md`](docs/design-status.md)。
 
 ## 参与贡献
