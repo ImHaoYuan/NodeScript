@@ -1,0 +1,56 @@
+name: tree-sitter native build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'bridge/treesitter/**'
+      - '.github/workflows/treesitter-native.yml'
+  pull_request:
+    paths:
+      - 'bridge/treesitter/**'
+      - '.github/workflows/treesitter-native.yml'
+  workflow_dispatch:
+
+jobs:
+  build-arm64:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+      
+      - name: Setup NDK
+        run: |
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/28.0.12674087" >> $GITHUB_ENV
+      
+      - name: Install NDK
+        run: |
+          sdkmanager --install "ndk;28.0.12674087"
+      
+      - name: Build tree-sitter natives
+        run: |
+          cd bridge/treesitter
+          bash scripts/build-treesitter.sh
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: treesitter-natives-arm64-v8a
+          path: bridge/treesitter/build/native-local/arm64-v8a/*.so
+          retention-days: 7
+      
+      - name: Show build output
+        run: |
+          ls -lh bridge/treesitter/build/native-local/arm64-v8a/ || echo "构建产物目录不存在"
