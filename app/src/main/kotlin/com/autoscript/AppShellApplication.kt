@@ -7,6 +7,7 @@ import com.autoscript.appservice.npm.NpmCliDeployer
 import com.autoscript.domain.host.CapabilityCenterSnapshot
 import com.autoscript.domain.host.ConsoleSnapshot
 import com.autoscript.domain.host.HostSummary
+import com.autoscript.domain.host.ProjectHistorySnapshot
 import com.autoscript.domain.host.ShellSummary
 import com.autoscript.domain.host.TaskCenterSnapshot
 import com.autoscript.domain.host.TaskRegistration
@@ -481,6 +482,12 @@ class AppShellApplication : Application(), HostSummary {
         val built = assembled
             ?: throw IllegalStateException("壳未装配（装配中或失败）：任务与执行记录暂不可读")
         return built.taskCenter { recoverySnapshot() }
+    }
+
+    /** 项目终态历史；壳未就绪或档案读取失败就抛，不冒充“没有记录”。 */
+    override suspend fun projectHistory(projectId: String): ProjectHistorySnapshot {
+        val built = checkNotNull(assembled) { "壳未装配（装配中或失败）：项目执行历史暂不可读" }
+        return built.projectHistory(projectId)
     }
 
     /**

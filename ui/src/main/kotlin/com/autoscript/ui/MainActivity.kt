@@ -64,6 +64,7 @@ import com.autoscript.ui.components.ToastAction
 import com.autoscript.ui.components.ToastHost
 import com.autoscript.ui.components.rememberToastAction
 import com.autoscript.ui.screens.ManagementScreen
+import com.autoscript.ui.screens.ProjectHistoryUi
 import com.autoscript.ui.screens.ProjectScreen
 import com.autoscript.ui.screens.SettingsScreen
 import com.autoscript.ui.screens.ConsoleScreen
@@ -73,6 +74,7 @@ import com.autoscript.ui.state.ActiveRunState
 import com.autoscript.ui.state.ConsoleState
 import com.autoscript.ui.state.HomeState
 import com.autoscript.ui.state.LoadState
+import com.autoscript.ui.state.ProjectHistoryState
 import com.autoscript.ui.state.ProjectState
 import com.autoscript.ui.state.RegistrationForm
 import com.autoscript.ui.state.TaskCenterState
@@ -123,6 +125,10 @@ class MainActivity : ComponentActivity() {
 
     /** 项目页（文件列表）状态（同上；挂起读口，由页签切换/回前台驱动）。 */
     private var projectState: ProjectState by mutableStateOf(ProjectState.NOT_LOADED)
+
+    /** 项目历史与文件清单分别记读取状态；不同项目的并发回包不能相互覆盖。 */
+    private var projectHistoryState by mutableStateOf(ProjectHistoryState.notLoaded(""))
+    private var historyReadVersion = 0L
 
     /** 设置页的状态（同上；数据面仍是能力快照）。 */
     private var capabilityState: CapabilityCenterState by mutableStateOf(CapabilityCenterState.NOT_LOADED)
@@ -208,6 +214,12 @@ class MainActivity : ComponentActivity() {
                             when (Tab.entries[current]) {
                                 Tab.HOME -> ProjectScreen(
                                     state = projectState,
+                                    history = ProjectHistoryUi(
+                                        state = projectHistoryState,
+                                        onRead = { reloadProjectHistory(it) },
+                                        active = pagerState.currentPage == Tab.HOME.ordinal,
+                                        resumeTick = resumeTick,
+                                    ),
                                     onSwitchTheme = themeSwitch.onSwitch,
                                     // 菜单项写**目标模式**（TG 的日夜项同款）：
                                     // 冷启缺省跟随系统，此时按"当下是不是深色"定文案。
@@ -383,6 +395,27 @@ class MainActivity : ComponentActivity() {
         val host = hostSummary() ?: error("宿主摘要未接线（Application 未实现 HostSummary）")
         host.saveScriptFile(projectId, relPath, content)
         reloadProjectFiles()
+        if (projectHistoryState.projectId == projectId) reloadProjectHistory(projectId)
+    }
+
+    private suspend fun reloadProjectHistory(projectId: String) {
+        val version = ++historyReadVersion
+        if (projectHistoryState.projectId != projectId) {
+            projectHistoryState = ProjectHistoryState.notLoaded(projectId)
+        }
+        val host = hostSummary()
+        val result = try {
+            if (host == null) {
+                ProjectHistoryState.failed(projectId, IllegalStateException("宿主摘要未接线"))
+            } else {
+                ProjectHistoryState.of(host.projectHistory(projectId))
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (t: Exception) {
+            ProjectHistoryState.failed(projectId, t)
+        }
+        if (version == historyReadVersion) projectHistoryState = result
     }
 
     private suspend fun reloadCapabilities() {
@@ -498,6 +531,7 @@ class MainActivity : ComponentActivity() {
                     "已触发「${task.name}」（执行成败见控制台）"
                 }
             }
+            if (projectHistoryState.projectId.isNotBlank()) reloadProjectHistory(projectHistoryState.projectId)
         } finally {
             taskState = taskState.copy(opTargetTaskId = null)
         }
@@ -516,17 +550,19 @@ class MainActivity : ComponentActivity() {
             consoleState = ConsoleState.NOT_LOADED
             return
         }
-        val previous = consoleState
+        val sinceSeq = consoleState.nextSeq
         consoleState = try {
+            val added = host.console(sinceSeq = sinceSeq, maxLines = CONSOLE_PAGE)
+            // 挂起期间另一份读取可能已返回：合并现值，不拿请求前的旧快照覆盖新日志。
             ConsoleState.of(
-                previous = previous,
-                added = host.console(sinceSeq = previous.nextSeq, maxLines = CONSOLE_PAGE),
+                previous = consoleState,
+                added = added,
                 nowMillis = System.currentTimeMillis(),
             )
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (t: Exception) {
-            ConsoleState.failed(t, previous)
+            ConsoleState.failed(t, consoleState)
         }
     }
 
