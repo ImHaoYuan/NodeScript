@@ -50,9 +50,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -66,6 +68,7 @@ import com.autoscript.ui.components.ActionBarAction
 import com.autoscript.ui.components.ActionBottomSheet
 import com.autoscript.ui.components.ActionBottomSheetItem
 import com.autoscript.ui.components.ContextMenu
+import com.autoscript.ui.components.centerInRoot
 import com.autoscript.ui.components.EaseOutQuint
 import com.autoscript.ui.components.OvershootEasing
 import com.autoscript.ui.components.rememberPressIndication
@@ -115,8 +118,12 @@ import kotlinx.coroutines.launch
 @Composable
 fun ProjectScreen(
     state: ProjectState,
-    /** 主题两态切换（⋮ 第一格，TG 日/夜同款 —— 目标模式写菜单项上）。 */
-    onSwitchTheme: () -> Unit,
+    /**
+     * 主题两态切换（⋮ 第一格，TG 日/夜同款 —— 目标模式写菜单项上）。
+     *
+     * 参数是**这颗 ⋮ 在根坐标里的中心**：外壳的圆形揭示从它长出来（见 `centerInRoot`）。
+     */
+    onSwitchTheme: (Offset) -> Unit,
     /**
      * 那一格的**文案** = 点它切到的那一档（TG `DialogsActivity` 的日夜项：
      * 当前深色写 "Day Mode"、当前浅色写 "Night Mode"）。
@@ -406,29 +413,42 @@ private fun ProjectMenu(
     currentSort: FileSort,
     reversed: Boolean,
     themeSwitchLabel: String,
-    onSwitchTheme: () -> Unit,
+    onSwitchTheme: (Offset) -> Unit,
     onSelectAll: () -> Unit,
     onSort: (FileSort, Boolean) -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     var sortMenuOpen by remember { mutableStateOf(false) }
+    // 这颗 ⋮ 在根坐标里的中心：主题切换的圆形揭示从它长出来。菜单本体住独立 popup
+    // 窗口、坐标不在主窗口的系里，所以量的是锚点而不是被点的那一行（见 centerInRoot）。
+    val anchor = remember { mutableStateOf(Offset.Zero) }
     Box {
-        Text(
-            text = "⋮",
-            color = ThemeColors.text,
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier
-                .pressable(role = Role.Button, onClick = { open = true })
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-        )
+        Box(Modifier.onGloballyPositioned { anchor.value = it.centerInRoot() }) {
+            Text(
+                text = "⋮",
+                color = ThemeColors.text,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .pressable(role = Role.Button, onClick = { open = true })
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            )
+        }
         ContextMenu(
             expanded = open,
             onDismiss = { open = false },
             actions = buildList {
                 // 标签 = **点它切到的那一档**（TG `DialogsActivity` 的日夜项：
                 // 当前是深色就写 "Day Mode"，当前是浅色就写 "Night Mode"）。
-                add(MenuAction(label = themeSwitchLabel, onClick = onSwitchTheme))
+                // `dismissOnClick = false`：切主题**不关菜单**（用户口径）—— 换的只是配色，
+                // 菜单里其余项还得能接着点；收掉会逼用户为"再选一次排序"重开一遍。
+                add(
+                    MenuAction(
+                        label = themeSwitchLabel,
+                        dismissOnClick = false,
+                        onClick = { onSwitchTheme(anchor.value) },
+                    ),
+                )
                 add(MenuGap)
                 add(MenuAction(label = "选择全部", onClick = onSelectAll))
                 add(
@@ -866,7 +886,7 @@ private val FabSubRise = 64.dp
  * 无文案的代价是读屏认不出，故 [label] 仍进 contentDescription。
  *
  * 背板沿用 TG 的 `iBlur3Background`（`BlurredBackgroundDrawable`）那一套：
- * - **圆角 18dp**（TG 的 `setRadius(dp(18))` 落在 48dp 上，近乎正圆）；
+ * - **正圆**（TG 的 `setRadius(dp(18))` 落在 48dp 上本来就近乎正圆；用户口径：与主钮同形）；
  * - **描边 0.4dp**（`setStrokeWidth(dpf2(0.4f), dpf2(0.4f))`），色随深浅：
  *   上边浅色 `0x20000000` / 深色 `0x11FFFFFF`（[FabSubStrokeTop]）；
  * - 底是**模糊背板**（把身后的内容模糊后上浮），本仓没有实时模糊，
@@ -880,7 +900,8 @@ private val FabSubRise = 64.dp
 @Composable
 private fun FabSubItem(label: String, glyph: GlyphKind, onClick: () -> Unit) {
     val palette = ThemeColors
-    val shape = remember { RoundedCornerShape(FabSubCornerRadius) }
+    // 正圆：与主钮同形（TG 那颗 `setRadius(dp(18))` 落在 48dp 上本来就近乎正圆）。
+    val shape = CircleShape
     Box(
         Modifier
             .size(FabSize)
@@ -898,9 +919,6 @@ private fun FabSubItem(label: String, glyph: GlyphKind, onClick: () -> Unit) {
         Glyph(kind = glyph, tint = palette.barIcon, size = 24.dp)
     }
 }
-
-/** 子钮背板圆角（TG 的 `iBlur3Background.setRadius(dp(18))`，落在 48dp 上近乎正圆）。 */
-private val FabSubCornerRadius = 18.dp
 
 /**
  * 子钮那圈 0.4dp 描边（`BlurredBackgroundDrawable.getStrokeColorTop()`：

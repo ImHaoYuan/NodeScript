@@ -7,6 +7,10 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
@@ -19,14 +23,23 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color as ComposeColor
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.ContentDrawScope
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.core.view.WindowCompat
 import com.autoscript.domain.host.HostSummary
 import com.autoscript.domain.host.TaskRegistration
+import com.autoscript.ui.components.EaseOutQuint
 import com.autoscript.ui.components.GlyphKind
 import com.autoscript.ui.components.LocalBarAction
 import com.autoscript.ui.components.TabBarBottomClearance
@@ -49,6 +62,9 @@ import com.autoscript.ui.state.ProjectState
 import com.autoscript.ui.state.RegistrationForm
 import com.autoscript.ui.state.TaskCenterState
 import com.autoscript.ui.state.TaskRowState
+import com.autoscript.ui.state.ThemeReveal
+import com.autoscript.ui.theme.DarkColors
+import com.autoscript.ui.theme.LightColors
 import com.autoscript.ui.theme.Theme
 import com.autoscript.ui.theme.ThemeMode
 import com.autoscript.ui.theme.isDark
@@ -135,6 +151,30 @@ class MainActivity : ComponentActivity() {
             // 否则白底上画一排白图标 = 看不见。`enableEdgeToEdge` 的 auto 只认系统档位，
             // 这里每次重组按当前档位覆盖一次。
             val dark = themeMode.isDark()
+            // 主题切换的圆形揭示（用户口径：从按下的那颗 ⋮ 长出一个圆，圆内已经是新主题，
+            // 菜单不收起）。做法是**先把新主题换上**，再把整块界面按一个不断长大的圆裁剪
+            // —— 圆外露出的就是 [ThemeSwitchReveal.fromBackground]（旧主题的底）。
+            // 反面做法（先画一个色圆再换主题）在圆里看到的是一块死色，不是"另一个模式"。
+            var reveal by remember { mutableStateOf<ThemeSwitchReveal?>(null) }
+            val switchTheme: (Offset) -> Unit = { origin ->
+                reveal = ThemeSwitchReveal(
+                    origin = origin,
+                    fromBackground = if (dark) DarkColors.background else LightColors.background,
+                    // **初值 0**（不是 1）：揭示的第一帧画出来就是"圆还没长"，不指望
+                    // LaunchedEffect 抢在第一次绘制前 snapTo —— 那个先后没有保证，
+                    // 抢不到就会闪一帧"整屏已是新主题"。
+                    progress = Animatable(0f),
+                )
+                themeMode = themeMode.next(dark)
+            }
+            LaunchedEffect(reveal) {
+                val active = reveal ?: return@LaunchedEffect
+                active.progress.animateTo(1f, tween(THEME_REVEAL_MILLIS, easing = EaseOutQuint))
+                // 圆已经盖满整屏，此刻撤掉裁剪与旧底色都看不出来（不会闪一下）。
+                reveal = null
+            }
+            // 这一帧有没有揭示要跑（局部 val：`reveal` 是可变的，闭包里没法智能转换）。
+            val activeReveal = reveal
             SideEffect {
                 WindowCompat.getInsetsController(window, window.decorView).apply {
                     isAppearanceLightStatusBars = !dark
@@ -150,6 +190,13 @@ class MainActivity : ComponentActivity() {
                     // 唯一事实来源，页签条与重读都从它派生，绕过去就又会漂移。
                     onSelectTab = { scope.launch { pagerState.animateScrollToPage(it) } },
                     toast = toast,
+                    // 揭示挂在**外壳这一层**（而不是某一块内容上）：圆要盖住整屏，
+                    // 页签胶囊与 toast 也在这一层里，跟着一起被裁。没有揭示时不挂。
+                    modifier = if (activeReveal == null) {
+                        Modifier
+                    } else {
+                        Modifier.drawWithContent { drawThemeReveal(activeReveal, activeReveal.progress.value) }
+                    },
                 ) { shellModifier ->
                         // 四屏装进 **HorizontalPager**：这是 TG 主页签的做法
                         // （`MainTabsActivity extends ViewPagerActivity`），换来两件事 ——
@@ -170,7 +217,7 @@ class MainActivity : ComponentActivity() {
                             when (Tab.entries[current]) {
                                 Tab.HOME -> ProjectScreen(
                                     state = projectState,
-                                    onSwitchTheme = { themeMode = themeMode.next(dark) },
+                                    onSwitchTheme = switchTheme,
                                     // 菜单项写**目标模式**（TG 的日夜项同款）：
                                     // 冷启缺省跟随系统，此时按"当下是不是深色"定文案。
                                     themeSwitchLabel = themeSwitchLabel(dark),
@@ -216,7 +263,7 @@ class MainActivity : ComponentActivity() {
                                     onOpenSettings = { hostSummary()?.openCapabilitySettings(it) },
                                     // 与项目页 ⋮ 同一项：标签 = 目标模式（TG 日夜项同款口径）。
                                     themeSwitchLabel = themeSwitchLabel(dark),
-                                    onSwitchTheme = { themeMode = themeMode.next(dark) },
+                                    onSwitchTheme = switchTheme,
                                     modifier = Modifier,
                                 )
                         }
@@ -577,6 +624,50 @@ private fun themeSwitchLabel(isDark: Boolean): String =
     if (isDark) "日间模式" else "夜间模式"
 
 /**
+ * 一次主题切换的圆形揭示（外壳持有到动画跑完为止）。
+ *
+ * @property origin 圆心 —— 那颗 ⋮ 在**根坐标**里的中心（见 `centerInRoot`；菜单本体在
+ *   独立 popup 窗口里，量不到被点那一行的坐标，故取锚点）。
+ * @property fromBackground 揭示期间**圆外**铺的底色 = 切换**前**那一档的 `background`。
+ * @property progress 半径进度 0 → 1；**建的时候就是 0**（见 `switchTheme` 那处的注释）。
+ */
+private data class ThemeSwitchReveal(
+    val origin: Offset,
+    val fromBackground: ComposeColor,
+    val progress: Animatable<Float, AnimationVector1D>,
+)
+
+/**
+ * 揭示时长：400ms。TG 的日夜切换是"看得见"的一段（不是 150ms 的淡入）——
+ * 短了看不出是个圆在长，长了每次换主题都要等它。
+ *
+ * 名字走 SCREAMING_SNAKE（本文件 [HOME_RETRY_INTERVAL_MILLIS] 同款）：`:ui` 里那十几条
+ * CamelCase 的 `…Millis` 常量是**基线里的存量债**，新写的按规则来，不再往上加。
+ */
+private const val THEME_REVEAL_MILLIS = 400
+
+/**
+ * 把当前内容按"从 [reveal] 圆心长出来的圆"裁剪后画出来（揭示的绘制侧）。
+ *
+ * 顺序是关键：**先换主题、再裁** —— 圆外铺一层 [ThemeSwitchReveal.fromBackground]（旧主题
+ * 的底），圆内是**新主题的界面本身**。反面做法（先画一个色圆再换主题）圆里只有一块死色，
+ * 不是"另一个模式"。
+ *
+ * [progress] 在 draw 期读（`Animatable.value`）：动画每帧只重绘，不重组整棵界面。
+ */
+private fun ContentDrawScope.drawThemeReveal(reveal: ThemeSwitchReveal, progress: Float) {
+    drawRect(reveal.fromBackground)
+    val radius = progress * ThemeReveal.maxRadius(
+        originX = reveal.origin.x,
+        originY = reveal.origin.y,
+        width = size.width,
+        height = size.height,
+    )
+    val circle = Path().apply { addOval(Rect(center = reveal.origin, radius = radius)) }
+    clipPath(circle) { this@drawThemeReveal.drawContent() }
+}
+
+/**
  * 外壳：内容（四屏的 pager）+ 底部页签条。
  *
  * 各屏自己画顶栏（它们各有各的副标题与行尾动作，如任务中心的「登记/刷新」），
@@ -603,9 +694,10 @@ private fun MainShell(
     pagerState: PagerState,
     onSelectTab: (Int) -> Unit,
     toast: ToastAction,
+    modifier: Modifier = Modifier,
     content: @Composable (Modifier) -> Unit,
 ) {
-    Column(Modifier.fillMaxSize()) {
+    Column(modifier.fillMaxSize()) {
         // pager 占满整个屏高（**不留**底栏的那份）：底栏改成 TG 的悬浮胶囊后它不再
         // 是"占一行的一块版面"，而是浮在内容之上的一条 —— 与内容同层（Box），内容
         // 滚动时会从胶囊底下穿过（TG 同款：会话列表从底栏下面滚过去）。
