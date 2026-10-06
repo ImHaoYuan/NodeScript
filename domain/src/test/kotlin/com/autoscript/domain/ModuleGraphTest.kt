@@ -91,6 +91,7 @@ class ModuleGraphTest {
             ":domain",
             ":bridge:java",          // §6 包级例外一（shell 装配包挂 handler）
             ":platform:capabilities",// §6 包级例外二（shell 装配包生产装配，PlatformWiring）
+            ":platform:editor",      // §6 包级例外二（同上，EditorHighlighters 转接）
             ":platform:system",      // §6 包级例外二（同上，SystemSpis 入口）
             ":engine:node-process",  // §8.1 注入点：根包 AppShellApplication 构造 engineFactory 传入
                                      //（shell 装配包仍禁碰 engine —— :app ArchitectureTest 量化）
@@ -111,6 +112,7 @@ class ModuleGraphTest {
         // :bridge:native 是运行期 .so 装载（main.cpp dlopen），不是 Kotlin 源码边。
         ":engine:node-process" to setOf(":bridge:native", ":domain"),
         ":platform:capabilities" to setOf(":domain"),
+        ":platform:editor" to setOf(":domain"),
         ":platform:system" to setOf(":domain"),
         // 呈现层只认 :domain（HostSummary 读口 + DTO）；反向依赖 :app 会成环。
         ":ui" to setOf(":domain"),

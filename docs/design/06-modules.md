@@ -1,6 +1,6 @@
 ## 6. Gradle 模块结构与依赖规则
 
-> 批判建议「约 12 个模块、不要过度拆分」，下表为落定清单（**16 个模块**；`:engine:sandbox` 空壳 2026-09-30 已从 settings 摘除、`:app-service:npm` 同日审查步骤 5 自 packager 拆出；
+> 批判建议「约 12 个模块、不要过度拆分」，下表为落定清单（**17 个模块**；`:engine:sandbox` 空壳 2026-09-30 已从 settings 摘除、`:app-service:npm` 同日审查步骤 5 自 packager 拆出；
 > sandbox 处置见 [`design-decisions.md`](../design-decisions.md) 已推翻表），薄模块已合并（原 4 个 `:platform:*` 合并为 2 个，插件管理器/打包器等薄服务并入对应模块）—
 > —拆分的唯一目的是：**让依赖方向能在 Gradle 层面被强制**。
 

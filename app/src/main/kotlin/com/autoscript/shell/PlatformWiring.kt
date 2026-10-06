@@ -26,6 +26,7 @@ import com.autoscript.platform.system.power.WakeLockLedger
 import com.autoscript.platform.capabilities.a11y.A11yEventRing
 import com.autoscript.platform.capabilities.a11y.InMemoryUiTree
 import com.autoscript.platform.capabilities.a11y.SystemA11yBridge
+import com.autoscript.platform.editor.EditorHighlighters
 
 /**
  * 生产能力装配：`SystemSpis` + `CapabilityNamespaces` → `AppShellKit.assemble` 的注入束
@@ -173,6 +174,14 @@ object PlatformWiring {
      * null → 图像面不注入（见 [Injection.imagesHandler]）。**默认值在装配期求值**，
      * 单测可传 null/替身绕过 native —— 同一函数真假可注入，不绑死构造。
      */
+    /**
+     * 语法高亮会话工厂（编辑器前端调用，树形解析器住 `:platform:editor`）。
+     * 根包 `AppShellApplication` 经此拿工厂 —— 它不 import 任何 `com.autoscript.platform..`
+     * （ArchitectureTest 看住）。JS 扩展 → tree-sitter；非 JS → NONE；so 缺位 → NONE。
+     */
+    fun syntaxHighlighter(relPath: String): com.autoscript.domain.editor.SyntaxHighlighter =
+        EditorHighlighters.create(relPath)
+
     /**
      * §8.7 唤醒锁账本的生产构造缝（账本类住 `:platform:system`）。
      * 根包 `AppShellApplication` 经此拿账本 —— 它不 import 任何
