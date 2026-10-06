@@ -27,6 +27,10 @@ node-runtime-build/out-opencv/
 .DS_Store
 .kotlin/
 
+# 交付产物落点（本机出包用：`out/` 放 assembleDebug 出来的 APK，见 README/CLAUDE.local）。
+# 不入库：APK 是构建产物，体积大且与源码不同源。
+/out/
+
 # 本机私人配置（机器路径等；CLAUDE.md 指过来的那份）
 CLAUDE.local.md
 

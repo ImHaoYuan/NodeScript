@@ -6,9 +6,18 @@
          仓库无 appcompat 依赖，只能挂平台主题；深浅两版由 values-night 分派，
          用来对齐窗口背景（见 res/values*/themes.xml）。不声明会让设备默认主题带出 ActionBar。 -->
     <application>
+        <!-- 方向锁竖屏（2026-10-06）：横放手机时系统会在屏幕左下角浮出一颗"旋转"按钮
+             （SystemUI 的 RotationButtonController）。那颗钮不是本仓画的，是 WindowManager
+             在 `DisplayRotation.isRotationChoiceAllowed()` 里按**当前 Activity 的
+             requestedOrientation** 决定的：只有 UNSPECIFIED / USER / FULL_USER /
+             USER_LANDSCAPE / USER_PORTRAIT 这五档，系统才把"旋转建议"发给状态栏
+             （`onProposedRotationChanged` → `sendProposedRotationChangeToStatusBarInternal`）；
+             声明 PORTRAIT 之后走 else 分支，连建议都不发，按钮自然不出现。
+             版式侧也确实是竖屏版式（底部页签条 + 列表 + 右下角 FAB），横屏没有第二套布局。 -->
         <activity
             android:name="com.autoscript.ui.MainActivity"
             android:exported="true"
+            android:screenOrientation="portrait"
             android:theme="@style/Theme.AutoScript">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
