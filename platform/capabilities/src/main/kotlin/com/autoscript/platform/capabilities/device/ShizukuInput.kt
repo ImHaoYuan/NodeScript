@@ -16,10 +16,12 @@ import java.util.concurrent.TimeUnit
  *
  * **为什么本文件不 import `rikka.shizuku.*`**：那是**冻结文件**（`gradle/libs.versions.toml`）
  * 里的新依赖，且该依赖只在**真机**上有意义（JVM 单测跑在 mock android.jar 上，碰
- * `Shizuku` 静态初始化即炸）。所以与 `:app` 既有做法一致：**反射调用**，依赖声明成
- * `compileOnly`（编得过、不进 APK 的运行时必需面 —— 缺它只是本通道不可用，不是崩溃）。
- * 反射的失败面（类不在、方法签名变了）**全部折成 `ERR_PERMISSION_DENIED`**：
- * 「Shizuku 没装」与「Shizuku 版本不兼容」对用户是同一句话 —— 去装/去更新。
+ * `Shizuku` 静态初始化即炸）。所以与 `:app` 既有做法一致：**反射调用**。
+ * **但依赖不是 `compileOnly`**（初稿的注释曾这么写，是错的）：`ShizukuProvider` 是本应用
+ * manifest 里声明的 ContentProvider，**运行时必须真在 APK 里**（类不在 = 授权握手不成立），
+ * 所以是 `implementation`，两个坐标都进 APK。反射的失败面（类不在、方法签名变了）**全部
+ * 折成 `ERR_PERMISSION_DENIED`**：「Shizuku 没装」与「Shizuku 版本不兼容」对用户是同一句话
+ * —— 去装/去更新。
  *
  * **未真机验证**：设备道 2026-10-06 已裁（backlog B3/E3）。JVM 侧只能钉「Shizuku 缺席时
  * 如实拒绝」这条；真机上的「装好 Shizuku 后能不能注进去」尚无人跑过。
