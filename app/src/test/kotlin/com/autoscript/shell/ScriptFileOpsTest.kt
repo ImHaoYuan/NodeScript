@@ -3,6 +3,7 @@ package com.autoscript.shell
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.name
+import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -134,4 +135,34 @@ class ScriptFileOpsTest {
         Files.write(project.resolve("big.js"), ByteArray((ScriptFileOps.MAX_EDIT_BYTES + 1).toInt()))
         assertThrows(IllegalArgumentException::class.java) { ScriptFileOps.read(dir, "demo", "demo/big.js") }
     }
+
+    @Test
+    fun `无 NUL 的非法 UTF8 拒绝且原始字节不变`() {
+        val project = Files.createDirectories(dir.resolve("scripts/demo"))
+        val invalid = listOf(
+            byteArrayOf(0xC3.toByte(), 0x28),
+            byteArrayOf(0xE4.toByte(), 0xB8.toByte()),
+            byteArrayOf(0xED.toByte(), 0xA0.toByte(), 0x80.toByte()),
+        )
+        for (bytes in invalid) {
+            val target = project.resolve("bad.js")
+            Files.write(target, bytes)
+            val error = assertThrows(IllegalArgumentException::class.java) {
+                ScriptFileOps.read(dir, "demo", "demo/bad.js")
+            }
+            assertTrue(error.message!!.contains("UTF-8"))
+            assertArrayEquals(bytes, Files.readAllBytes(target))
+        }
+    }
+
+    @Test
+    fun `合法中文补充字符与空文件都可读取`() {
+        val project = Files.createDirectories(dir.resolve("scripts/demo"))
+        val text = "中文脚本😀\n合法替换字符：�"
+        Files.write(project.resolve("valid.js"), text.toByteArray(Charsets.UTF_8))
+        Files.createFile(project.resolve("empty.js"))
+        assertEquals(text, ScriptFileOps.read(dir, "demo", "demo/valid.js"))
+        assertEquals("", ScriptFileOps.read(dir, "demo", "demo/empty.js"))
+    }
+
 }
