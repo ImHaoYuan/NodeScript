@@ -75,10 +75,13 @@ private val jdkProcessPidMethod: java.lang.reflect.Method? = try {
  * 的分辨，而病因诊断（原生层 fprintf/addon 报错/脚本 throw）几乎全在 stderr ——
  * 合流后想把"真病因"从"常规输出"里捞出来多一次无谓的串扰。
  *
- * `Process.pid()` **在 android.jar 桩面（compileSdk 35）根本不存在**——直接调用编译不过
- * （本机 Android SDK 编译门抓出；此前"compileSdk 35 可见"的判断是被 JDK 的 `java.lang.*`
- * 遮蔽后的误判，javap 不解包就看到的是 JDK 自己的类）。故取 pid 走反射探测：桌面 JDK 恒有
- * 真 pid；Android 运行时有该方法则取，没有如实回 null（§8.4 noPid 路径，不是崩溃、不是 0/自身）。
+ * `Process.pid()` **不在 Android 平台 API 表**里 —— `platforms/android-3{5,6}/data/api-versions.xml`
+ * 的 `java/lang/Process` 只有 `destroyForcibly`/`isAlive`/`waitFor(…,TimeUnit)`（均 since 26），
+ * **没有 `pid`**；`java/lang/ProcessHandle` 整类也缺席。故直接调用会被 lint 的 `NewApi` 抓
+ * （全模块 `lintDebug` 的 `checkDependencies`，见 `.github/workflows/ci.yml` 的 android-build job）。
+ * 注意**不是** javac 抓的：android.jar 桩面里 `pid()` 其实**有**（libcore 派生），javac 放行 ——
+ * 这也正是"看着能用"的错觉来源。故取 pid 走反射探测：桌面 JDK 恒有真 pid；Android 运行时有该
+ * 方法则取，没有如实回 null（§8.4 noPid 路径，不是崩溃、不是 0/自身）。
  */
 class ProcessBuilderLauncher : ProcessLauncher {
 

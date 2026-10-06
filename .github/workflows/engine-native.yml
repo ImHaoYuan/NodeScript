@@ -1,0 +1,266 @@
+name: engine-native
+
+# 「真形态 APK」门（docs/backlog.md **B5**，2026-10-06 拍板新开此条；裁决全文见
+# docs/design-decisions.md 的 B5 行）。
+#
+# 为什么需要它：`ci.yml` 的 android-build job 出的 APK **不含引擎二进制** ——
+# `engine/node-process/build/native-local/*`、`node-runtime-build/out/{libnode.so,npm}`、
+# `out-opencv/libopencv.so` 都不在 git，装配期 `autoscript.engine-natives` 按「缺位只 warn」
+# 放行。那份 APK 的用途是「装配链通不通」，不是「设备上跑不跑得起来」。
+#
+# B5 的真堵点**不是**「产物取不到」，而是**没有任何 workflow 产出 `noden` /
+# `bridge_native.node`**：node-slice（libnode + npm 素材）与 image-native（libopencv）
+# 的 artifact 都在且可取，只有这两个引擎件从来没有生产者。所以本 workflow 自己跑
+# `build-native.sh`，再跨 workflow 取那两条 artifact 喂 `LIBNODE`/`NPM_CLI_ROOT`/`LIBOPENCV`，
+# 起 `assembleDebug`，最后逐件断言。
+#
+# 为什么**不**并进 `ci.yml`（2026-10-06 拍板）：分钟预算。NDK zip 722MB 下载 + Node 头文件包
+# + C++ 交叉编译是分钟级，塞进 PR 门会把「秒级红绿」变成「十分钟才知道」。PR 门仍由
+# `ci.yml` 的 assembleDebug（无引擎件）守着；真形态 APK 是**独立可点**的门。
+#
+# **诚实边界**：本 workflow 取的是 node-slice / image-native 的**最新成功 artifact**，
+# 与本次 commit 的源码未必同源。它断言的对象是「装配链能不能把四件摆对、ABI 面收没收敛」，
+# **不是**「引擎二进制的可复现构建」（后者归 node-slice / image-native 自己的门）。
+on:
+  push:
+    paths:
+      - 'engine/node-process/**'
+      - 'bridge/native/**'
+      - 'app/**'
+      - 'build-logic/**'
+      - 'gradle/libs.versions.toml'
+      - 'node-runtime-build/VERSIONS.env'
+      - '.github/workflows/engine-native.yml'
+  pull_request:
+    paths:
+      - 'engine/node-process/**'
+      - 'bridge/native/**'
+      - 'app/**'
+      - 'build-logic/**'
+      - 'gradle/libs.versions.toml'
+      - 'node-runtime-build/VERSIONS.env'
+      - '.github/workflows/engine-native.yml'
+  workflow_dispatch:
+
+# 最小权限：读仓库内容 + **读 Actions**（跨 workflow 取 artifact 要它）。
+# 产物上传走 artifact 的运行时令牌，不需要写权限。
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: engine-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  true-form-apk:
+    name: 真形态 APK（noden + libnode + libc++_shared + libopencv + npm 素材）
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # 与 node-slice 同一 WORK 布局（$WORK/{dl,ndk}）：下载层缓存可复用它的条目。
+      WORK_DIR: ${{ github.workspace }}/work
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: 安装 Android SDK 组件（platform-36 + build-tools）
+        run: |
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+            "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: bridge/js/package-lock.json
+
+      # dist 是构建产物（不在 git），而 `prepareBridgeDistAssets` 缺件**直接红** ——
+      # 这一步是 assemble 的前置，不是可选优化（与 ci.yml 的 android-build job 同因）。
+      - name: 构建 facade dist（随包资产 prepareBridgeDistAssets 的输入）
+        run: |
+          npm --prefix bridge/js ci
+          npm --prefix bridge/js run build
+
+      - name: 安装编译期依赖（build-essential + curl + unzip + xz + python3）
+        run: |
+          # build-native.sh 要 gcc/g++（probe TU）、python3（readelf 断言脚本）；
+          # unzip 解 NDK zip、xz 解 Node 头文件包（.tar.gz 走 tar，但保持与 node-slice 同款工具箱）。
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential curl unzip xz-utils python3
+
+      # 下载层缓存：key 用**本 workflow 自己的**前缀（绝不写进 node-slice 的 key ——
+      # 两个 workflow 同 key 时，先跑的那个会把只有一半内容的 $DL 存进去，后跑的命中后
+      # 得重下 Node tarball）。restore-keys 仍指向 node-slice 的前缀：冷启动可白捡
+      # 它缓存里的 NDK zip（722MB，命中即省几分钟），未命中则干净重下。
+      - name: 缓存下载层（NDK zip + Node 头文件包）
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/work/dl
+          key: engine-native-dl-${{ hashFiles('node-runtime-build/VERSIONS.env') }}
+          restore-keys: node-dl-
+
+      - name: 安装 NDK r28c（dl.google.com zip + size/sha1 校验，同 node-slice 手法）
+        run: |
+          # 不借 sdkmanager：build-native.sh 与装配任务都按 ANDROID_NDK_HOME 找 NDK，
+          # 而 sdkmanager 装到 $ANDROID_SDK_ROOT/ndk/<VERSION_CODE>/（目录语义是版本码
+          # 不是版本名），中间得再软链一层。改走 zip：与 fetch-and-build.sh §2 同源同校验。
+          V=node-runtime-build/VERSIONS.env
+          NDK_VERSION="$(sed -n 's/^NDK_VERSION=//p' "$V")"
+          NDK_ZIP_SIZE="$(sed -n 's/^NDK_ZIP_SIZE=//p' "$V")"
+          NDK_SHA1="$(sed -n 's/^NDK_SHA1=//p' "$V")"
+          API="$(sed -n 's/^ANDROID_API=//p' "$V")"
+          [ -n "$NDK_VERSION" ] && [ -n "$NDK_ZIP_SIZE" ] && [ -n "$NDK_SHA1" ] \
+            || { echo "VERSIONS.env 缺 NDK_VERSION/ZIP_SIZE/SHA1"; exit 1; }
+          [ -n "$API" ] || { echo "VERSIONS.env 缺 ANDROID_API"; exit 1; }
+          DL="$WORK_DIR/dl"
+          mkdir -p "$DL" "$WORK_DIR/ndk"
+          ZIP="$DL/android-ndk-${NDK_VERSION}-linux.zip"
+          if [ -f "$ZIP" ]; then
+            echo "[skip] NDK zip 已在（下载层缓存命中），跳过下载"
+          else
+            echo "下载 NDK $NDK_VERSION（约 $((NDK_ZIP_SIZE / 1024 / 1024))MB）…"
+            curl -fsS -C - --retry 3 --retry-all-errors -o "$ZIP" \
+              "https://dl.google.com/android/repository/$(basename "$ZIP")"
+          fi
+          echo "校验 size=$NDK_ZIP_SIZE sha1=${NDK_SHA1:0:16}…"
+          actual_size=$(stat -c%s "$ZIP")
+          [ "$actual_size" = "$NDK_ZIP_SIZE" ] || { echo "NDK zip 大小不符: $actual_size"; exit 1; }
+          actual_sha1=$(sha1sum "$ZIP" | awk '{print $1}')
+          [ "$actual_sha1" = "$NDK_SHA1" ] || { echo "NDK sha1 不符: $actual_sha1"; exit 1; }
+          unzip -q "$ZIP" -d "$WORK_DIR/ndk"
+          TOOLCHAIN="$WORK_DIR/ndk/android-ndk-$NDK_VERSION/toolchains/llvm/prebuilt/linux-x86_64"
+          [ -x "$TOOLCHAIN/bin/aarch64-linux-android${API}-clang" ] \
+            || { echo "解包后无 aarch64-linux-android${API}-clang: $TOOLCHAIN"; exit 1; }
+          echo "ANDROID_NDK_HOME=$WORK_DIR/ndk/android-ndk-$NDK_VERSION" >> "$GITHUB_ENV"
+          echo "[OK] NDK 就位: $TOOLCHAIN"
+
+      - name: 取 node-slice / libopencv artifact（跨 workflow；喂 LIBNODE / NPM_CLI_ROOT / LIBOPENCV）
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # 取**最新一次成功 run** 的 artifact。gh 在 ubuntu-latest 上预装；
+          # 权限由 job 的 `actions: read` 给（artifact 下载走 Actions 读端点）。
+          fetch() {   # $1=workflow 文件  $2=artifact 名  $3=落地目录
+            local wf="$1" name="$2" dest="$3" rid
+            rid="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow "$wf" \
+                     --status success --limit 1 --json databaseId --jq '.[0].databaseId')"
+            [ -n "$rid" ] && [ "$rid" != "null" ] \
+              || { echo "::error::$wf 没有任何成功的 run —— 先跑一次它（workflow_dispatch）再来"; exit 1; }
+            echo "取 $wf 的 artifact「$name」（run $rid）→ $dest"
+            rm -rf "$dest"; mkdir -p "$dest"
+            gh run download "$rid" --repo "$GITHUB_REPOSITORY" -n "$name" -D "$dest" \
+              || { echo "::error::artifact「$name」下载失败（多半是过了 retention 已过期）—— 重跑 $wf"; exit 1; }
+          }
+          fetch node-slice.yml node-slice "$RUNNER_TEMP/ns"
+          fetch image-native.yml libopencv "$RUNNER_TEMP/ocv"
+
+          [ -f "$RUNNER_TEMP/ns/libnode.so" ] \
+            || { echo "::error::node-slice artifact 里没有 libnode.so"; ls -l "$RUNNER_TEMP/ns"; exit 1; }
+          [ -f "$RUNNER_TEMP/ocv/libopencv.so" ] \
+            || { echo "::error::libopencv artifact 里没有 libopencv.so"; ls -l "$RUNNER_TEMP/ocv"; exit 1; }
+          echo "LIBNODE=$RUNNER_TEMP/ns/libnode.so"           >> "$GITHUB_ENV"
+          echo "NPM_CLI_ROOT=$RUNNER_TEMP/ns/npm"             >> "$GITHUB_ENV"
+          echo "LIBOPENCV=$RUNNER_TEMP/ocv/libopencv.so"      >> "$GITHUB_ENV"
+          echo "--- node-slice 出库自审 ---"; cat "$RUNNER_TEMP/ns/SHASUMS256"
+          echo "--- libopencv 出库自审 ---"; cat "$RUNNER_TEMP/ocv/SHASUMS256"
+
+      - name: 取 Node 头文件包（build-native.sh 的 NODE_SRC）
+        run: |
+          # build-native.sh 只从 NODE_SRC/src 取 node_api.h 等 N-API 头（addon 的 -I），
+          # 不碰 Node 源码树本体 —— 所以用官方 **headers tarball**（10MB）而不是 600MB 源码包。
+          # 版本仍从 VERSIONS.env 取（与 node-slice 同一条钉死），哈希走官方 SHASUMS256.txt：
+          # 刻意**不**把 headers 的 sha256 写进 VERSIONS.env —— 那会改掉它的内容哈希，
+          # 连带把 node-slice / image-native 的下载层与 ccache 全部失效（两条半小时级的门
+          # 白跑一轮），而收益只是省一次 10MB 下载。
+          V=node-runtime-build/VERSIONS.env
+          NODE_VERSION="$(sed -n 's/^NODE_VERSION=//p' "$V")"
+          [ -n "$NODE_VERSION" ] || { echo "VERSIONS.env 缺 NODE_VERSION"; exit 1; }
+          DL="$WORK_DIR/dl"; mkdir -p "$DL"
+          TARBALL="node-v$NODE_VERSION-headers.tar.gz"
+          if [ -f "$DL/$TARBALL" ]; then
+            echo "[skip] $TARBALL 已在（下载层缓存命中）"
+          else
+            curl -fsS --retry 3 -o "$DL/$TARBALL" "https://nodejs.org/dist/v$NODE_VERSION/$TARBALL"
+          fi
+          curl -fsS --retry 3 -o "$DL/SHASUMS256.txt" "https://nodejs.org/dist/v$NODE_VERSION/SHASUMS256.txt"
+          ( cd "$DL" && grep " $TARBALL\$" SHASUMS256.txt | sha256sum -c - ) \
+            || { echo "::error::headers tarball 与官方 SHASUMS256.txt 不符"; exit 1; }
+          tar -xzf "$DL/$TARBALL" -C "$RUNNER_TEMP"
+          HDR="$RUNNER_TEMP/node-v$NODE_VERSION/include/node"
+          [ -f "$HDR/node_api.h" ] || { echo "::error::headers 包里没有 node_api.h: $HDR"; exit 1; }
+          # build-native.sh 的契约是 $NODE_SRC/src/node_api.h；headers 包的布局是
+          # include/node/ —— 用一层软链把两者接上（不复制、不改脚本、机器路径不入库）。
+          mkdir -p "$RUNNER_TEMP/nodesrc"
+          ln -sfn "$HDR" "$RUNNER_TEMP/nodesrc/src"
+          [ -f "$RUNNER_TEMP/nodesrc/src/node_api.h" ] || { echo "::error::NODE_SRC 软链没接上"; exit 1; }
+          echo "NODE_SRC=$RUNNER_TEMP/nodesrc" >> "$GITHUB_ENV"
+          echo "[OK] NODE_SRC=$RUNNER_TEMP/nodesrc（src → $HDR，$(ls "$HDR" | wc -l) 个头文件）"
+
+      - name: 编引擎件（build-native.sh：noden + bridge_native.node + 符号对表 + 16KB 门禁）
+        run: bash engine/node-process/scripts/build-native.sh
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+
+      - name: 构建真形态 Debug APK
+        run: ./gradlew :app:assembleDebug --stacktrace
+
+      - name: 断言 APK 真形态（四件齐 + npm 素材 + ABI 只 arm64）
+        run: |
+          set -euo pipefail
+          APK="$(ls app/build/outputs/apk/debug/*.apk)"
+          [ -f "$APK" ] || { echo "::error::没出 APK"; exit 1; }
+          echo "APK: $APK（$(stat -c%s "$APK") 字节）"
+          BT="$ANDROID_SDK_ROOT/build-tools/36.0.0"
+          # aapt2 会**安静地**把 `<dir>_*` 形态的条目从 listing 里滤掉（2026-10-02 踩过），
+          # 所以条目清单一律走 unzip，aapt2 只用来读 badging（native-code / SDK 版本）。
+          unzip -l "$APK" | awk '{print $4}' > "$RUNNER_TEMP/apk-entries.txt"
+
+          echo "--- lib/arm64-v8a/ ---"
+          grep -E '^lib/arm64-v8a/' "$RUNNER_TEMP/apk-entries.txt" || true
+          for f in libnoden.so libnode.so libc++_shared.so libopencv.so; do
+            grep -qx "lib/arm64-v8a/$f" "$RUNNER_TEMP/apk-entries.txt" \
+              || { echo "::error::APK 缺 lib/arm64-v8a/$f"; exit 1; }
+          done
+
+          # ABI 面：**只许有 arm64-v8a**（B10 拍板）。多出别的 = 声明面对装不上的设备做了承诺。
+          echo "--- native-code ---"
+          # compileSdkVersion 挂在 package: 行上、minSdkVersion 自带前缀 —— 不写窄锚点。
+          "$BT/aapt2" dump badging "$APK" | grep -E "^(package:|native-code|minSdkVersion|targetSdkVersion)" || true
+          NC="$("$BT/aapt2" dump badging "$APK" | sed -n "s/^native-code: //p")"
+          [ "$NC" = "'arm64-v8a'" ] \
+            || { echo "::error::native-code 不是单 arm64-v8a：$NC（B10：app/build.gradle.kts 的 ndk.abiFilters）"; exit 1; }
+
+          # addon 走 assets（.node 不进 jniLibs：PackageManager 只提取 *.so）。
+          grep -qx 'assets/bridge-addon/bridge_native.node' "$RUNNER_TEMP/apk-entries.txt" \
+            || { echo "::error::APK 缺 assets/bridge-addon/bridge_native.node"; exit 1; }
+          # facade dist 随包（脚本侧 require('auto') 的落位源）。
+          for f in bootstrap.js index.js; do
+            grep -qx "assets/bridge-dist/$f" "$RUNNER_TEMP/apk-entries.txt" \
+              || { echo "::error::APK 缺 assets/bridge-dist/$f"; exit 1; }
+          done
+
+          # npm 素材：件数 + 两个锚（prepareNpmCliAssets 的「有货但缺锚 → 红」同一条判据）。
+          NPM_N="$(grep -c '^assets/npm/' "$RUNNER_TEMP/apk-entries.txt" || true)"
+          echo "assets/npm/ 条目数: $NPM_N"
+          [ "$NPM_N" -gt 1000 ] \
+            || { echo "::error::assets/npm/ 只随了 $NPM_N 条（素材没落位？NPM_CLI_ROOT 指对了没）"; exit 1; }
+          for f in assets/npm/bin/npm-cli.js assets/npm/bin/npx-cli.js; do
+            grep -qx "$f" "$RUNNER_TEMP/apk-entries.txt" \
+              || { echo "::error::APK 缺 $f（半瘫 CLI 比没交付更糟）"; exit 1; }
+          done
+          echo "[OK] 真形态 APK 断言全过"
+
+      - name: 上传真形态 APK
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: android-debug-true-form
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn

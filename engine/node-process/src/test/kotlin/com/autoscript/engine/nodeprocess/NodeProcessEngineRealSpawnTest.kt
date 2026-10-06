@@ -63,8 +63,9 @@ class NodeProcessEngineRealSpawnTest {
     }
 
     /**
-     * 自身 pid（仅本桌面单测用）：`ProcessHandle` 同样不在 android.jar 桩面（compileSdk 35），
-     * 直接引用会把 gradle/CI 的 testDebugUnitTest 编译炸掉 —— 反射取，拿不到回 null（断言仍成立但弱化）。
+     * 自身 pid（仅本桌面单测用）：`ProcessHandle` 同样**不在 Android 平台 API 表**里
+     * （`api-versions.xml` 整类缺席，与 `Process.pid()` 同因，见 `ProcessLauncher.kt` KDoc），
+     * 直接引用会被 lint 的 `NewApi` 抓 —— 反射取，拿不到回 null（断言仍成立但弱化）。
      */
     private fun selfPid(): Long? = try {
         val ph = Class.forName("java.lang.ProcessHandle")

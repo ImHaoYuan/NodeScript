@@ -13,7 +13,7 @@
 | **打包** | 模板 APK 改写（AXML/ARSC 编辑替换 application + 注入 assets/project），复用宿主 Node 引擎 so | AutoJsPro 已验证的发行形态；不需要为每个脚本重编 C++ | APK 依赖宿主引擎版本 |
 | **npm 支持** | **D（混合）**：vendored 真 npm CLI（npm 12.x 系，Node≥24.15）在**专用安装会话进程**内进程内执行——P0 默认零 spawn（npm12 官方 `allowScripts=none` 等默认语义把「无 child_process」从 workaround 变成契约）；P1 加 spawn 桥升级通道（批准后 lifecycle/npm run）；内置离线 bundle + 精选 tarball 种子通道 | 纯 JS 生态（axios/dayjs/lodash/ws 等）安装**实证无需子进程**（strace 实测 0 execve）；真 CLI 白拿 lockfile v3/audit/审批语义且可审计；不重造轮子 | npm CLI ~8–9MB 体积；供应链护栏只能靠带外信任锚与审批人机分离（§10） |
 | **进程隔离** | `:main`(UI+服务) / `:node0..N`(脚本) | §4 进程拓扑（`:sandbox` 已裁，图中留痕标注） | — |
-| **SDK 基线** | minSdk 24 / compile&target **36**（Android 16）/ arm64-v8a 首发（后续 x86_64）；**16KB ELF 对齐进 CI 门禁** | 2026 事实标准；16KB 页设备成为主流 | 放弃 32 位旧机 |
+| **SDK 基线** | minSdk **26** / compile&target **36**（Android 16）/ **ABI 只发 arm64-v8a**（`ndk.abiFilters` 单值，B10 拍板；x86_64 待 P1）；**16KB ELF 对齐进 CI 门禁** | 2026 事实标准；16KB 页设备成为主流 | 放弃 32 位旧机 |
 
 ---
 
