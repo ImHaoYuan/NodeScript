@@ -1,8 +1,8 @@
 // bridge/image —— match 族（模板匹配：金字塔粗筛 + 原像素精配）
 //
-// 2026-10-01 D7 自 `imgnative.cpp` 拆出（同批拆出 feature 族；共享面的口子见
-// `imgnative_internal.h`）。**语义逐字未改**：机制说明留在各函数自己的 KDoc 里，
-// 拆分只搬位置 —— 三段大注释（金字塔路径 / 相位平均粗模板 / 计算出锁）跟着代码走。
+// 自 `imgnative.cpp` 拆出（同批拆出 feature 族；共享面的口子见 `imgnative_internal.h`）。
+// **拆分只搬位置**：机制说明留在各函数自己的 KDoc 里，三段大注释（金字塔路径 /
+// 相位平均粗模板 / 计算出锁）跟着代码走。
 //
 // 本 TU 自持两张派生缓存（模板端 `NeedlePrep` / 场景端 `ScenePrep`）与那把缓存锁：
 // 它们是**帧不可变**这一条不变式的派生物，帧没了就必须同批清掉 —— 失效钩子
@@ -32,8 +32,6 @@ namespace {
 // 仅缓存“模板端”的粗筛准备结果。模板帧也是不可变的；A2/重复匹配场景里，
 // 每次重做 cvtColor + resize + 相位平均没有信息增量。独立 cache 锁避免
 // 为了这几个毫秒把 g_mu 的匹配段重新变成长锁。release 时同步清掉对应 ref。
-// （原 phase_worst 相位探针分数字段 2026-10-02 随相位门一并移除：探针只服务
-// 那道门，门没了留着是死代码 —— 见设计决策 24。）
 struct NeedlePrep {
     double sc = 1.0;
     cv::Mat small;
@@ -77,13 +75,10 @@ struct MatchHit {
 //   AUTOSCRIPT_MATCH_MIN_TEMPL_SIDE=48    模板短边低于此值 → 精确路径
 //   AUTOSCRIPT_MATCH_MARGIN=0.10          粗筛候选带宽：提出 conf ≥ thr−margin 的峰
 //   AUTOSCRIPT_MATCH_MAX_CANDIDATES=8     精配候选数下限（自适应 K 的地板，见 kKMax）
-// 【2026-10-01 移除 `AUTOSCRIPT_MATCH_HEADROOM`】原 `floor = 带宽 + headroom`（0.05）
-// 的意图是"保守一点"，但实测它把「够得着带宽、只是最差相位余量薄」的模板也挡回
-// 精确路径 —— 300×150 全帧：带宽 0.75、相位 0.8086，floor 0.80 差 0.0086 被挡，
-// 单次 473~1467ms。而**粗筛只负责提名**（候选还要过带宽、坐标/置信度回原图重算），
-// 带宽之上再留余量是重复上保险，收益为 0、代价是一次全图精确匹配。现 floor == 带宽。
-// 【2026-10-02】相位门（floor 落地的那道）整体移除，floor 不复存在；提名带宽仍
-// 单源在 coarse_margin_of，负结果改由 match_pyramid 兜底回精确（设计决策 24）。
+// **别再加"带宽之上的余量"**：粗筛只负责**提名**（候选还要过带宽、坐标/置信度回原图
+// 重算），带宽之上再留余量是重复上保险 —— 收益为 0，代价是把「够得着带宽、只是余量薄」
+// 的模板挡回精确路径（实测 300×150 全帧单次 473~1467ms）。提名带宽单源在
+// coarse_margin_of，负结果由 match_pyramid 兜底回精确（设计决策 24）。
 struct MatchTune {
     int min_templ_side;
     double margin;
@@ -115,8 +110,7 @@ const MatchTune& match_tune() {
     return t;
 }
 
-/** 某粗筛尺度下的候选带宽 —— 提名线单源（原兼作相位 floor 基准，2026-10-02
- *  相位门已拆，见设计决策 24）。 */
+/** 某粗筛尺度下的候选带宽 —— **提名线单源**，别在别处再算一份。 */
 double coarse_margin_of(double sc) {
     return match_tune().margin + (sc <= 0.25 ? 0.05 : 0.0);
 }
@@ -124,16 +118,13 @@ double coarse_margin_of(double sc) {
 // 粗筛层模板短边最低对应 12px（再小的模板继续走精确路径）。与上面三个不同：
 // 它不给调参口（合成屏调参时改过一次就够，扫它对真机决策无增量）。0.25× 对
 // 48px 模板意味着 12px 短边 —— 48×48 这档正好进粗筛。
-// 【2026-10-02 E2 拆两门】原 std 门（kMinTemplStd=12，挡纯色/平噪）与相位门
-// （phase_worst ≥ floor，挡「粗尺度够不着提名线」的模板）一并移除：两门的职责
-// （防假漏检）由 match_pyramid 负结果**回全图精确路径的兜底**结构性接管 ——
-// 门挡对了省一次全图 matchTemplate，挡错了赔一次假漏检；兜底把「挡错」的代价
-// 封顶为「多付一次粗筛」。判据/实测见 docs/design/07-bridge.md §7.7 的
-// 2026-10-02 段与 docs/design-decisions.md 第 24 项。
+// **别在这里加"挡一挡"的门**（曾有过 std 门与相位门，已拆）：防假漏检的职责由
+// match_pyramid 负结果**回全图精确路径的兜底**结构性接管 —— 门挡对了省一次全图
+// matchTemplate，挡错了赔一次假漏检；兜底把「挡错」的代价封顶为「多付一次粗筛」。
+// 判据与实测见 docs/design/07-bridge.md §7.7、裁决见 design-decisions 第 24 项。
 constexpr double kMinCoarseSide = 12.0;
 // 相位平均模板的重采样参数：B = 反射填充边宽（毫像素模板的一圈“假邻域”，
-// 让粗图带上下文）。原相位探针（门的度量，扫 {1,2,3}² 各相位取最差分）
-// 2026-10-02 已随门移除。
+// 让粗图带上下文）。
 constexpr int kPhaseBorder = 12;
 // 自适应 K（评审二轮）：精配总像素预算固定，窗面积小 → 放更多候选（≤kKMax）。
 // 对症重复峰：K=8 时 12 枚等价图标的真峰排第 9 就出局；窗小的时候多提名几乎免费。
@@ -156,8 +147,6 @@ MatchHit match_exact(const cv::Mat& h, const cv::Mat& n, double thr) {
  * 相位重采样（相位平均模板的取材原语，2026-10-01 起）：模板按粗筛栅格的各相位
  * 做反射填充 → 缩小，供 build_phase_avg 对齐取平均。0.25× 采 {0..3}² 十六个
  * 相位（覆盖 0.25/0.5/0.75/1 四种错位），0.5× 只有半格相位。
- * （原相位探针 phase_probe —— 各相位自打取最差分，服务相位门 —— 2026-10-02
- * 随门一并移除，见设计决策 24。）
  */
 cv::Mat phase_resample(const cv::Mat& gray, double sc, int dx, int dy) {
     cv::Mat c;
@@ -174,7 +163,7 @@ inline int phase_origin(double sc, int d) {
 }
 
 /**
- * 相位平均粗模板（2026-10-01，治「大模板全帧恒精确 1.4s」）—— 相位探针的同源推广。
+ * 相位平均粗模板（治「大模板全帧恒精确 1.4s」）。
  *
  * **测出来的病灶与一般直觉相反，先记下来**：粗筛的假 miss 不是粗模板"太好"，而是
  * 粗模板**只对住了一个相位**。现状粗模板 = `resize(gray, sc)` 相位 0，等于赌"场景里
@@ -196,8 +185,8 @@ inline int phase_origin(double sc, int d) {
  *   * 平均对**对齐/结构起支配**的模板（UI/文字/图标）抬相位地板；对 i.i.d. 高频
  *     噪声模板（case6c 那种）会把结构抹平 —— 但那类模板粗筛本来就给不出可信
  *     提名（相位 0 自匹配虚高 1.0，任何相位错位都塌），平均只是把"虚高 1.0"
- *     换成"诚实的低分"。2026-10-02 起门已拆、负结果一律回精确兜底（设计决策
- *     24），低分的后果从「假漏检」变成「多付一次粗筛」，不会制造假中。
+ *     换成"诚实的低分"。负结果一律回精确兜底，低分的后果是「多付一次粗筛」
+ *     而不是「假漏检」，不会制造假中。
  *   * 粗分整体下移（best 1.0 → 0.97）：带宽是**绝对**阈值，所以提名会略保守；
  *     精配仍按原 4 通道窗重算，报出的数字与精确路径一字不差（差分门逐字段钉）。
  */
@@ -309,11 +298,10 @@ cv::Mat get_scene_prep(int64_t haystack, const cv::Mat& h, double sc) {
  *
  * 候选提名：conf ≥ thr−margin 的前 K 个峰，NMS 半径 = 粗模板边长一半（重复列表
  * 行会产生近等高的一排峰，不压会把 K 个名额全占了）。提名不到峰 / 精配后仍无
- * 过阈值候选 → **回全图精确路径兜底**（2026-10-02 E2）：假 miss 从「语料统计
- * 能不能抓住」变成**结构上不可能**，代价是「图上没有」这类负结果多付一次粗筛
- * （约 0.1× 全图成本）。原「快速 miss 不回退」是拿假漏检风险换负结果延迟，已
- * 随相位/std 门一并退役（设计决策 24）。host 差分双跑门仍逐字段对拍：同一输入
- * 强制精确 vs 本路径，必须同命中/同位置/置信度 ≤2e-3。
+ * 过阈值候选 → **回全图精确路径兜底**：假 miss 从「语料统计能不能抓住」变成
+ * **结构上不可能**，代价是「图上没有」这类负结果多付一次粗筛（约 0.1× 全图成本）。
+ * host 差分双跑门逐字段对拍：同一输入强制精确 vs 本路径，必须同命中/同位置/
+ * 置信度 ≤2e-3。
  */
 // `use_scene_cache` = 全帧调用（region == nullptr）才允许走场景缓存：region 是浅视图，
 // 它的灰度/缩小与"先全帧再裁"在小尺度边界上有舍入差，缓存键得带 region 才等价。
@@ -367,7 +355,7 @@ MatchHit match_pyramid(const cv::Mat& h, const cv::Mat& n, double thr, const Nee
             .setTo(-1.0f);
     }
 
-    // FastPath（12a，2026-10-01）：粗筛提名**唯一** + **高置信** → 精配窗收窄一档。
+    // FastPath（12a）：粗筛提名**唯一** + **高置信** → 精配窗收窄一档。
     //   唯一性 = NMS 后全图只有一个过带宽候选（cands.size()==1 已含「第二个峰过
     //   不了带宽」，探针 370×80：peak1=0.979、NMS 后 peak2=0.728 < 带宽 0.75）。
     //   高置信 = 主峰 ≥ thr + 0.05（0.25× 量化余量；370×80 实测粗峰 0.979 vs
@@ -399,9 +387,9 @@ MatchHit match_pyramid(const cv::Mat& h, const cv::Mat& n, double thr, const Nee
              (p.y < best.pos.y || (p.y == best.pos.y && p.x < best.pos.x)));
         if (better) best = {hit.conf >= thr, p, hit.conf};
     }
-    // 负结果兜底（2026-10-02 E2）：粗筛提名没够着阈值 ≠ 图上没有 —— 回全图
-    // 精确路径拿权威答案。命中 → 报出（与强制精确同解，差分门逐字段钉）；仍
-    // 不中 → 同一个未命中，只是多付了一次粗筛。
+    // 负结果兜底：粗筛提名没够着阈值 ≠ 图上没有 —— 回全图精确路径拿权威答案。
+    // 命中 → 报出（与强制精确同解，差分门逐字段钉）；仍不中 → 同一个未命中，
+    // 只是多付了一次粗筛。
     return best.conf >= thr ? best : match_exact(h, n, thr);
 }
 
@@ -476,13 +464,10 @@ int imgnative_match(int64_t haystack, int64_t needle, double threshold,
 
         const bool force_exact = g_force_exact.load(std::memory_order_relaxed);
         const NeedlePrep prep = force_exact ? NeedlePrep{} : get_needle_prep(needle, n);
-        // 【2026-10-02 E2】原相位门（phase_worst ≥ floor）与 std 门已拆 —— 职责
-        // 移交 match_pyramid 负结果回精确路径的兜底：走粗筛最坏 = 多付一次粗筛
-        // 拿同一答案；挡回 = 白付一次全图 matchTemplate（实测 473~1500ms）还没
-        // 解决问题。粗筛仍只**提名**，坐标/置信度回原 4 通道窗重算，阈值语义与
-        // 精确路径一字不差（差分门 host_match_test 逐字段对拍）。尺寸门还在：
-        // prep.sc < 1.0 才走粗筛（见 build_needle_prep），小于门限的模板直落
-        // 精确路径。
+        // 没有"挡回"这一步：走粗筛最坏 = 多付一次粗筛拿同一答案；挡回 = 白付一次
+        // 全图 matchTemplate（实测 473~1500ms）还没解决问题。粗筛只**提名**，坐标/
+        // 置信度回原 4 通道窗重算，阈值语义与精确路径一字不差（host_match_test 逐
+        // 字段对拍）。尺寸门还在：prep.sc < 1.0 才走粗筛，更小的模板直落精确路径。
         const bool use_pyramid = !force_exact && prep.sc < 1.0;
         const MatchHit hit = use_pyramid ? match_pyramid(h, n, threshold, prep, haystack, full_frame)
                                          : match_exact(h, n, threshold);

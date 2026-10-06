@@ -42,6 +42,12 @@ import com.autoscript.platform.system.zip.ZipNamespaceHandler
  * SPI 替身本就住这里，语义层与实现同模块收拢；§12.2 原「语义层 handler 不住 system」
  * 口径已反转（记入 design-decisions）。
  *
+ * **各子包的四件同住一处**：每个命名空间子包里**契约 + ops 缝 + Android 实现 + handler**
+ * 同住（`shell/` `device/` `app/` `floatingWindow/` 四面的契约原是一份
+ * `SystemHostContracts.kt`，2026-10-01 D3 按面拆开；它们的 handler 原本是**本文件的内联
+ * 四件**，同批拆出）。拆分的理由是「按命名空间对齐」而不是「按层对齐」——同一次改动要动的
+ * 四件挨在一起，跨层跳文件的开销大于分层带来的秩序。各子包文件不再重复这段沿革。
+ *
  * **能力门禁不在这里**：`:app-service:permission-center` 的 `PermissionFacade` 住
  * `:app-service:*`，而本模块的 archUnit 黑名单含 `com.autoscript.appservice..`（§6）。
  * 所以门禁由装配层在调用工厂前完成（`ensure(Capability.OVERLAY)` 等），

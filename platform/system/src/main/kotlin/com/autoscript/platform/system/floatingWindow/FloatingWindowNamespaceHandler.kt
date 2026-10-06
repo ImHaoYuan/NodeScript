@@ -14,14 +14,7 @@ import com.autoscript.domain.json.DomainJson
 /**
  * `floatingWindow` 命名空间的桥处理器（`create`/`close`，§9.4）
  *
- * **来历**：原 `SystemNamespaces.kt` 的「四内」之一 —— 2026-10-01 D3「子包按命名空间
- * 对齐」把四个内联 handler 拆到各自命名空间的子包（与 capabilities 的
- * `a11y/A11yNamespaceHandler` 同形：handler 与它服务的 SPI/实现同包），
- * `SystemNamespaces.kt` 只留十一工厂束。语义逐字未改。
- *
- * **能力门禁不在这里**（§9.5）：门禁归 `:app-service:permission-center` 的
- * `PermissionFacade`（本模块 archUnit 黑名单含 `com.autoscript.appservice..`），
- * 装配层先判后取；本类只负责「能力已保证之后」的参数校验与分类错误。
+ * 沿革与「门禁不在这里」的边界见 `SystemNamespaces` 的类注释（同一条纪律，此处不重复）。
  */
 
 // ── floatingWindow（§9.4）───────────────────────────────────────────

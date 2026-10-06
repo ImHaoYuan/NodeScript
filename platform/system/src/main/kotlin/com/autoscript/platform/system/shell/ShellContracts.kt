@@ -3,11 +3,8 @@ package com.autoscript.platform.system.shell
 /**
  * shell 命名空间的契约 DTO/SPI（§9.3/§9.6/§12.2；`extras.ts` 的 Kotlin 对偶）。
  *
- * **来历**：原 `SystemHostContracts.kt`（shell/device/app/floating 四面合一份）在
- * 2026-10-01 的 D3「子包按命名空间对齐」里按面拆开，与实现/handler 同子包 ——
- * 契约随「仅 handler+impl 消费」判据迁自 `:domain` `SystemContracts.kt`（`:app`/`:ui`/
- * app-service 生产读面零引用；`DialogHost` 反例留 `:domain`，装配层 `PlatformWiring`
- * 生产参数面在读）。
+ * 沿革（原 `SystemHostContracts.kt` 四面合一份 → 按面拆开，契约随「仅 handler+impl 消费」
+ * 判据迁自 `:domain`）见 `SystemNamespaces` 的类注释，此处不重复。
  *
  * **非法即拒**：构造期 `require`（空命令/负超时由 handler 挡，本面只管结果形状），handler 据此折叠
  * ERR_INVALID_PARAM，绝不把垃圾发往平台层。

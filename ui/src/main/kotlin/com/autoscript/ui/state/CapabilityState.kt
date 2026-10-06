@@ -67,7 +67,7 @@ data class CapabilityCenterState(
  * 一行能力的呈现态。
  *
  * @property tone 三态该用哪一档色（判读在 [of]，色值在主题）—— 旧版把这个判读写成
- *   `CapabilityScreen` 里一个私有 `stateColor()`，既不可测也不可复用。
+ *   能力面那一屏（已并入 `SettingsScreen`）里一个私有 `stateColor()`，既不可测也不可复用。
  * @property stateLabel 三态的中文说法，逐态不同，因为"用户该做什么"逐态不同：
  *   GRANTED 什么都不用做、DEGRADED 能用但受限、DENIED 必须去系统里改。
  * @property guide 引导文案（原样透传，不截断不加工）。批 47 起设置页不渲染它。

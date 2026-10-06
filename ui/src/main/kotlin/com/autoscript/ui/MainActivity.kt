@@ -142,7 +142,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             Theme(mode = themeMode) {
-                // 主题档位不再挂顶栏（2026-10-03 批 24）：TG 顶栏右侧没有全局开关格，
+                // 主题档位不挂顶栏：TG 顶栏右侧没有全局开关格，
                 // 四屏顶栏只放本屏动作 —— 主题切换收进各处自己的菜单/设置面。
                 MainShell(
                     pagerState = pagerState,

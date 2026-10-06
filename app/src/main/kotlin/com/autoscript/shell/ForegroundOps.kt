@@ -210,8 +210,6 @@ class AutoScriptForegroundService : ForegroundServiceBase()
  * `startForegroundService`（API 26+，minSdk 即 26）与 `startForeground` 两个裸调用，
  * 而 API 34 的类型参数恰恰**要求调用点按 `SDK_INT` 显式给**（见上），`ServiceCompat`
  * 那层包装反倒挡在中间。裸 API 的副作用才是本类不依赖 androidx.core。
- * （2026-09-30 前这里写的理由是「本机 `tools/jvm-test.sh` 旁路没有 androidx 坐标」——
- * 该旁路已删，这条不再成立。）
  */
 class AndroidForegroundOps private constructor(
     private val context: Context,

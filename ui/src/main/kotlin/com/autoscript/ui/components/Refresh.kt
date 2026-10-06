@@ -27,8 +27,8 @@ class RefreshAction internal constructor(
     private val onRefresh: suspend () -> Unit,
 ) {
     /**
-     * 有没有一次读还在路上。**只有 [trigger] 读它**（丢弃判据）—— 2026-10-04 拆掉
-     * 下拉手势后，本仓没有"刷新中"的可见指示：TG 的刷新是点一下就走，没有转圈位。
+     * 有没有一次读还在路上。**只有 [trigger] 读它**（丢弃判据）—— 本仓没有下拉手势，
+     * 也就没有"刷新中"的可见指示：TG 的刷新是点一下就走，没有转圈位。
      */
     private var refreshing = false
 
@@ -65,13 +65,13 @@ fun rememberRefreshAction(onRefresh: suspend () -> Unit): RefreshAction {
 /**
  * 列表容器 —— **只有内容宿主这一件事，没有手势**。
  *
- * 2026-10-04 拆掉下拉刷新（M3 `PullToRefreshBox`）：**参考项目没有这个手势**。TG 的
+ * **参考项目没有下拉刷新手势**（M3 的 `PullToRefreshBox` 已拆掉）。TG 的
  * 列表（`RecyclerListView`）只有滚动，刷新一律是显式动作 —— `ActionBar` 上那颗，
  * 或者 `DialogsActivity` 菜单里的那一项；`ChatAttachAlertDocumentLayout` 的文件列表
  * 连刷新项都没有（它读的是本地目录，进目录即重读）。本仓照此：**刷新入口 = 顶栏
  * 那颗「刷新」**，列表上没有第二条路径。
  *
- * 项目页**没有**刷新入口（2026-10-04 批 37）：它读的也是本地目录，与 TG 文件页同款
+ * 项目页**没有**刷新入口：它读的也是本地目录，与 TG 文件页同款
  * —— 进目录即重读，切回该页签也会重取（`TabReloadEffect`），不需要一颗手动刷新。
  *
  * 壳为什么还留着（而不是把四屏的 `RefreshableBox { … }` 拆成裸 `Box { … }`）：

@@ -3,7 +3,7 @@ package com.autoscript.ui.state
 /**
  * 一个事实该用哪一档颜色说（呈现层语义色的**唯一**出口）。
  *
- * **为什么是枚举而不是到处传四个 `Color` 参数**：旧 `CapabilityScreen` 里有个
+ * **为什么是枚举而不是到处传四个 `Color` 参数**：旧的能力面那一屏（已并入 `SettingsScreen`）里有个
  * `stateColor(state, primary, tertiary, error)` —— "三态各有各的色"这件事只活在那个函数
  * 的签名里，既没法 JVM 测，也没法在别的屏复用。现在每一处着色先落到一个 [StatusTone]，
  * 色值由主题统一给出，"哪一态用哪一档"这条判读留在可测的面。
