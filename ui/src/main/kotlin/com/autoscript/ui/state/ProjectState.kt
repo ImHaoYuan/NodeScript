@@ -27,8 +27,8 @@ enum class FileSort(val label: String) {
  * - 操作面（新建文件/文件夹）三态照任务中心同构：[creating] 开着哪个对话框、
  *   [opError]/[opNotice] 回执 —— 失败**不清清单**。
  *
- * 时间/大小格式化在这一层（[ScriptFileRowUi.subtitle]），时刻由 [of] 参数注入，
- * 类内不读 `System.currentTimeMillis()`（可测 + 同帧一致）。
+ * 时间/大小格式化在这一层（[ScriptFileRowUi.subtitle]），时区由 [of] 参数注入，
+ * 类内不读系统时钟（可测）。
  */
 data class ProjectState(
     val load: LoadState,
@@ -139,16 +139,15 @@ data class ProjectState(
         /**
          * 现取快照（排序/回执**不重置** —— 重取是读数，不是用户偏好的消失）。
          *
-         * 取 `nowMillis`/`zone` 一次传进去：同一帧里所有"今天/昨天"共用同一个 now。
+         * `zone` 由调用方注入（类内不读 `ZoneId.systemDefault()` 之外的时钟）。
          */
         fun of(
             snapshot: com.autoscript.domain.host.ScriptFilesSnapshot,
-            nowMillis: Long,
             zone: ZoneId = ZoneId.systemDefault(),
             previous: ProjectState? = null,
         ): ProjectState = ProjectState(
             load = LoadState.Loaded,
-            files = snapshot.rows.map { ScriptFileRowUi.of(it, nowMillis, zone) },
+            files = snapshot.rows.map { ScriptFileRowUi.of(it, zone) },
             sort = previous?.sort ?: FileSort.DATE,
             reversed = previous?.reversed ?: false,
             opError = previous?.opError,
@@ -182,7 +181,7 @@ data class ScriptFileRowUi(
     val sizeBytes: Long,
     /** 最后修改时刻（epoch ms）—— 排序"按日期"档的键（格式化后的时刻在 [subtitle]）。 */
     val modifiedMillis: Long,
-    /** 已格式化的一句："1.2 MB · 昨天" / "348 B · 09-14 22:10"（TG 次行的读法；文件夹 = "N 项 · …"）。 */
+    /** 已格式化的一句："1.2 MB · 26-06-24 22:32"（次行的读法；文件夹 = "N 项 · …"）。 */
     val subtitle: String,
 ) {
     /** 搜索命中：文件名或项目内路径含词（大小写不敏感；空词全命中）。 */
@@ -208,21 +207,17 @@ data class ScriptFileRowUi(
         }
 
         /**
-         * 时刻文案（TG 会话列表时间位 `formatDate` 的读法）：今天 = `HH:mm`，
-         * 今年 = `MM-dd`，跨年 = `yyyy-MM-dd`；文件没有"正在输入"，无需秒级。
+         * 时刻文案：`26-06-24 22:32`（用户口径：**一个格式走到底**）。
+         *
+         * 原先照 TG 会话列表时间位 `formatDate` 分了三档（今天 `HH:mm` / 今年 `MM-dd` /
+         * 跨年 `yyyy-MM-dd`）—— 同一列里三种粒度，扫一眼分不清"这个文件到底是哪天的"；
+         * 用户要的是固定的一格。年份取两位（`yy`）是为了行宽稳定（TG 的日期位本来就是
+         * 右对齐的一小格）。
          */
-        fun formatTime(millis: Long, nowMillis: Long, zone: ZoneId): String {
-            val now = Instant.ofEpochMilli(nowMillis).atZone(zone).toLocalDate()
-            val t = Instant.ofEpochMilli(millis).atZone(zone)
-            val date = t.toLocalDate()
-            return when {
-                date == now -> t.format(DateTimeFormatter.ofPattern("HH:mm"))
-                date.year == now.year -> t.format(DateTimeFormatter.ofPattern("MM-dd"))
-                else -> t.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
-            }
-        }
+        fun formatTime(millis: Long, zone: ZoneId): String =
+            Instant.ofEpochMilli(millis).atZone(zone).format(FILE_TIME)
 
-        fun of(row: ScriptFileRow, nowMillis: Long, zone: ZoneId): ScriptFileRowUi = ScriptFileRowUi(
+        fun of(row: ScriptFileRow, zone: ZoneId): ScriptFileRowUi = ScriptFileRowUi(
             projectId = row.projectId,
             relPath = row.relPath,
             name = row.name,
@@ -233,8 +228,8 @@ data class ScriptFileRowUi(
             modifiedMillis = row.modifiedMillis,
             // 文件夹不显示字节数（TG 文件页文件夹行同款）：显示"N 项"。
             subtitle = when {
-                row.isDirectory -> "${row.childCount} 项 · ${formatTime(row.modifiedMillis, nowMillis, zone)}"
-                else -> "${formatFileSize(row.sizeBytes)} · ${formatTime(row.modifiedMillis, nowMillis, zone)}"
+                row.isDirectory -> "${row.childCount} 项 · ${formatTime(row.modifiedMillis, zone)}"
+                else -> "${formatFileSize(row.sizeBytes)} · ${formatTime(row.modifiedMillis, zone)}"
             },
         )
 
@@ -269,3 +264,11 @@ data class ScriptFileRowUi(
         }
     }
 }
+
+/**
+ * 文件行那一格的时刻格式（`26-06-24 22:32`，用户口径）。
+ *
+ * 提到**文件级**是为了只建一次：原先每次格式化现建三个 `DateTimeFormatter`，
+ * 一屏几十行就是几十次解析 pattern（[TaskCenterState] 里同一条纪律）。
+ */
+private val FILE_TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("yy-MM-dd HH:mm")

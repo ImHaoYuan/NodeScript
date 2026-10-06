@@ -46,25 +46,6 @@ object EditorScroll {
     /** 行号槽要留几位数（三位数的文件不该按一位数留宽）。 */
     fun gutterDigits(lines: Int): Int = lines.coerceAtLeast(1).toString().length
 
-    /**
-     * 行号槽那一列字（每个**视觉行**一条，``\n`` 连接）。
-     *
-     * 折行打开时，一个逻辑行会占好几个视觉行 —— 行号只写在它的**第一个**视觉行上，
-     * 其余行留空：这样"第几行"数的是逻辑行（用户数得出来的那个数），而不是折出来的段。
-     * 反过来说，行号槽的**行数**必须等于正文的视觉行数，否则下面的数字会整体错位。
-     *
-     * @param visualRows 折行之后的视觉行总数（``TextLayoutResult.lineCount``）。
-     * @param firstRowOfLine 第 L 个逻辑行的首个视觉行序号（``getLineForOffset`` 读出来的）。
-     */
-    fun gutterLabels(visualRows: Int, firstRowOfLine: List<Int>): String {
-        if (visualRows <= 0) return ""
-        val labels = Array(visualRows) { "" }
-        firstRowOfLine.forEachIndexed { lineIndex, row ->
-            // 越界的丢掉而不是崩：排版结果与文本是两次读取，理论上可能差一帧。
-            if (row in 0 until visualRows) labels[row] = (lineIndex + 1).toString()
-        }
-        return labels.joinToString("\n")
-    }
 
     /**
      * 这一下按钮该画成"去最顶"还是"去最底"，以及气泡上那个数字。

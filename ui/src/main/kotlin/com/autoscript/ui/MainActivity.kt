@@ -315,7 +315,6 @@ class MainActivity : ComponentActivity() {
         projectState = try {
             ProjectState.of(
                 snapshot = host.scriptFiles(),
-                nowMillis = System.currentTimeMillis(),
                 // 排序/回执是用户的呈现偏好与刚才的操作结论，重读不重置
                 // （回执在刷新**之后**盖上去会自相矛盾，见 performTaskOp 同一条）。
                 previous = projectState.takeIf { it.load is LoadState.Loaded },

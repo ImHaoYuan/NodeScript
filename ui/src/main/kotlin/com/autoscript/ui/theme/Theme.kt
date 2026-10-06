@@ -350,9 +350,15 @@ val DarkColors = Colors(
     fieldBackground = Color(0xFF262E36),
     graySection = Color(0xFF0B0B0C),
     graySectionText = Color(0xFF838384),
-    // 这三个键 night.attheme 都设了。
-    menuBackground = Color(0xFF282829),
-    menuSeparator = Color(0xFF1E1E1F),
+    // 这三个键 night.attheme 都设了 —— 但**用户口径**（2026-10-06 批 62）把"夜间的黑"
+    // 统一定成 #161E27：顶栏 / 菜单（子菜单底）/ 底部页签胶囊三处都换成它。
+    // 菜单底与屏底同值 = 菜单"贴"在屏底上，靠投影 + 圆角分层 —— 浅色档本来就是
+    // 白菜单贴白屏底（见 [LightColors]），深色跟着一致，不另立第三档灰。
+    menuBackground = Color(0xFF161E27),
+    // 组与组之间那道"槽"：原先 = 菜单底每通道 -10（0x1E1E1F vs 0x282829），菜单底
+    // 平移之后**跟着平移同样的 -10**，保住"比菜单底暗一档"这个关系（浅色档同理：
+    // #F5F5F5 比白暗一档）。不跟着改的话，槽会比菜单底更亮，观感是"接缝"。
+    menuSeparator = Color(0xFF0C141D),
     sheetBackground = Color(0xFF1E1E1E),
     // night.attheme 没设 → ThemeColors.java 默认值 TELEGRAM_COLOR。
     featuredButton = Color(0xFF229AF0),

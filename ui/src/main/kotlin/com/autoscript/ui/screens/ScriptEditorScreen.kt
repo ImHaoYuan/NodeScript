@@ -9,6 +9,8 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -23,6 +25,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -49,13 +53,15 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -305,9 +311,13 @@ internal data class ScriptLoad(val text: String?, val error: String?)
 /**
  * 正文那一层：**行号槽 + 正文 + 右下那颗跳转钮**（含它上面的气泡）。
  *
+ * 正文**不折行**（用户口径）：一行就是一行，超出的部分交给横向滚动，所以"第几行"
+ * 只有一个口径 —— 行号列就是 `1..lineCount(text)`，与正文天然逐行对齐。
+ * 双指捏合改的是**字号/行高/字距**（见 [detectPinchZoom]），不是把画面拉伸。
+ *
  * 单独一个函数有两个理由：① [ScriptEditorScreen] 已经贴着 detekt 的长函数线；
- * ② 它自带四份状态（滚动轴、行高换算、排版结果报回来的行数、手指方向）—— 留在屏里
- * 会和保存/退出那套混在一起。
+ * ② 它自带四份状态（纵横两根滚动轴、缩放倍率、排版结果报回来的正文高度、手指方向）
+ * —— 留在屏里会和保存/退出那套混在一起。
  *
  * @param value 正文与**光标位置**（选区由这一层改，见"点空白送到文末"那一段）。
  * @param onValueChange 内容或选区变了（调用方据此标脏、清掉上一次的保存失败结论）。
@@ -321,17 +331,16 @@ private fun EditorBody(
     val palette = ThemeColors
     val density = LocalDensity.current
     val vScroll = rememberScrollState()
+    val hScroll = rememberScrollState()
     val focusRequester = remember { FocusRequester() }
     val scope = rememberCoroutineScope()
-    // 下面这三个都由**排版结果**（`onTextLayout`）报回来：
-    // - 正文自己占的高度：判断"点在不在正文下方"要用它；
-    // - **折行之后**的视觉行数：气泡那个数与"超没超出一屏"都按它算（按逻辑行会少）；
-    // - 行号槽那一列字：折行时一个逻辑行占好几个视觉行，行号只写在**第一个**视觉行上。
-    // 存 String 而不是 TextLayoutResult：字符串是等值比较，布局回调万一再来一次
-    // （同一个布局），等值的写入不会触发重组，也就不会自激。
+    // 双指缩放的倍率：字号/行高/字距**整组**乘它（不是 `graphicsLayer` 拉伸画面）。
+    // 拉伸只改画面、不改排版 —— 滚动范围、行号位置、"屏幕外还有几行"会全部对不上；
+    // 改字号是让排版自己重算一遍，所有几何都跟着走。
+    var zoom by remember { mutableStateOf(1f) }
+    // 正文自己占的高度（**不折行**之后 = 行数 × 行高）：判断"点在不在正文下方"要用它。
+    // 存 Float 而不是 TextLayoutResult：等值比较，布局回调万一再来一次也不会自激。
     var contentHeightPx by remember { mutableStateOf(0f) }
-    var visualRows by remember { mutableStateOf(0) }
-    var gutterText by remember { mutableStateOf("") }
     // 手指方向：往下拖 = 往上看（见 [EditorScroll.affordance]）。默认 false = 去最底。
     var towardTop by remember { mutableStateOf(false) }
     LaunchedEffect(vScroll) {
@@ -345,38 +354,38 @@ private fun EditorBody(
     }
     // 正文与行号槽**共用同一套字体度量**（同一个 TextStyle，只换对齐与颜色）：换字号、
     // 换行高、换字距都只改一处，否则第 n 个数字会逐行偏离第 n 行。
-    val codeStyle = remember(palette.text) {
-        TextStyle(
-            fontFamily = FontFamily.Monospace,
-            fontSize = EditorFontSize,
-            lineHeight = EditorLineHeight,
-            letterSpacing = EditorLetterSpacing,
-            color = palette.text,
-        )
-    }
+    val codeStyle = remember(palette.text, zoom) { editorCodeStyle(palette.text, zoom) }
     val gutterStyle = remember(codeStyle, palette.textTertiary) {
-        codeStyle.copy(textAlign = TextAlign.End, color = palette.textTertiary)
+        editorGutterStyle(codeStyle, palette.textTertiary)
     }
 
     BoxWithConstraints(modifier.fillMaxSize()) {
         val viewportHeight = maxHeight
         val viewportPx = with(density) { viewportHeight.toPx() }
-        val lineHeightPx = with(density) { EditorLineHeight.toPx() }
+        // 行高跟着缩放走：气泡那个数与"超没超出一屏"都按**当前**行高算。
+        val lineHeightPx = with(density) { (EditorLineHeight * zoom).toPx() }
         // 正文上沿到整行上沿的距离（判断"点的是不是正文下方"时要用）。
         val topPaddingPx = with(density) { EditorVerticalPadding.toPx() }
         // 正文上下那两块留白（上 12dp + 下 60dp 让位给圆钮）：判断"超没超出一屏"时
         // 它们是内容的一部分，要从视口里扣掉。
         val contentPaddingPx = with(density) { (EditorVerticalPadding + EditorChipReserve).toPx() }
-        // 槽宽按**逻辑行**的行数留（最大行号是几位就留几位）。
+        // **不折行**之后"逻辑行 = 视觉行"：行数直接从文本数出来（不必等排版结果），
+        // 行号列就是 1..lines，气泡那个数也按它算。
         val lines = EditorScroll.lineCount(value.text)
-        val gutterWidth = EditorGutterStart + EditorGutterDigit * EditorScroll.gutterDigits(lines) + EditorGutterEnd
+        val gutterText = remember(lines) { (1..lines).joinToString("\n") }
+        // 槽宽按行数留（最大行号是几位就留几位）；数字跟着缩放，槽宽也得跟着。
+        val gutterWidth = EditorGutterStart +
+            EditorGutterDigit * zoom * EditorScroll.gutterDigits(lines) + EditorGutterEnd
         val gutterWidthPx = with(density) { gutterWidth.toPx() }
+        // 正文可视宽度（Row 里扣掉行号槽那一块）：正文不足一屏宽时也要占满它，
+        // 否则右边那片空白点不到、也落不了光标。
+        val textViewportWidth = maxWidth - gutterWidth
         // 气泡里那个数与按钮去哪一头：**只在"跨过一行"或"方向翻面"时才变值** ——
         // 直接读 `vScroll.value` 会让整块编辑面每滚一帧重组一次。
-        val affordance by remember(viewportPx, lineHeightPx, visualRows) {
+        val affordance by remember(viewportPx, lineHeightPx, lines) {
             derivedStateOf {
                 // `vScroll.value` 是 Int（px 整数），几何那层一律吃 Float。
-                EditorScroll.affordance(vScroll.value.toFloat(), viewportPx, lineHeightPx, visualRows, towardTop)
+                EditorScroll.affordance(vScroll.value.toFloat(), viewportPx, lineHeightPx, lines, towardTop)
             }
         }
         Box(Modifier.fillMaxSize().verticalScroll(vScroll)) {
@@ -406,13 +415,20 @@ private fun EditorBody(
                             }
                         }
                     }
+                    // 双指捏合缩放（见 [detectPinchZoom]）：单指阶段一个事件都不消费，
+                    // 竖向滚动、落光标、长按选词照旧。
+                    .pointerInput(Unit) {
+                        detectPinchZoom { factor ->
+                            zoom = (zoom * factor).coerceIn(EDITOR_ZOOM_MIN, EDITOR_ZOOM_MAX)
+                        }
+                    }
                     // 下方留出那颗圆钮的位置：滚到最底时最后一行正好停在钮上方，
                     // 而不是被它压住半行（钮是浮层，不参与布局，只能这样让位）。
                     .padding(top = EditorVerticalPadding, bottom = EditorChipReserve),
                 verticalAlignment = Alignment.Top,
             ) {
                 // 行号槽：一条淡灰竖线把它和正文分开（用户口径）。数字与正文**同一套行高**
-                // （同一个 TextStyle 派生的），所以第 n 个数字恰好落在第 n 个视觉行上。
+                // （同一个 TextStyle 派生的），所以第 n 个数字恰好落在第 n 行上。
                 Box(
                     Modifier
                         .width(gutterWidth)
@@ -432,34 +448,34 @@ private fun EditorBody(
                         modifier = Modifier.fillMaxWidth().padding(end = EditorGutterEnd),
                     )
                 }
-                // 正文：**保持折行**（不改成横向滚动）—— 手机屏宽下十几二十个字就折了，
-                // 让用户为每个长行左右拉一次是拿"行号对齐好写"换走了"能读"。行号按**逻辑行**
-                // 给（见 [EditorScroll.gutterLabels]），折出来的续行留空，与 Acode 一致。
-                BasicTextField(
-                    value = value,
-                    onValueChange = onValueChange,
-                    modifier = Modifier
-                        .weight(1f)
-                        .focusRequester(focusRequester)
-                        .padding(start = EditorTextStart, end = EditorTextEnd),
-                    textStyle = codeStyle,
-                    cursorBrush = SolidColor(palette.accent),
-                    onTextLayout = { layout ->
-                        contentHeightPx = layout.size.height.toFloat()
-                        visualRows = layout.lineCount
-                        gutterText = EditorScroll.gutterLabels(
-                            visualRows = layout.lineCount,
-                            firstRowOfLine = logicalLineRows(layout, value.text),
-                        )
-                    },
-                )
+                // 正文：**不折行 + 横向滚动**（用户口径）。一行就是一行，长行往右拉；
+                // 于是"第几行"只有一个口径，行号列与正文天然逐行对齐（折行那套
+                // `getLineForOffset` 映射整个不需要了）。
+                Box(Modifier.weight(1f).horizontalScroll(hScroll)) {
+                    BasicTextField(
+                        value = value,
+                        onValueChange = onValueChange,
+                        modifier = Modifier
+                            // **不折行**靠的是约束而不是参数：`BasicTextField` 没有
+                            // `softWrap`，但外层 `horizontalScroll` 会给内容无限宽 —— 拿不到
+                            // 宽度上限，排版就不会折行，字段宽度跟着最长的行走。
+                            // `widthIn(min = …)` 补另一头：正文比一屏窄时也占满可视宽度，
+                            // 右边那片空白才点得到、才落得了光标。
+                            .widthIn(min = textViewportWidth)
+                            .focusRequester(focusRequester)
+                            .padding(start = EditorTextStart, end = EditorTextEnd),
+                        textStyle = codeStyle,
+                        cursorBrush = SolidColor(palette.accent),
+                        onTextLayout = { layout -> contentHeightPx = layout.size.height.toFloat() },
+                    )
+                }
             }
         }
         EditorJumpChip(
             affordance = affordance,
             // 气泡只在正文**超出一屏**时出现：没超出时"屏幕外还有几行"是个假问题。
             // 比的是"正文能不能占满视口"（上下留白不算正文，要从视口里扣掉）。
-            showBubble = EditorScroll.overflows(visualRows, lineHeightPx, viewportPx - contentPaddingPx),
+            showBubble = EditorScroll.overflows(lines, lineHeightPx, viewportPx - contentPaddingPx),
             onJump = {
                 val toTop = affordance.jump == EditorJump.TOP
                 scope.launch {
@@ -476,22 +492,38 @@ private fun EditorBody(
 }
 
 /**
- * 每个**逻辑行**（`\n` 分隔）的第一个字落在第几个**视觉行**（折行之后）。
+ * 双指捏合缩放（回调给的是**相对上一次**的倍率，调用方自己乘起来再夹上下限）。
  *
- * 折行打开时"第几行"有两个口径：逻辑行（用户数出来的行）与视觉行（屏幕上占的行）。
- * 行号要按逻辑行给，所以得知道每一行的**起点**落在哪个视觉行上 —— 这个映射只有
- * 排版结果知道（`getLineForOffset`），文本本身算不出来。
+ * 为什么不用 `detectTransformGestures`：它**单指**拖动过了 touch slop 之后也会
+ * `consume()` —— 竖向滚动、"点空白落光标"、长按选词当场全失效。这里等到第二根
+ * 手指落下才开始算两指距离，单指阶段一个事件都不碰。
+ *
+ * 又为什么跑在 [PointerEventPass.Initial] 上：Initial 趟是**父 → 子**，而横向滚动与
+ * 文本框自己的手势都在子树里（Main 趟是子 → 父，抢不过它们）。两根手指往两边分开，
+ * 在横向滚动看来就是一次"横向拖动"—— 不在这趟里拦下来，缩放会跟横向滚动打架。
  */
-private fun logicalLineRows(layout: TextLayoutResult, text: String): List<Int> {
-    val rows = ArrayList<Int>()
-    var offset = 0
-    while (true) {
-        rows.add(layout.getLineForOffset(offset))
-        // 末尾的 `\n` 后面那个空行也是一个逻辑行（光标能落上去），所以按"下一个换行符"
-        // 推进而不是"最后一个换行符就收工"：`indexOf` 返回 -1 才是真的没有下一行了。
-        val next = text.indexOf('\n', offset)
-        if (next < 0) return rows
-        offset = next + 1
+private suspend fun PointerInputScope.detectPinchZoom(onZoom: (Float) -> Unit) {
+    awaitEachGesture {
+        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        var lastDistance = 0f
+        var pinching = false
+        while (true) {
+            val event = awaitPointerEvent(PointerEventPass.Initial)
+            val pressed = event.changes.filter { it.pressed }
+            // 不足两根手指：要么还没开始捏（接着等），要么捏到一半抬起一根（收工）。
+            if (pressed.size < 2) {
+                if (pinching || pressed.isEmpty()) return@awaitEachGesture
+                continue
+            }
+            val distance = (pressed[0].position - pressed[1].position).getDistance()
+            if (pinching && lastDistance > 0f) {
+                onZoom(distance / lastDistance)
+                // **在 Initial 趟消费**：子树（横向滚动 / 文本框）就收不到这两个指针了。
+                pressed.forEach { it.consume() }
+            }
+            pinching = true
+            lastDistance = distance
+        }
     }
 }
 
@@ -550,7 +582,25 @@ private fun EditorJumpChip(
     }
 }
 
-/** 正文字号（等宽 14sp，与重构前一致）。 */
+/**
+ * 正文与行号槽**共用**的那套字体度量（行号只换对齐与颜色）。
+ *
+ * 双指缩放（[zoom]）乘在字号/行高/字距三处：只改这一处，行号槽与正文的对齐关系
+ * 才不会散（改字号不改行高、或只改正文不改行号，第 n 个数字就会逐行偏离第 n 行）。
+ */
+private fun editorCodeStyle(color: Color, zoom: Float): TextStyle = TextStyle(
+    fontFamily = FontFamily.Monospace,
+    fontSize = EditorFontSize * zoom,
+    lineHeight = EditorLineHeight * zoom,
+    letterSpacing = EditorLetterSpacing * zoom,
+    color = color,
+)
+
+/** 行号槽的样式：与正文同一套度量，只换右对齐与更淡的颜色。 */
+private fun editorGutterStyle(code: TextStyle, color: Color): TextStyle =
+    code.copy(textAlign = TextAlign.End, color = color)
+
+/** 正文字号（等宽 14sp，与重构前一致）。双指缩放的倍率乘在它（以及行高、字距）上。 */
 private val EditorFontSize = 14.sp
 
 /** 正文行高：行号槽、气泡那个数、点空白的判据**全按它算** —— 改它要三处一起看。 */
@@ -558,6 +608,15 @@ private val EditorLineHeight = 20.sp
 
 /** 字间距（用户口径：别让字连在一起）。等宽字体的 CJK 与数字挤在一起最难认。 */
 private val EditorLetterSpacing = 0.5.sp
+
+/**
+ * 双指缩放的上下限（相对 [EditorFontSize] 的倍率）。
+ *
+ * 下限 0.6 倍 ≈ 8.4sp（再小在手机上看不清了），上限 3 倍 = 42sp（一屏放不下几行，
+ * 但看一条特别长的行够用）。
+ */
+private const val EDITOR_ZOOM_MIN = 0.6f
+private const val EDITOR_ZOOM_MAX = 3f
 
 /** 正文上下留白（行号槽与正文共用同一份，否则第一行就对不齐）。 */
 private val EditorVerticalPadding = 12.dp

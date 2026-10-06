@@ -70,28 +70,6 @@ class EditorScrollTest {
     }
 
     @Test
-    fun `行号只写在逻辑行的第一个视觉行上`() {
-        // 三行、没折行：一行一个号。
-        assertEquals("1\n2\n3", EditorScroll.gutterLabels(3, listOf(0, 1, 2)))
-        // 第一行折成两段：第 2 个号落在视觉行 2 上，视觉行 1 留空。
-        assertEquals("1\n\n2\n3", EditorScroll.gutterLabels(4, listOf(0, 2, 3)))
-        // 折行数**多**于逻辑行数时，末尾那几行必须留空（少了就会与正文错位）。
-        assertEquals("1\n\n", EditorScroll.gutterLabels(3, listOf(0)))
-    }
-
-    @Test
-    fun `还没排版出结果时行号槽是空的_越界的行号丢掉不崩`() {
-        assertEquals("", EditorScroll.gutterLabels(0, emptyList()))
-        // 越界的号丢掉，但**行数不能少**：两行视觉行就是两个空行（``\n`` 就是两行），
-        // 少了的话行号槽会比正文短，下面的号整体上移一行。
-        assertEquals("\n", EditorScroll.gutterLabels(2, listOf(5, 9)))
-    }
-
-    @Test
-    fun `空文本也是一个逻辑行_行号是1`() {
-        assertEquals("1", EditorScroll.gutterLabels(1, listOf(0)))
-    }
-    @Test
     fun `往下拖去最顶_数上方的行`() {
         val a = EditorScroll.affordance(40f, viewport, line, 10, towardTop = true)
         assertEquals(EditorJump.TOP, a.jump)
