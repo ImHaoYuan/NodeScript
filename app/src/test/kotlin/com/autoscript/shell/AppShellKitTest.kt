@@ -239,7 +239,7 @@ class AppShellKitTest {
     @Test
     fun `能力缝缺省不挂则如实 ERR_NOT_IMPLEMENTED，注入真 handler 则可达`() = runBlocking {
         kit().use { bare ->
-            val resp = bare.shell.router.dispatch(BridgeRequest(1, "a11y", "canPerformGestures", null, 5_000))
+            val resp = bare.shell.router.dispatch(BridgeRequest(1, "a11y", "canPerformGestures", """{"channel":"auto"}""", 5_000))
             val err = assertInstanceOf(BridgeResponse.Err::class.java, resp)
             assertEquals("ERR_NOT_IMPLEMENTED", err.errorCode, "未接线就如实回 NOT_IMPLEMENTED，绝不伪造可用")
         }

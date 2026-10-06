@@ -12,6 +12,7 @@ readonly a11y: {
   events: Promise<UiEventBatch>;
   gesture: Promise<boolean>;
   selector: UiSelector;
+  setInputChannel: Promise<void>;
   waitFor: Promise<boolean>;
 };
 ```
@@ -22,14 +23,18 @@ readonly a11y: {
 canPerformGestures(opts?): Promise<boolean>;
 ```
 
-手势能力门（§9.1 canPerformGestures；false 时走能力中心引导，不发手势）。
+当前通道能不能发手势（问的是**会话通道**，可用 `{channel}` 单次覆盖）。
+
+`auto` 问的是无障碍服务的 `CAPABILITY_CAN_PERFORM_GESTURES` 能力位；
+`adb`/`root` 通道**没有对应的开关** —— 能不能用取决于进程身份，而那正是该通道
+被接线的前提，所以到得了这里的调用恒为 `true`。真正的失败（`su` 没了、Shizuku
+服务死了）以命令退出码的形式出现在动作调用里。
 
 ##### Parameters
 
 | Parameter | Type |
 | ------ | ------ |
-| `opts` | \{ `timeout?`: `number`; \} |
-| `opts.timeout?` | `number` |
+| `opts` | `ChannelOptions` |
 
 ##### Returns
 
@@ -66,14 +71,16 @@ gesture(input, opts?): Promise<boolean>;
 手势派发（§9.1 dispatchGesture；对偶 Kotlin `a11y.gesture`）。
 关门回 false（不抛错）；非法手势（空笔画/负坐标/非正 duration）抛 ERR_INVALID_PARAM。
 
+**经 `adb`/`root` 通道时实际是直线**：shell 面只有 `input tap`/`input swipe` 两个
+原语、没有轨迹，所以多笔画会被逐条串行注入、每条只取首尾两点。要真轨迹得走
+`sendevent`（§9.3 提过，未落地）。
+
 ##### Parameters
 
 | Parameter | Type |
 | ------ | ------ |
 | `input` | `GestureInput` |
-| `opts` | \{ `signal?`: `AbortSignal`; `timeout?`: `number`; \} |
-| `opts.signal?` | `AbortSignal` |
-| `opts.timeout?` | `number` |
+| `opts` | `ChannelOptions` |
 
 ##### Returns
 
@@ -90,6 +97,33 @@ selector(): UiSelector;
 ##### Returns
 
 `UiSelector`
+
+#### setInputChannel()
+
+```ts
+setInputChannel(channel, opts?): Promise<void>;
+```
+
+设**本脚本**的会话输入通道（§9.3）：`await auto.a11y.setInputChannel('root')`。
+
+会话态住宿主侧的**每连接**上下文（不是全局 handler 字段）—— 一个脚本设的通道
+不会漏给另一个脚本。单次调用可用 `{channel}` 覆盖，不改变会话值。
+
+**没有「缺省通道」**：设过会话值之后，本脚本后续的 `click`/`gesture`/… 可以省掉
+`channel`；**没设过又没传**则抛 `ERR_INVALID_PARAM`。指定了 `adb`/`root` 而不可用时
+抛 `ERR_PERMISSION_DENIED`，**不会悄悄回落到无障碍**。
+
+##### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `channel` | `InputChannelInput` |
+| `opts` | \{ `timeout?`: `number`; \} |
+| `opts.timeout?` | `number` |
+
+##### Returns
+
+`Promise`\<`void`\>
 
 #### waitFor()
 

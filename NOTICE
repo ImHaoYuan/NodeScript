@@ -4,7 +4,7 @@ AutoScript —— 第三方参考件与版权署名（NOTICE）
 本文件是**源码面**的署名与许可说明。随包分发的第三方**二进制与素材**清单不在这里 ——
 那份在 `THIRD_PARTY_NOTICES.md`（生成物，版本事实来源 `node-runtime-build/VERSIONS.env`，
 手改会被 CI 的同步门判漂移）。两份分工：本文件管"源码里有哪些不是我们写的"，
-那份管"APK 里装了哪些别人的二进制"。
+那份管"APK 里装了哪些别人的二进制"。两份都随 APK 出（`assets/third-party/`）。
 
 --------------------------------------------------------------------------------
 1. 本仓版权与许可
@@ -17,42 +17,46 @@ GNU General Public License **第 2 版**，**不含**"或任何更新版本"。�
 `bridge/js` 这个 npm 包（标 private、不发布到 registry）同许可，见其 `package.json`
 的 `license` 字段。
 
-**为什么是 `only` 而不是 `or-later`**（口径与代价见 `docs/design-decisions.md` 第 33 项）：
-本仓 `ui/` 含衍生自 Telegram Android 的部分，而后者是 GPL-2.0-**only**（见下节）。
-GPL-2.0-only 与 GPL-3.0 不兼容，两者合成的整体无法合法地按 GPL-3.0 再分发 ——
-"or later" 这个选项因此**在事实上不可行使**，继续对外宣称它，等于给下游一个走不通的
-授权路径。`only` 是对现状的如实陈述，不是许可收紧。
+**为什么是 `only` 而不是 `or-later`**（口径与代价见 `docs/design-decisions.md` 第 33、36 项）：
+本仓 `ui/` 的前端实现与风格参考自 Telegram Android（**GPL-2.0-only**，见下节）。
+**这是否构成"衍生作品"属法律判断，本仓不做该判断** —— 本文件是工程侧的事实陈述，不是法律意见。
+在未经复核前，不对外附加一条可能走不通的授权路径（GPL-2.0-only 与 GPL-3.0 不兼容），
+是保守且如实的做法。`only` 因此是**本仓自己的选择**，不是被上游"逼"出来的结论。
 
 --------------------------------------------------------------------------------
-2. 衍生自 Telegram Android 的部分（GPL-2.0-only）
+2. 前端 UI 的实现与风格参考自 Telegram Android（GPL-2.0-only）
 --------------------------------------------------------------------------------
 
-上游：Telegram Android 客户端，<https://github.com/DrKLO/Telegram>，许可 **GPL-2.0-only**。
+本仓 `ui/` 的前端实现与视觉风格**参考自 Telegram Android 客户端**
+（<https://github.com/DrKLO/Telegram>，许可 **GPL-2.0-only**），包括版式尺寸、间距层次、
+色值与键名、缓动曲线控制点，以及少数几处算法（底栏宽度分配、菜单错相浮现、删除粒子）。
 
-**上游版本未钉死（待补）**：本仓的参考与移植发生在 2026-10-02 起的若干批次
-（`docs/log/2026-10-02.md` 批 13 起、`docs/log/2026-10-04.md`），当时**未记录上游 commit**。
-按 GPL-2.0 第 1 节，分发衍生作品时应随附"显示收到版权声明与担保免责"的合适声明；
-精确到 commit 的来源说明是这件事的应有形态。补齐已登记在 `docs/backlog.md`。
+**参考的上游版本**：**12.10.6（build 7112）**，commit
+`f2908b14133bbffbf7ab04f641ecb5faf533242`。本仓的参考发生在 **2026-10-02 起**的若干批次
+（`docs/log/2026-10-02.md` 批 13 起、`2026-10-04.md`、`2026-10-05.md`），当时上游最新版即
+12.10.6，故按它锚定。
 
-| 本仓文件 | 上游来源 | 关系 |
-|---|---|---|
-| `ui/.../components/MenuPopup.kt` | `AndroidUtilities.cascade`（`AndroidUtilities.java`） | **逐字移植**（`cascade()` 函数体） |
-| `ui/.../state/TabBarMeasure.kt` | `TMessagesProj/.../MainTabsLayout.java` 的 `onMeasure` | **逐句对着写**（三趟试排 / 等分上限 / 两端夹逼） |
-| `ui/.../state/Particles.kt`、`ui/.../components/DeletionParticles.kt` | `Components/ThanosEffect.java` | **形态参考**（网格切分与上飘淡出；实现不同，见各文件 KDoc） |
-| `ui/.../theme/Theme.kt` | `TMessagesProj/src/main/assets/{day,night}.attheme`、`ui/ActionBar/ThemeColors.java` | **取色值常量**（事实性数据）与键名 |
-| `ui/.../components/`、`ui/.../screens/` 的其余版式 | TG 的 `ActionBar` / Cell / `Bulletin` 等 | **观感参考**，代码自写 |
+**上游版权与担保免责**（GPL-2.0 第 1 节要求随副本发布的两件）：Copyright (C) DrKLO/Telegram
+项目贡献者，来源见上列仓库（上游仓库的 `LICENSE` 是 GPL-2.0 全文，未另附单独的版权持有人行）。
+本仓与其上游**均不提供任何担保**，包括但不限于适销性与特定用途适用性的默示担保 ——
+免责全文见本仓 `LICENSE` 的 GPL-2.0 第 11、12 节。
 
-**修改说明**（GPL-2.0 第 2(a) 节要求对改动过的文件作显著通知）：上列文件均已按本仓的
-Compose / Kotlin 形态重写或改写（上游是 Java + Android View 体系），各文件 KDoc 里逐处
-标注了对应上游类与差异。这些文件**不是上游文件的原样副本**。
+**修改说明**（GPL-2.0 第 2(a) 节要求对改动过的文件作显著通知）：本仓 `ui/` 是 Kotlin /
+Compose 重写（上游是 Java + Android View 体系），**不是上游文件的原样副本**，且**未 vendored
+任何上游源文件**（跟踪树里零 `.java` —— `find . -name '*.java'` 只命中 `.gradle/` 缓存）。
+逐文件的上游对应类与差异，各文件 KDoc 里逐处标注；主要落点见下表。
 
-**上表第 1、2 行的"逐字/逐句"是本仓 KDoc 自己的说法，尚未与上游逐行比对过** ——
-补上游 commit 时一并核；若核实为"按语义重写"，本表相应行降级为"语义参考"。
+| 本仓文件 | 参考的上游 |
+|---|---|
+| `ui/.../theme/Theme.kt` | `day/night.attheme`、`ThemeColors.java`（色值与键名） |
+| `ui/.../components/Motion.kt` | `CubicBezierInterpolator` 的缓动常量 |
+| `ui/.../components/MenuPopup.kt` | `AndroidUtilities.cascade`（错相浮现的算法） |
+| `ui/.../state/TabBarMeasure.kt` | `MainTabsLayout.onMeasure`（底栏宽度分配） |
+| `ui/.../state/Particles.kt`、`components/DeletionParticles.kt` | `Components/ThanosEffect.java`（删除粒子的形态） |
+| `ui/.../screens/`、`ui/.../components/` 的其余版式 | `DialogsActivity` / `ContactsActivity` / `ActionBar` / Cell / `Bulletin` 等 |
 
---------------------------------------------------------------------------------
-3. 不构成本仓衍生部分的第三方
---------------------------------------------------------------------------------
+**未逐行比对（诚实登记）**：上表的对应关系来自本仓 KDoc 的自述与人工核对，**未与上游逐行比对**。
+抽查过的几处（`cascade()`、`MainTabsLayout.onMeasure`、缓动常量、`SIZE = 48`、缩放时长）与上游
+12.10.6 一致；「逐处核实并据此降级措辞」这件事经裁定**不做**，理由见
+`docs/design-decisions.md` 第 37 项。
 
-Node.js / npm / OpenCV / KleidiCV / libc++ / libjpeg-turbo / libpng / zlib 等随包二进制
-与素材按各自原许可分发，与本仓是**分发聚合**（各自独立文件、各自许可），不构成衍生。
-清单与逐字原文见 `THIRD_PARTY_NOTICES.md` 与 `node-runtime-build/licenses/`。

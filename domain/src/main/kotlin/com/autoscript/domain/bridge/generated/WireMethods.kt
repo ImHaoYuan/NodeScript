@@ -18,8 +18,8 @@ object WireMethods {
         "a11y" to setOf(
             "bounds", "canPerformGestures", "children", "click", "copy", "desc",
             "dispose", "events", "findAll", "findOne", "findOneOrNull", "gesture",
-            "longClick", "parent", "paste", "scroll", "setText", "text",
-            "waitFor",
+            "longClick", "parent", "paste", "scroll", "setInputChannel", "setText",
+            "text", "waitFor",
         ),
         "app" to setOf(
             "currentPackage", "launch",

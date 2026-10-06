@@ -120,7 +120,7 @@
 | 风险 | 影响 | 缓解 |
 |---|---|---|
 | **Node-on-Android 升级依赖自持管线** | 上游（nodejs-mobile）停更；我方需长期维护 recipe | 建立 `:node-runtime-build` 固化管线：固定 Node LTS、预期树哈希门禁、NDK 版本锁定、CI 每日构建冒烟、产物 ABI 号校验；管线减至「换版本号→跑一次→回归」 |
-| **16KB 页 / ELF 对齐** | 未对齐 so 在新设备加载即崩 | **CI 门禁强制 `LOAD 0x4000` 对齐**（用 `llvm-objdump --private-headers` 断言）；红测机里常驻一台 16KB 页设备；`libopencv.so` 同轨还有一个**JNI 符号面**断言（五个 `JniOps_*` 逐个在场）—— 2026-09-25 补，理由是符号名是字符串约定、改包名/类名漏一处照样编得过，前三类断言一条都不红；**2026-09-26 修过一次真错位**：cc 用 `NativeImageAnalyzer_` 而声明类是顶层 `JniOps`，JVM 按声明类找 `JniOps_` 一个都找不到（无 RegisterNatives 兜底），本机 `jni-names.test.cjs` 先钉、CI 的符号面断言同批改对 |
+| **16KB 页 / ELF 对齐** | 未对齐 so 在新设备加载即崩 | **CI 门禁强制 `LOAD 0x4000` 对齐 + `p_offset ≡ p_vaddr (mod align)`**（用 `llvm-objdump --private-headers` / `llvm-readelf -l` 断言；三个产物 + `libc++_shared.so` 逐件过）；**不设 16KB 真机红测**（2026-10-06 拍板，`design-decisions.md` 第 34 项：风险在构建期被机械门禁吃掉，真机只是追加证明）；`libopencv.so` 同轨还有一个**JNI 符号面**断言（五个 `JniOps_*` 逐个在场）—— 2026-09-25 补，理由是符号名是字符串约定、改包名/类名漏一处照样编得过，前三类断言一条都不红；**2026-09-26 修过一次真错位**：cc 用 `NativeImageAnalyzer_` 而声明类是顶层 `JniOps`，JVM 按声明类找 `JniOps_` 一个都找不到（无 RegisterNatives 兜底），本机 `jni-names.test.cjs` 先钉、CI 的符号面断言同批改对 |
 | **引擎进程被杀/LMK** | 长任务中断 | 执行 slot 与 `:main` 绑定继承进程重要性 + specialUse FGS；看门狗对「被杀」能恢复意图日志重调度（幂等）；low-memory 降池 |
 | **无障碍树洪峰（滚动/动画）** | IPC 爆炸 / UI 卡顿 | 节流拉取（seq 游标批量）+ 数据面可丢包 + 紧凑索引树按需属性 |
 | **`process.exit` / CPU 风暴 / OOM 单脚本** | 曾拖垮整个 app | **进程边界**吸收全部；外带 CPU 差分 + 心跳双通道 + 堆 cap（沙箱 interrupt handler 随 §18 第 1 项裁掉） |
@@ -142,7 +142,7 @@
 | 维度 | 决策 |
 |---|---|
 | SDK | minSdk **26**（Android 8.0）· target/compile **36**（Android 16 · 2025/26 基线；真值见 [`gradle/libs.versions.toml`](../../gradle/libs.versions.toml)）；arm64-v8a 首发，x86_64/模拟器 P1 补 |
-| 页对齐 | 16KB ELF 对齐为 CI 硬门禁（§16） |
+| 页对齐 | 16KB ELF 对齐为 CI 硬门禁（§16）；**真机 16KB 页测试不做**（2026-10-06 拍板，见 §16 与 `design-decisions.md` 第 34 项） |
 | 无障碍 | API 31+ 需启用手势 → 能力中心引导；hidden API 在黑名单 → 不 curl，用 Safe-mode 替代路径 |
 | 前台服务 | API 34 起必须带 type → specialUse；API 35 6h 超时对 specialUse 不适用（但要声明 subtype） |
 | MediaProjection | API 34+ 每会话确认 + FGS(mediaProjection) 前置；会话 306s 感知 |

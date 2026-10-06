@@ -224,6 +224,7 @@ const offF = auto.npm.onFinished(f => f.success ? done() : fail(f.detail)); // �
 2. **脚本审批卡**：带 install/postinstall 脚本的包 → 卡片列表（可展开「脚本=任意代码」风险说明）→ per-package 人工批准/拒绝 / 「全局禁止脚本」（出厂默认）→ 批准记录入审计页。
 3. **npm 终端视图**（P1）：项目内终端 `npm install axios` / `npm ls`，stdout/stderr 流式输出 + exit code；与依赖面板同一安装会话队列。
 4. **离线包导入**：SAF 选择（tarball / lock+cacache bundle / 快照 node_modules.zip）→ 验签 → 队列安装；另提供「从内置精选缓存离线装 axios/dayjs/…」。`node_modules.zip` 导入**仅限高信任项目**，签名锚定 `HMAC(应用密钥, lock.sig + zip.sha256)`；市场脚本一律拒绝该格式（走 reify 产出 integrity）。
+   **体积上限（2026-10-06，backlog B12）**：cacache bundle 解包前先卡**整包** 512 MiB（判据是文件系统上的字节数，不是 zip 声明的数），解包中逐条目卡 64 MiB —— 单条目读到顶即停、不入缓存。上限**整包拒收**（不截断、不返回部分结果）并回 `ERR_INVALID_PARAM`（「选错了文件」是可诊断的参数问题，不是 `ERR_FILE_NOT_FOUND`）。理由：这条路径收的是用户从 SAF 递进来的外部文件，**用户可能只是选错了**（视频、系统镜像、整个 Downloads 打成的一个包），而解包器在读到顶之前没有任何自然的停止点。
 5. **包大小管理页**：per-project `node_modules` + `npm-cache` 尺寸（Kotlin 遍历）+ 配额条（80%黄/100%拦）→ 一键 prune/dedupe/ci 重装/cache clean；明确标注 node_modules 计入系统「App 数据」。
 6. **首启引导**：原子部署 assets/npm CLI + 播种精选缓存 → registry ping 探测 → 选镜像（**默认官方 npmjs**，§18 第 7 项；镜像是加速选项不是开箱前提）与配置代理（能力中心网络项）。
 7. **打包向导联动**：node_modules 默认入 APK + `.autojs.build.ignore` 排除规则 + 「完全离线变体」（宿主预装 node_modules.zip）+ 项目 lock 签名生成。

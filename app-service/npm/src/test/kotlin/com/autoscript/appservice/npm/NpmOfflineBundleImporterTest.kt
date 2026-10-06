@@ -2,6 +2,7 @@ package com.autoscript.appservice.npm
 
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -42,6 +43,33 @@ class NpmOfflineBundleImporterTest {
             }
         }
         return zip
+    }
+
+    /**
+     * 把 zip 里每条条目的**声明**未压缩大小改小（中央目录 + 本地头两处，各 4 字节 LE）。
+     *
+     * 这是「压缩炸弹」那一类包的手法：声明可以撒谎。用例靠它证明上限不是拿声明判的。
+     */
+    private fun forgeDeclaredSize(zip: Path, declared: Int): Path {
+        val b = Files.readAllBytes(zip)
+        fun putLe(off: Int, v: Int) {
+            b[off] = v.toByte(); b[off + 1] = (v ushr 8).toByte()
+            b[off + 2] = (v ushr 16).toByte(); b[off + 3] = (v ushr 24).toByte()
+        }
+        for (i in 0..b.size - 4) {
+            val sig = (b[i].toInt() and 0xff) or ((b[i + 1].toInt() and 0xff) shl 8) or
+                ((b[i + 2].toInt() and 0xff) shl 16) or ((b[i + 3].toInt() and 0xff) shl 24)
+            if (sig == 0x02014b50) putLe(i + 24, declared)   // central directory header
+            if (sig == 0x04034b50) putLe(i + 22, declared)   // local file header
+        }
+        Files.write(zip, b)
+        return zip
+    }
+
+    /** 造一个含**指定大小**合法条目的 bundle（用于把上限压到可测的规模）。 */
+    private fun bundleOfSize(size: Int): Pair<Path, ByteArray> {
+        val payload = ByteArray(size) { (it % 251).toByte() }
+        return bundle(payload) to payload
     }
 
     @Test
@@ -162,5 +190,66 @@ class NpmOfflineBundleImporterTest {
         val idx = CacacheIndex(cacheDir)
         assertTrue(idx.has(integ), "导入的条目必须被离线体检看见")
         assertEquals(1f, idx.coverage(listOf(integ)))
+    }
+
+    // ═══ 资源上限（backlog B12） ═══
+    //
+    // 上限做成可注入参数（`import(zip, cacheDir, maxBundleBytes, maxEntryBytes)`）正是
+    // 为了这几条：边界要按真值测就得造 64 MiB+ 的条目，而**为一条不该进内存的条目
+    // 先吃满 64 MiB 内存**是拿边界的坑去测边界。缝只开在上限上，两个入口同一段循环。
+
+    @Test
+    fun `整包超限：拒收且一条都不写（不是「导一半」）`() {
+        val (zip, payload) = bundleOfSize(4096)
+        // 上限取自**文件系统上的真实字节数**（压缩后的大小不是载荷大小 —— 这里正是
+        // 用真值而不是「我猜它多大」）。
+        val realBytes = Files.size(zip)
+        val cap = realBytes - 1
+        val e = assertThrows(NpmOfflineBundleImporter.BundleTooLargeException::class.java) {
+            NpmOfflineBundleImporter.import(zip, cacheDir, maxBundleBytes = cap, maxEntryBytes = 1L shl 20)
+        }
+        assertTrue(e.message!!.contains("超过上限"), "得说清是超限：${e.message}")
+        assertTrue(e.message!!.contains("$realBytes"), "得带上真值（实际字节数）：${e.message}")
+        val hex = digest(payload)
+        assertFalse(
+            Files.exists(cacheDir.resolve("_cacache/content-v2/sha512/${hex.substring(0, 2)}/${hex.substring(2, 4)}/${hex.substring(4)}")),
+            "整包拒收 = 缓存零条目（截断的包只会变成一屏对不上摘要的 rejected）",
+        )
+    }
+
+    @Test
+    fun `单条目超限：点名拒收，其余条目照常导入`() {
+        val small = "ok".toByteArray()
+        val big = ByteArray(4096) { 7 }
+        val zip = bundle(small, big)
+        val r = NpmOfflineBundleImporter.import(zip, cacheDir, maxBundleBytes = 1L shl 30, maxEntryBytes = 1024)
+        assertEquals(1, r.imported, "小条目不受牵连")
+        assertEquals(1, r.rejected.size, "大条目必须点名：${r.rejected}")
+        val bigHex = digest(big)
+        assertFalse(
+            Files.exists(cacheDir.resolve("_cacache/content-v2/sha512/${bigHex.substring(0, 2)}/${bigHex.substring(2, 4)}/${bigHex.substring(4)}")),
+            "超限条目绝不入缓存",
+        )
+    }
+
+    @Test
+    fun `声明撒谎的条目：改小声明也拦得住（上限不是拿声明判的）`() {
+        val (zip, payload) = bundleOfSize(4096)
+        forgeDeclaredSize(zip, declared = 10)   // 声明 10 字节，实际 4096
+        val r = NpmOfflineBundleImporter.import(zip, cacheDir, maxBundleBytes = 1L shl 30, maxEntryBytes = 1024)
+        assertEquals(0, r.imported, "声明小 ≠ 真小：真读出来的字节数才是判据")
+        assertEquals(1, r.rejected.size, "撒谎条目必须被拦：${r.rejected}")
+        val hex = digest(payload)
+        assertFalse(Files.exists(cacheDir.resolve("_cacache/content-v2/sha512/${hex.substring(0, 2)}/${hex.substring(2, 4)}/${hex.substring(4)}")))
+    }
+
+    @Test
+    fun `readCapped：cap 内原字节返回，超一个字节即 null`() {
+        val data = ByteArray(1000) { it.toByte() }
+        val ok = NpmOfflineBundleImporter.readCapped(data.inputStream(), cap = 1000)
+        assertTrue(data.contentEquals(ok), "恰好到顶算通过（边界含等号）")
+        assertNull(NpmOfflineBundleImporter.readCapped(data.inputStream(), cap = 999), "多一个字节就拒")
+        assertNull(NpmOfflineBundleImporter.readCapped(data.inputStream(), cap = 0), "cap=0 只能过空条目")
+        assertTrue(NpmOfflineBundleImporter.readCapped(ByteArray(0).inputStream(), cap = 0)!!.isEmpty())
     }
 }

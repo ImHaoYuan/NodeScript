@@ -126,7 +126,8 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 > ③ 脚本侧本来就不受影响（桥走 abstract unix socket，`auto.*` 没有 HTTP 面）。
 
 运行期已实测过的部分（非 root 设备、Android 13 / arm64）：引擎冷启、桥往返、无障碍读屏与手势、
-截屏帧源；**未**实测：16KB 页设备、SELinux enforcing、`targetSdk` 提取策略、MediaProjection 高清会话。
+截屏帧源；**未**实测：SELinux enforcing、`targetSdk` 提取策略、MediaProjection 高清会话
+（16KB 页设备**已裁定不测** —— 装载风险由构建期 ELF 对齐门禁承接，见 `docs/design-decisions.md` 第 34 项）。
 逐条记在 [`docs/design-status.md`](docs/design-status.md)。
 
 ## 参与贡献
@@ -139,12 +140,13 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 本项目本体（Kotlin / C++ / TypeScript 源码，含 `bridge/js`）是 **GPL-2.0-only** ——
 GNU General Public License **第 2 版**，**不含**「或任何更新版本」。全文见 [`LICENSE`](LICENSE)。
 
-**为什么是 `only` 而不是 `or-later`**：`ui/` 含衍生自 Telegram Android 的部分，而后者是
-GPL-2.0-**only**；它与 GPL-3.0 不兼容，两者合成的整体无法合法地按 GPL-3.0 再分发，
-所以「or later」这个选项事实上走不通。口径与代价见 [`docs/design-decisions.md`](docs/design-decisions.md)
-第 33 项。
+**为什么是 `only` 而不是 `or-later`**：本仓 `ui/` 的**前端 UI 实现与风格参考自 Telegram
+Android**（GPL-2.0-**only**，逐文件见 [`NOTICE`](NOTICE)）。**这是否构成「衍生作品」属法律判断，本仓不做
+该判断**；在未经复核前，不对外附加一条可能走不通的授权路径（GPL-2.0-only 与 GPL-3.0 不兼容），
+是保守且如实的做法 —— `only` 是本仓自己的选择，不是被上游逼出来的结论。口径见
+[`docs/design-decisions.md`](docs/design-decisions.md) 第 33、36 项。
 
-**署名与衍生来源**：源码面（哪几个文件衍生自哪个上游、改了哪些）见 [`NOTICE`](NOTICE)；
+**署名与参考来源**：源码面（哪几个文件参考了哪个上游、改了哪些）见 [`NOTICE`](NOTICE)；
 随包分发的第三方**二进制与素材**（Node.js / npm / OpenCV / KleidiCV / libc++ /
 libjpeg-turbo / libpng / zlib）清单见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)，
 逐字许可原文在 [`node-runtime-build/licenses/`](node-runtime-build/licenses/)。

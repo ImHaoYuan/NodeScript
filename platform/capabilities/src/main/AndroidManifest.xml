@@ -32,5 +32,25 @@
         <receiver
             android:name="com.autoscript.platform.capabilities.device.DialogActionReceiver"
             android:exported="false" />
+
+        <!-- Shizuku 握手（§9.3 的 adb 输入通道，2026-10-06 引入）。
+             **为什么必须显式声明**：dev.rikka.shizuku:provider 的 AAR 只带 meta-data，
+             不带 <provider> 节点 —— 授权握手（Shizuku 管理器把 binder 递进来）靠的就是
+             这个 ContentProvider，不声明 = 永远授权不上。
+             **authority 取 `${applicationId}.shizuku`**：Shizuku 侧按这个约定名找（类里
+             硬编码的 `.shizuku` 后缀），库模块里用占位符，合并时取宿主应用的 applicationId
+             —— 打包模板多实例同装一台机时各用各的 authority。
+             **exported + permission 是它的设计形态**：它必须被 Shizuku 管理器（另一个应用）
+             访问，所以 exported=true；写权限靠 `moe.shizuku.manager.permission.API_V23`
+             （signature 级，只有 Shizuku 管理器持有），不是靠 exported=false 藏起来。
+             这是本应用**唯一** exported 且非系统绑定权限的组件，改它之前先读 §9.3 与
+             `ShizukuInput` 的类注释。 -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:enabled="true"
+            android:exported="true"
+            android:multiprocess="false"
+            android:permission="moe.shizuku.manager.permission.API_V23" />
     </application>
 </manifest>

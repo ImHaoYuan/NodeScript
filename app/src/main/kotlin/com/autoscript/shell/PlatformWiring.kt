@@ -2,6 +2,7 @@ package com.autoscript.shell
 
 import android.content.Context
 import com.autoscript.domain.automation.ImageAnalyzer
+import com.autoscript.domain.automation.InputChannel
 import com.autoscript.domain.bridge.NamespaceHandler
 import com.autoscript.domain.system.DialogHost
 import com.autoscript.platform.capabilities.dialogs.AndroidDialogHost
@@ -10,6 +11,7 @@ import com.autoscript.platform.capabilities.screen.AndroidGestureInput
 import com.autoscript.platform.capabilities.a11y.AndroidUiTree
 import com.autoscript.platform.capabilities.CapabilityNamespaces
 import com.autoscript.platform.capabilities.screen.ScreenshotSource
+import com.autoscript.platform.capabilities.device.ShizukuInput
 import com.autoscript.platform.capabilities.device.SystemDialogOps
 import com.autoscript.platform.system.power.AndroidWakeLockOps
 import com.autoscript.platform.system.images.JniOps
@@ -17,6 +19,9 @@ import com.autoscript.platform.system.images.NativeImageAnalyzer
 import com.autoscript.platform.system.SystemNamespaces
 import com.autoscript.platform.system.power.PowerManagerNamespaceHandler
 import com.autoscript.platform.system.SystemSpis
+import com.autoscript.platform.system.shell.ShellExecutor
+import com.autoscript.platform.system.shell.ShellInputProvider
+import com.autoscript.platform.system.shell.ShellResult
 import com.autoscript.platform.system.power.WakeLockLedger
 import com.autoscript.platform.capabilities.a11y.A11yEventRing
 import com.autoscript.platform.capabilities.a11y.InMemoryUiTree
@@ -94,7 +99,7 @@ object PlatformWiring {
     ): Injection = Injection(
         // 树+动作同一个实例（句柄注册表共享，同 InMemoryUiTree 双身份形态）；
         // 事件流缺省 A11yEventRing.shared（服务 push / 树读同一环）。
-        a11yHandler = a11yHandler(),
+        a11yHandler = a11yHandler(spis.shell),
         screenHandler = screenHandler(images),
         systemHandlers = SystemHandlers(
             // 缺省 null（未提供）→ 如实 ERR_NOT_IMPLEMENTED；生产由 of() 传真宿主。
@@ -116,11 +121,36 @@ object PlatformWiring {
         imagesHandler = images?.let { SystemNamespaces.images(it) },
     )
 
-    /** a11y 装配（[CapabilityNamespaces.a11y] 形状转接；实现在 :platform:capabilities）。 */
-    private fun a11yHandler(): NamespaceHandler {
+    /**
+     * a11y 装配（[CapabilityNamespaces.a11y] 形状转接；实现在 :platform:capabilities）。
+     *
+     * **三通道登记（§9.3，2026-10-06）**：`auto` 恒在（无障碍原生）；`root` 与 `adb`
+     * **各自按可用性接线**，不可用就**不登记** —— 调用方指定它时拿到 handler 的
+     * `ERR_PERMISSION_DENIED` + 引导文案，而不是「命令跑不起来」。这不是降级：
+     * 登记与否只决定「这条通道现在有没有」，**绝不改变调用方选的那条**。
+     */
+    private fun a11yHandler(shell: ShellExecutor): NamespaceHandler {
         val tree = AndroidUiTree()
-        return CapabilityNamespaces.a11y(tree = tree, actions = tree, input = AndroidGestureInput())
+        val channels = buildMap {
+            put(InputChannel.AUTO, AndroidGestureInput())
+            // ROOT：走既有的 `su -c`（ShellExecutor 的 ShellMode.ROOT）。
+            put(InputChannel.ROOT, ShellInputProvider.root(shell))
+            // ADB：Shizuku。装没装 + 服务活没活都要问过才登记（见 ShizukuInput.isAvailable）。
+            if (ShizukuInput.isAvailable()) {
+                put(InputChannel.ADB, ShellInputProvider.adb { cmd -> ShizukuInput.run(cmd).toShellResult() })
+            }
+        }
+        return CapabilityNamespaces.a11y(
+            tree = tree,
+            actions = tree,
+            input = AndroidGestureInput(),
+            channels = channels,
+        )
     }
+
+    /** Shizuku 的 `(exitCode, stderr)` → [ShellResult]（stdout 不取：`input` 成功时无输出）。 */
+    private fun Pair<Int, String?>.toShellResult(): ShellResult =
+        ShellResult(code = first, stdout = null, stderr = second)
 
     /**
      * screen 装配（§9.2 a11y 截图路径：语义节流/策略在 ScreenshotSource，设备面在 producer）。

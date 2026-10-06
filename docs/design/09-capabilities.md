@@ -44,8 +44,36 @@ FrameSource (SPI)
   落点是**发号侧归一**（§7.4）—— 归一的两条落点（`ImageAnalyzer.ingest` 第 6 方法、
   共用 `nextRefId`）与其钉子清单随上条实现注记外迁。
 
-### 9.3 输入通道（`root_automator` / 手势）
-`InputProvider` SPI 三实现：无障碍手势（默认）/ root `sendevent`（root 设备自选）/ Shizuku-ADB（可代理 dev `${i}` 事件）。统一 `touchDown/Move/Up` + 手势 DSL。root 能力分级进 PermissionCenter，无 root 不降级渲染为禁用（不假装可用）。
+### 9.3 输入通道（`auto` / `adb` / `root`）
+`InputProvider` SPI 三实现：无障碍手势 / root / Shizuku-ADB。统一 `touchDown/Move/Up` + 手势 DSL。root 能力分级进 PermissionCenter，无 root 不降级渲染为禁用（不假装可用）。
+
+**三通道平级、显式选路（2026-10-06 拍板，见 [`design-decisions.md`](../design-decisions.md) 第 35 项；
+含 Shizuku 依赖引入与「未真机验证」这条诚实缺口）**：
+- 取值 `auto`（无障碍）/ `adb`（Shizuku）/ `root`（`su`）。**必须显式指定**：单次调用在
+  payload 带 `{channel}`，会话级用 `a11y.setInputChannel`（**按桥连接隔离**，一个脚本设的
+  不会漏给另一个）；**两者都没有 → `ERR_INVALID_PARAM`，没有缺省通道**（本仓别处「不传即用
+  缺省」的惯例在这里刻意不成立）。会话值是**显式选择的一种**，设过之后本脚本可省略 `channel`。
+  受这条约束的方法只有**与通道有关**的那几个：`gesture`/`click`/`longClick`/`scroll`/
+  `canPerformGestures`；`copy`/`paste`/`setText`/`bounds`/`text`/`desc`/`children`/`parent`/
+  `dispose`/`findOne`/`findAll`/`waitFor`/`events` 与通道无关，**不要求** `channel`。
+- **不是降级链**：指定的那条不可用 → `ERR_PERMISSION_DENIED`（带引导），**绝不改用别的通道**。
+  这一条与 §9.5 的 `DEGRADED` 哲学刻意相反，因为三者**可观测后果不同**（无障碍注入会被前台
+  应用看出、root 注入在系统层不留无障碍痕迹、adb 注入的进程身份是 shell）—— 静默换通道等于
+  让脚本作者以为在测 A 实际在测 B。
+- **节点动作在非 auto 通道降级为坐标注入**：`click`/`longClick`/`scroll` 在 `auto` 走节点语义
+  `ACTION_CLICK`/`ACTION_LONG_CLICK`/`ACTION_SCROLL`；`adb`/`root` **没有节点语义可用**，改为解出
+  节点 `bounds` 再注入（点中心 / 按方向在节点内划一条）。语义上这是「点这个控件所在的位置」，
+  不是「对这个控件发 action」。
+- **`copy`/`paste` 没有第二条通道**：它们是纯语义动作（shell 面没有「复制节点文本」这种原语），
+  所以不在上一条的降级映射里，也不要求 `channel`。
+- **shell 面只有直线**：`input tap` / `input swipe` 两个原语，没有轨迹 —— 经 `adb`/`root` 的
+  `gesture` 会逐笔画串行注入且每条只取首尾两点。真轨迹要 `sendevent`（按设备事件节点写，未落地）。
+- **`canPerformGestures` 问的是当前通道**：`auto` 问服务能力位；`adb`/`root` **没有对应开关**
+  （能不能用取决于进程身份，而那正是该通道被接线的前提），故恒 `true`；真正的失败以命令退出码
+  形式出现在动作调用里（**不折成 `false`** —— `false` 的语义是「系统拒绝这次注入」）。
+- **接线（`PlatformWiring`）**：`auto` 恒登记；`root` 恒登记（走既有 `su -c`，真无 root 时命令
+  自己失败）；`adb` **只在 `ShizukuInput.isAvailable()` 为真时登记**（装了 **且** 服务活着，两问
+  都要）。未登记 = 调用方拿 `ERR_PERMISSION_DENIED`，**不回落 `auto`**。
 
 ### 9.4 悬浮窗 / UI 宿主
 - `floating_window`：`TYPE_ACCESSIBILITY_OVERLAY`（可信窗口易保持）＋ `SYSTEM_ALERT_WINDOW`（普通）；运行时权限 checkbox 进能力中心。
@@ -84,7 +112,7 @@ FrameSource (SPI)
   **捕获有上限（2026-10-02 拍板，口径见 `design-decisions.md` 第 21 项）**：每条流至多留 `ShellCaptureLimit.MAX_CAPTURE_BYTES`（1 MiB），超出即**静默截断 + 显式日志 Warning + `ShellResult.truncated=true`**（纯增量字段，缺省 false）。三条硬约束：① **到顶后仍要把管道读到 EOF**，只是不再落缓冲 —— 停下来不读会让子进程憋死在写满的管道上，那正是「双流并发读干」要防的死锁；② **两条流各自计数**（stdout 截了不挤掉 stderr 的额度，错误信息恰是最该留住的短输出）；③ 上限必须满足 `MAX_CAPTURE_BYTES × JSON_WORST_CASE_EXPANSION(6) < 单帧上限`（§7.5 的 8 MiB）—— 单帧超限在桥上是 `FrameTooLargeException` → **关连接**，比截断重得多，所以必须在实现侧先兜住、不让超限载荷走到 JSON 编码那一步。**截断不进 `isSuccess` 的判据**：`code` 是子进程真实退出码，截断是宿主侧捕获策略，两者正交；被截的那条流末尾另追加 `TRUNCATION_MARK` 说明行（人读的那一层，机器判定一律用 `truncated`）。日志走可注入的 `LogSink`（缺省 `java.util.logging`，其 `ConsoleHandler` 写 `System.err`，Android 把 `System.err` 重定向进 logcat）—— **刻意不直接调 `android.util.Log`**：`:platform:system` 的 JVM 单测没有 `isReturnDefaultValues`，直接调会抛 "not mocked"，一条"输出超限"的告警不该把测试判红。
 **实现注记已外迁**：五个系统命名空间（`dialogs`/`shell`/`device`/`app`/`floatingWindow`）的落地清单与 `dialogs` 的回投/取消语义，逐字见 [`design-status.md` §9.6 实现注记](../design-status.md#实现注记自各分卷外迁逐字保留)。
   **Promise 封装的诚实口径**：`stdout`/`stderr` 为 `null` 表示「流无输出」，不是「有输出但为空」；退出码非 0 不是异常，原样回 `{code, stdout, stderr, truncated}` 由 JS 侧判；child_process 副作用限制如实上报。
-- `zip` = 归档压缩/解压（`:domain` `ZipArchiver` SPI + `:platform:system` `JdkZipArchiver`）。契约级安全底线：**zip-slip 先验后写** —— 全包条目名校验通过才落字节（`../` 逃逸/绝对路径条目 → `ERR_INVALID_PARAM`，界内零写入；与 shell 超时同级的实现方义务）。压缩 tmp+rename 原子落位、空目录条目保留、垃圾包如实 `ERR_IO`（`ZipFile` 中央目录校验，不用对垃圾"零条目静默成功"的流式读）。
+- `zip` = 归档压缩/解压（`:domain` `ZipArchiver` SPI + `:platform:system` `JdkZipArchiver`）。契约级安全底线：**zip-slip 先验后写** —— 全包条目名校验通过才落字节（`../` 逃逸/绝对路径条目 → `ERR_INVALID_PARAM`，界内零写入；与 shell 超时同级的实现方义务）。压缩 tmp+rename 原子落位、空目录条目保留、垃圾包如实 `ERR_IO`（`ZipFile` 中央目录校验，不用对垃圾"零条目静默成功"的流式读）。**体积上限（2026-10-06，backlog B13）**：解压前先卡**单条目** 256 MiB 与**整包合计** 1 GiB（两道都要 —— 单条目的闸防「一个巨物」，总量的闸防「一万个小东西」），超限整次拒绝并回 `ERR_INVALID_PARAM`（与 zip-slip 同码：都是「这个归档本身不合格」，是**输入**的问题，不是目标盘的问题）。判据分两拍：第一拍按包的**声明**早退（诚实炸弹在写任何字节之前就被拦下），第二拍在字节流经过的地方按**真读出来的字节数**再判一次（`ZipEntry.getSize()` 是包自己声明的数，可以撒谎）。**不查剩余空间** —— 那是配额面的事（§10.9 UX 5），混在一起会让「盘满了」与「包是炸弹」报同一个错。
 **实现注记已外迁**：`ScriptPaths` 三处复用、`ScriptDeployRecovery` 的「只补缺不覆盖」与诚实边界，逐字见 [`design-status.md` §9.6 实现注记](../design-status.md#实现注记自各分卷外迁逐字保留)。
   **桥面已通**：handler（`:platform:capabilities` `ZipNamespaceHandler`，参数口径+错误原码透传，不碰归档字节）+ 独立注入缝（`assemble.zipHandler`）+ JS facade（`zip.ts`）。与 packager 的 npm 专用 zip（`NpmSnapshot` 固定 mtime+integrity）边界分明，不互相复用。
 

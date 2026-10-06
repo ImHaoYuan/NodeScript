@@ -8,6 +8,8 @@ import com.autoscript.domain.json.DomainJson
 import com.autoscript.domain.automation.GestureInput
 import com.autoscript.domain.automation.GesturePoint
 import com.autoscript.domain.automation.GestureStroke
+import com.autoscript.domain.automation.InputChannel
+import com.autoscript.domain.automation.InputChannelSession
 import com.autoscript.domain.automation.InputProvider
 import com.autoscript.domain.automation.ScrollDirection
 import com.autoscript.domain.automation.UiActionExecutor
@@ -18,6 +20,7 @@ import com.autoscript.domain.automation.UiSelectorDsl
 import com.autoscript.domain.bridge.HandleRef
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
+import kotlin.coroutines.coroutineContext
 import com.autoscript.platform.capabilities.CapabilityNamespaces
 import com.autoscript.platform.capabilities.screen.AndroidGestureInput
 import com.autoscript.platform.capabilities.screen.InMemoryInputProvider
@@ -56,7 +59,24 @@ import com.autoscript.platform.capabilities.screen.InMemoryInputProvider
  *   → Ok `"true"/"false"`（关门 canPerformGestures=false → false，调用方走能力中心引导；
  *   服务未连 → Err ERR_SERVICE_DISABLED 原码，不折 false）；
  *   非法手势 → ERR_INVALID_PARAM，绝不发往系统服务）；
- * - `canPerformGestures`：无参 → Ok `"true"/"false"`。
+ * - `canPerformGestures`：无参 → Ok `"true"/"false"`（**按当前会话通道问**，见下）。
+ *
+ * **输入通道选路（2026-10-06，§9.3；判据见 `design-decisions.md`）**：
+ * - `setInputChannel`：payload `{channel:"auto"|"adb"|"root"}` → Ok `"true"`，设**本连接**的
+ *   会话通道（`InputChannelSession`，随 [kotlin.coroutines.CoroutineContext] 传播，见其 KDoc）；
+ * - **必须显式**（2026-10-06 用户口径「必须显式传，无默认」）：`gesture`/`click`/`longClick`/
+ *   `scroll`/`canPerformGestures` 的 payload **必须**带 `channel`，或先 `setInputChannel` 设过
+ *   会话值；**两者都没有 → `ERR_INVALID_PARAM`**。刻意不设 `auto` 缺省：预置缺省等于
+ *   「什么都没说 = 走了无障碍」，而三者可观测后果不同（见 [InputChannel] 的 KDoc）。
+ *   其他方法（`copy`/`paste`/`setText`/`bounds`/…）**与通道无关**，不需要 `channel`；
+ * - **不是降级链**：指定 `adb`/`root` 而该通道不可用 → `ERR_PERMISSION_DENIED` 并如实说
+ *   「哪条通道不可用」，**绝不改用无障碍**。三者可观测后果不同（无障碍注入会被前台应用
+ *   看出、root 注入在系统层不留无障碍痕迹、adb 注入的进程身份是 shell），静默换通道
+ *   等于让脚本作者以为在测 A 实际在测 B。
+ * - `click`/`longClick`/`scroll` 在 `auto` 通道走**节点语义动作**（`ACTION_CLICK` 等）；
+ *   在 `adb`/`root` 通道**没有节点语义可用**，改为解出节点 bounds 再按坐标注入
+ *   （`tap` 中心 / 按方向滑一条）。**这条映射未在真机上验过**（设备道 2026-10-06 已裁，
+ *   见 backlog B3/E3）—— 语义上是「点这个控件所在的位置」，不是「对这个控件发 action」。
  */
 class A11yNamespaceHandler(
     private val tree: UiNodeTreeReader,
@@ -67,6 +87,15 @@ class A11yNamespaceHandler(
      * 事件监听做在树之外，可显式注入 —— handler 不关心事件从哪来，只认游标契约。
      */
     private val events: UiEventStream? = null,
+    /**
+     * 通道 → provider 表。缺省只登记 [InputChannel.AUTO]（= [input]）—— 其余两条
+     * **如实不可用**（`ERR_PERMISSION_DENIED` + 引导），不是「悄悄回落到 auto」。
+     * 生产装配（`PlatformWiring`）把三条都塞进来。
+     *
+     * 表里有 `auto` **不等于**「不传通道就走 auto」：缺省通道在 [requiredChannel] 里
+     * **不存在**（那是本次改动最要紧的一条）。
+     */
+    private val channels: Map<InputChannel, InputProvider> = mapOf(InputChannel.AUTO to input),
 ) : RpcNamespaceHandler() {
 
 
@@ -78,11 +107,12 @@ class A11yNamespaceHandler(
         "findOneOrNull" -> findOne(request, single = true)
         "findAll" -> findAll(request)
         "waitFor" -> waitFor(request)
-        "click" -> boolAction(request) { ref -> actions.click(ref) }
-        "longClick" -> boolAction(request) { ref -> actions.longClick(ref) }
+        "setInputChannel" -> setInputChannel(request)
+        "click" -> nodeAction(request) { ref, channel -> clickNode(ref, channel) }
+        "longClick" -> nodeAction(request) { ref, channel -> longClickNode(ref, channel) }
         "scroll" -> scroll(request)
-        "copy" -> boolAction(request) { ref -> actions.copy(ref) }
-        "paste" -> boolAction(request) { ref -> actions.paste(ref) }
+        "copy" -> refAction(request) { ref -> actions.copy(ref) }
+        "paste" -> refAction(request) { ref -> actions.paste(ref) }
         "setText" -> setText(request)
         "bounds" -> bounds(request)
         "text" -> attr(request, "text")
@@ -95,7 +125,8 @@ class A11yNamespaceHandler(
         // 服务未连时 AndroidGestureInput 抛 ERR_SERVICE_DISABLED：原码回桥（不折 false ——
         // "没服务"与"手势关门"是两回事，后者才走能力中心引导）。
         "canPerformGestures" -> run {
-            ok(request, if (input.canPerformGestures) "true" else "false")
+            val provider = providerFor(requiredChannel(decodePayloadOrNull(request.payload), request))
+            ok(request, if (provider.canPerformGestures) "true" else "false")
         }
         else -> err(request, ErrorCode.ERR_NOT_IMPLEMENTED, "未知 a11y 方法: ${request.method}")
     }
@@ -145,7 +176,30 @@ class A11yNamespaceHandler(
 
     // ── 动作 ─────────────────────────────────────────────────────────
 
-    private suspend fun boolAction(request: BridgeRequest, run: suspend (HandleRef) -> Boolean): BridgeResponse {
+    /**
+     * **与通道有关**的动作（`click`/`longClick`）：先定通道（[requiredChannel]，无缺省）
+     * 再执行 —— 通道定不下来就 `ERR_INVALID_PARAM`，且**一个字节都没注入**。
+     */
+    private suspend fun nodeAction(
+        request: BridgeRequest,
+        run: suspend (HandleRef, InputChannel) -> Boolean,
+    ): BridgeResponse {
+        val o = decodePayload(request.payload)
+        val ref = requiredRef(o)
+        return ok(request, if (run(ref, requiredChannel(o, request))) "true" else "false")
+    }
+
+    /**
+     * **与通道无关**的动作（`copy`/`paste`）：走无障碍 Action 的语义面，**没有第二条
+     * 通道可选**（shell 面没有「复制节点文本」这种原语），所以不要求 `channel`。
+     *
+     * 这一刀是必须的：`copy`/`paste` 曾复用 [nodeAction]，加通道校验后它们会开始
+     * 要一个**根本没有意义**的参数（`A11yNamespaceHandlerTest` 当场抓住）。
+     */
+    private suspend fun refAction(
+        request: BridgeRequest,
+        run: suspend (HandleRef) -> Boolean,
+    ): BridgeResponse {
         val ref = requiredRef(decodePayload(request.payload))
         return ok(request, if (run(ref)) "true" else "false")
     }
@@ -169,12 +223,137 @@ class A11yNamespaceHandler(
         val o = decodePayload(request.payload)
         val ref: HandleRef
         val direction: ScrollDirection
+        val channel: InputChannel
         run {
             ref = requiredRef(o)
             direction = optDirection(o, "direction") ?: ScrollDirection.FORWARD
+            channel = requiredChannel(o, request)
         }
-        return ok(request, if (actions.scroll(ref, direction)) "true" else "false")
+        val ok0 = if (channel == InputChannel.AUTO) {
+            actions.scroll(ref, direction)
+        } else {
+            swipeNode(ref, direction, channel)
+        }
+        return ok(request, if (ok0) "true" else "false")
     }
+
+    // ── 输入通道选路（§9.3） ──────────────────────────────────────────
+
+    /**
+     * 会话通道（`setInputChannel`）：payload `{channel}` → Ok `"true"`。
+     *
+     * 会话态住 [InputChannelSession]（协程上下文元素），**不是本类的字段** ——
+     * 本类是全局单例，字段级会话态会让一个脚本设的通道漏给另一个脚本。
+     */
+    private suspend fun setInputChannel(request: BridgeRequest): BridgeResponse {
+        val o = decodePayload(request.payload)
+        val channel = InputChannel.ofWire(requiredStr(o, "channel"))
+        val session = coroutineContext[InputChannelSession]
+            ?: throw AutojsException(
+                ErrorCode.ERR_SERVICE_DISABLED,
+                "当前连接无输入通道会话（桥未装载 InputChannelSession）：无法记住 setInputChannel",
+                null,
+            )
+        session.current = channel
+        return ok(request, "true")
+    }
+
+    /**
+     * 本次调用的通道：payload 的 `channel`（单次覆盖）→ 会话当前值（`setInputChannel` 设的）
+     * → **两者都没有就抛**（`IllegalArgumentException` → `ERR_INVALID_PARAM`）。
+     *
+     * **没有缺省**（2026-10-06 用户口径「必须显式传，无默认」）：本仓别处的「不传即用缺省」
+     * 在这里**刻意不成立** —— 三者可观测后果不同（见 [InputChannel] 的 KDoc），
+     * 静默落 `auto` 等于替脚本决定「这次走无障碍」。会话值是**显式选择的一种**
+     * （`setInputChannel` 是脚本自己发的帧），所以它算「说过」；**从没说过**才报错。
+     *
+     * 未知字面量同样抛 —— 拼错 `"uiautomator"` 却按 `auto` 跑，正是这个枚举要防的事。
+     */
+    private suspend fun requiredChannel(
+        payload: Map<String, DomainJson.Value>?,
+        request: BridgeRequest,
+    ): InputChannel {
+        val explicit = payload?.get("channel")?.let { v ->
+            if (v is DomainJson.Value.Null) null
+            else InputChannel.ofWire(
+                (v as? DomainJson.Value.S)?.v ?: throw IllegalArgumentException("channel 必须是字符串"),
+            )
+        }
+        if (explicit != null) return explicit
+        return coroutineContext[InputChannelSession]?.current
+            ?: throw IllegalArgumentException(
+                "未指定输入通道：请在载荷里给 channel（auto/adb/root），" +
+                    "或先调 a11y.setInputChannel 设本脚本的会话通道（方法 ${request.method} 无缺省通道）",
+            )
+    }
+
+    /** 通道 → provider；未接线的那条**如实拒绝**，绝不回落到别的通道（见类 KDoc）。 */
+    private fun providerFor(channel: InputChannel): InputProvider =
+        channels[channel] ?: throw AutojsException(
+            ErrorCode.ERR_PERMISSION_DENIED,
+            "输入通道 ${channel.name.lowercase()} 不可用（未接线或未授权）：" +
+                "请按能力中心引导启用，或显式改用 auto/adb/root 中可用的一条",
+            null,
+        )
+
+    /** 节点语义点击（auto）/ 坐标点击（adb、root）。 */
+    private suspend fun clickNode(ref: HandleRef, channel: InputChannel): Boolean =
+        if (channel == InputChannel.AUTO) actions.click(ref) else tapNode(ref, LONG_PRESS_NONE_MILLIS, channel)
+
+    /**
+     * 长按：auto 走 `ACTION_LONG_CLICK`（节点语义）；adb/root 走**同点长滑**
+     *（`input swipe x y x y <ms>` —— shell 面唯一能表达按住时长的写法）。
+     * 600ms 是 Android 判定长按的惯用阈值（`ViewConfiguration.getLongPressTimeout()` 缺省 500ms，
+     * 留 100ms 余量防抖动）。
+     */
+    private suspend fun longClickNode(ref: HandleRef, channel: InputChannel): Boolean =
+        if (channel == InputChannel.AUTO) actions.longClick(ref) else tapNode(ref, LONG_PRESS_MILLIS, channel)
+
+    /** 节点中心坐标点击；节点无 bounds（已离开树）→ `ERR_STALE_HANDLE`。 */
+    private suspend fun tapNode(ref: HandleRef, durationMillis: Long, channel: InputChannel): Boolean {
+        val b = actions.bounds(ref) ?: throw AutojsException(
+            ErrorCode.ERR_STALE_HANDLE, "节点无 bounds，无法按坐标注入（通道 ${channel.name.lowercase()}）", null,
+        )
+        return providerFor(channel).tap((b.left + b.right) / 2, (b.top + b.bottom) / 2, durationMillis)
+    }
+
+    /**
+     * 节点内滑动（adb/root 通道的 `scroll`）：按方向在节点 bounds 内划一条。
+     *
+     * **手指方向与内容方向相反**（触屏惯例：往下看更多内容 = 手指往上划）。四个方向里
+     * `FORWARD` 与 `DOWN` 同义、`BACKWARD` 与 `UP` 同义（`AccessibilityNodeInfo` 的
+     * ACTION_SCROLL_FORWARD 就是「看后面的内容」）。起止点各留 1/4 边距，避免从节点边缘
+     * 起划被相邻控件吃掉。
+     *
+     * **未真机验证**：设备道 2026-10-06 已裁（backlog B3/E3），这条映射是照惯例写的，
+     * 真机上第一次用就该拿它跟 auto 通道的行为对一遍。
+     */
+    private suspend fun swipeNode(ref: HandleRef, direction: ScrollDirection, channel: InputChannel): Boolean {
+        val b = actions.bounds(ref) ?: throw AutojsException(
+            ErrorCode.ERR_STALE_HANDLE, "节点无 bounds，无法按坐标滑动（通道 ${channel.name.lowercase()}）", null,
+        )
+        val cx = (b.left + b.right) / 2
+        val cy = (b.top + b.bottom) / 2
+        val quarterW = (b.right - b.left) / 4
+        val quarterH = (b.bottom - b.top) / 4
+        val (from, to) = when (direction) {
+            ScrollDirection.FORWARD, ScrollDirection.DOWN ->
+                GesturePoint(cx, b.bottom - quarterH) to GesturePoint(cx, b.top + quarterH)
+            ScrollDirection.BACKWARD, ScrollDirection.UP ->
+                GesturePoint(cx, b.top + quarterH) to GesturePoint(cx, b.bottom - quarterH)
+            ScrollDirection.LEFT ->
+                GesturePoint(b.right - quarterW, cy) to GesturePoint(b.left + quarterW, cy)
+            ScrollDirection.RIGHT ->
+                GesturePoint(b.left + quarterW, cy) to GesturePoint(b.right - quarterW, cy)
+        }
+        return providerFor(channel).dispatchGesture(
+            GestureInput(listOf(GestureStroke(listOf(from, to), durationMillis = SWIPE_MILLIS))),
+        )
+    }
+
+    /** 只取 payload 的通道提示，payload 缺失/坏掉时不在这里抛（让下游的校验先说话）。 */
+    private fun decodePayloadOrNull(payload: String?): Map<String, DomainJson.Value>? =
+        payload?.let { runCatching { DomainJson.decodeObject(it) }.getOrNull() }
 
     private suspend fun bounds(request: BridgeRequest): BridgeResponse {
         val ref = requiredRef(decodePayload(request.payload))
@@ -253,7 +432,8 @@ class A11yNamespaceHandler(
     private suspend fun gesture(request: BridgeRequest): BridgeResponse {
         val o = decodePayload(request.payload)
         val gesture = gestureOf(o["strokes"])
-        return ok(request, if (input.dispatchGesture(gesture)) "true" else "false")
+        val provider = providerFor(requiredChannel(o, request))
+        return ok(request, if (provider.dispatchGesture(gesture)) "true" else "false")
     }
 
     private fun gestureOf(v: DomainJson.Value?): GestureInput {
@@ -355,5 +535,14 @@ class A11yNamespaceHandler(
 
     companion object {
         val SELECTOR_KEYS: Set<String> = setOf("text", "desc", "id", "className", "packageName", "clickable")
+
+        /** 点击（非长按）：按下即起，`input swipe` 不接受 0，用 1ms。 */
+        const val LONG_PRESS_NONE_MILLIS = 1L
+
+        /** 长按阈值（见 [longClickNode] 的 KDoc）。 */
+        const val LONG_PRESS_MILLIS = 600L
+
+        /** 节点内滑动时长：够系统识别成滑动而不是抛掷（fling），也别慢到像长按。 */
+        const val SWIPE_MILLIS = 300L
     }
 }

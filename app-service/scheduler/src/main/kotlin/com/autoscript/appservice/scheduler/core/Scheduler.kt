@@ -5,24 +5,6 @@ import com.autoscript.domain.scripts.RunArchive
 import com.autoscript.domain.scripts.RunRecord
 import com.autoscript.domain.scripts.RunState
 import com.autoscript.domain.scripts.isTerminal
-import java.time.ZoneId
-
-/**
- * 定时任务模型（docs §8.6 / §9.6 定时 API）：
- * 一次登记 = 一个调度计划 + 投递参数 + 屏幕契约；每次触发生成新的 runNonce（意图日志幂等锚点）。
- */
-data class ScheduledTask(
-    val id: String,                             // 任务标识（alarm requestCode / UI 引用）
-    val name: String,
-    val projectId: String,
-    val scriptPath: String,
-    val schedule: TimedSchedule,
-    val screen: ScreenGuarantee = ScreenGuarantee.ANY,
-    val args: List<String> = emptyList(),
-    val scriptTimeoutMillis: Long? = null,      // 透传引擎
-    val timezone: ZoneId = ZoneId.systemDefault(),
-    val enabled: Boolean = true,
-)
 
 /**
  * 调度编排（§8.6）：登记/取消/触发 → 意图日志 RUN_START → dispatcher → COMMIT。
@@ -488,41 +470,3 @@ class Scheduler(
         }
     }
 }
-
-/**
- * 排队/到期上限的默认分级表（§8.6 分级口径的**唯一正本**）。
- *
- * 分级依据 = **谁在等、等久了会不会连带出事**：
- * - ENGINE_INTERNAL 最紧（15s）：一个已占槽的引擎在等另一个引擎，满池时这是
- *   「持有者等后来者」的嵌套形态，等久了就是跨引擎死锁，必须先爆；
- * - USER_CLICK 次之（10s）：人盯着 UI，给不出结果就该如实回 Cancelled，让任务中心
- *   呈现「引擎忙，未执行」，而不是让按钮原地转圈；
- * - INTENT_BROADCAST / EVENT 宽一些（60s）：外部涌入的批量触发本就该容忍排队；
- * - TIMED 最宽（120s）：守时任务已承诺「亮屏+解锁保底 + 可能偏差」，2 分钟兜底
- *   只为满足铁律 3（满池排队必须有 TTL，绝不无限等），不追求抢跑。
- *
- * 两处消费同一引用（不是两份相同的数字）：scheduler 的 `deadlineMillis`（恢复判过期）
- * 与 `:app` dispatcher 的排队上限（在途等多久）。`:app` 侧以
- * `ControllerRunDispatcher.DEFAULT_QUEUE_TIMEOUTS` 别名引用本表（arch 门禁禁止
- * scheduler→:app 方向，故正本只能住 scheduler 侧）；生产装配（`AppShell.assemble`）
- * 把那张表显式喂给 `Scheduler(deadlineFor=…)` —— 缺省恰好相同是巧合，写出来才是契约。
- */
-val DefaultDeadlines: (TriggerSource) -> Long = { trigger ->
-    when (trigger) {
-        TriggerSource.ENGINE_INTERNAL -> 15_000L
-        TriggerSource.USER_CLICK -> 10_000L
-        TriggerSource.INTENT_BROADCAST -> 60_000L
-        TriggerSource.EVENT -> 60_000L
-        TriggerSource.TIMED -> 120_000L
-    }
-}
-
-/** 恢复结果：一次未完成意向的封口 + 重投（§8.5）。 */
-data class RecoveryRecord(
-    val oldRunId: Long,
-    val newRunId: Long,
-    val runNonce: String,
-    val outcome: RunOutcome,
-    /** 因 [PendingRun.deadlineMillis] 到期而未重投（§8.6）：outcome 必为 [RunOutcome.Cancelled]。 */
-    val expired: Boolean = false,
-)

@@ -5,7 +5,7 @@
 
 /** wire 面方法表（schema 同源）。facade 列 = 该命名空间的 TS 门面文件。 */
 export const WIRE = {
-  "a11y": { facade: 'a11y.ts', methods: ['bounds', 'canPerformGestures', 'children', 'click', 'copy', 'desc', 'dispose', 'events', 'findAll', 'findOne', 'findOneOrNull', 'gesture', 'longClick', 'parent', 'paste', 'scroll', 'setText', 'text', 'waitFor'] },
+  "a11y": { facade: 'a11y.ts', methods: ['bounds', 'canPerformGestures', 'children', 'click', 'copy', 'desc', 'dispose', 'events', 'findAll', 'findOne', 'findOneOrNull', 'gesture', 'longClick', 'parent', 'paste', 'scroll', 'setInputChannel', 'setText', 'text', 'waitFor'] },
   "app": { facade: 'extras.ts', methods: ['currentPackage', 'launch'] },
   "clipboard": { facade: 'clipboard.ts', methods: ['getText', 'setText'] },
   "console": { facade: 'console.ts', methods: ['log'] },

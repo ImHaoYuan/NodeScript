@@ -261,7 +261,7 @@ class AndroidUiTreeTest {
         val mem = InMemoryUiTree()
         val handler = A11yNamespaceHandler(tree = mem, actions = mem, input = input)
         val resp = runBlocking {
-            handler.handle(a11yReq(1, "canPerformGestures", null))
+            handler.handle(a11yReq(1, "canPerformGestures", """{"channel":"auto"}"""))
         }
         assertTrue(resp is BridgeResponse.Err, "未连时 canPerformGestures 必须是 Err")
         assertEquals(
@@ -272,7 +272,7 @@ class AndroidUiTreeTest {
             handler.handle(
                 a11yReq(
                     2, "gesture",
-                    """{"strokes":[{"points":[{"x":1,"y":1}]}]}""",
+                    """{"strokes":[{"points":[{"x":1,"y":1}]}],"channel":"auto"}""",
                 ),
             )
         }

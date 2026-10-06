@@ -9,6 +9,7 @@ import com.autoscript.domain.permission.GrantResult
 import com.autoscript.domain.permission.requireGrantedOrThrow
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -124,6 +125,33 @@ class PermissionCenterTest {
             val text = PermissionCenter.guideText(ability)
             assertTrue(text.isNotBlank(), "$ability 缺引导文案")
         }
+    }
+
+    @Test
+    fun `guideText 与三态无关 —— 不按拒绝态起句（backlog A8）`() {
+        // A8 的现场：文案写死「精确闹钟未允许：请前往…」，而同一行的三态读数是「可用」。
+        // 裁定改数据这一头（显示逻辑不动）：每条只答「这项能力是干什么的 + 怎么让它可用」，
+        // 于是三态下都成立，呈现层不必按态猜该不该显示它。
+        for (ability in Capability.entries) {
+            val text = PermissionCenter.guideText(ability)
+            assertFalse(
+                text.startsWith("未") || text.startsWith("没") || text.startsWith("不"),
+                "$ability 的引导文案按拒绝态起句了 —— GRANTED 那一行会与它自相矛盾：$text",
+            )
+            assertTrue(
+                text.contains("："),
+                "$ability 的引导文案没按「能力名：用途」起头，读不出这是哪项能力：$text",
+            )
+        }
+    }
+
+    @Test
+    fun `ADB 输入文案不承诺降级 —— 三通道三选一之后没有降级链`() {
+        // 批 61（§9.3）把输入面改成三条平级通道 + 显式选路：指定 adb 而该通道不可用
+        // 就是 ERR_PERMISSION_DENIED，绝不改用别的通道。旧文案那句「未就绪时输入走
+        // 无障碍手势」描述的路已经不存在了，留着就是对用户的假承诺。
+        val text = PermissionCenter.guideText(Capability.ADB_INPUT)
+        assertFalse(text.contains("走无障碍"), "文案还在承诺已作废的降级路径：$text")
     }
 
     @Test

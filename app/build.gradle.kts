@@ -65,8 +65,11 @@ android {
             // 与 bridge-dist 同一条"指成子目录会拍平"的教训。
             assets.srcDir(layout.buildDirectory.dir("generated/npmCliAssets"))
             // 第三方许可声明随包（backlog D8）：srcDir 取**父目录**，资产键 =
-            // `third-party/<file>`（`THIRD_PARTY_NOTICES.md` + `licenses/` 的七份逐字原文；
-            // 随分发可达是许可义务，仓里那份只解决审计面）—— 同样「指成子目录会拍平」。
+            // `third-party/<file>`（`THIRD_PARTY_NOTICES.md` + `licenses/` 的七份逐字原文
+            // + 本仓 `LICENSE` / `NOTICE` 两份 —— 后两份是 2026-10-06 补的：包内清单里
+            // 「见 `LICENSE`」「见 `NOTICE`」两条链接此前在 APK 里是断的，且 GPL-2.0 第 1 节
+            // 要求随程序给一份本许可副本。随分发可达是许可义务，仓里那份只解决审计面）
+            // —— 同样「指成子目录会拍平」。
             assets.srcDir(layout.buildDirectory.dir("generated/noticesAssets"))
             // 引擎二进制随包（§19）：srcDir 根下按 ABI 分目录（`arm64-v8a/libnoden.so`），
             // prepareEngineNativeLibs 拷进 generated/engineNativeLibs/arm64-v8a/。

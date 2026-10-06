@@ -495,6 +495,122 @@
     - **性质声明**：本项与 `NOTICE` 的文本是**工程侧的事实陈述与署名**，不是法律意见；分发前若需
       法律判断（衍生认定、GPL-2.0-only 与 GPL-3.0 的兼容性边界），应由维护者请人复核。
 
+34. **16KB 页设备测试取消（2026-10-06，用户裁定；backlog B3/E3 的这一面据此结项）**：
+    - **拍板**：**不做 16KB 页设备/模拟器镜像的真机红测**，也不为此立设备道。相关契约（§16 风险表、
+      §17 兼容矩阵、§11.3 第 5 条）里「红测机里常驻一台 16KB 页设备」这类**计划性表述**按新口径改写。
+    - **为什么可以取消（这是判据，不是"不做了"）**：16KB 页的风险**在构建期就被机械门禁吃掉了**，
+      真机红测从来只是**追加**一层证明，不是唯一防线。`node-runtime-build/scripts/check-alignment.sh`
+      断言每条 `LOAD` 段 `align >= 2**14` **且** `p_offset ≡ p_vaddr (mod align)` —— 后者是 16KB 基页
+      映射真正要求的那条同余关系（2026-09-29 补的「门的另一半」，只查 align 是半截门禁）；
+      `build-native.sh` 对 `noden` / `bridge_native.node` 跑同一套；`check-opencv-alignment.sh` 对
+      `libopencv.so` 同轨。**三个产物 + `libc++_shared.so` 的 16KB 口径都在 CI 里逐件断言**，而
+      `fetch-and-build.sh` 那条链路（NDK r28c 链接器默认对齐）在 2026-09-29 的真机上**已跑通过一次**
+      —— 也就是说「对齐与否」这个问题在交付物里有确定答案，缺的只是「在 16KB 内核上再验一遍」。
+    - **代价照单收**：**残余缺口 = 内核真的按 16KB 基页映射时的装载行为未被实测**。已知的残余面很窄
+      （门禁已断言同余关系，剩下的偏差只可能来自内核/ROM 侧与 bionic 的交互）。**这条缺口从"待做"
+      改成"已知不测"**，登记在 §11.3 第 5 条（该条本就叫「残余风险（诚实缺口）」，是它的正确归宿）。
+      **若将来出现真机装载失败的现场证据，本项即为重新开案的依据**（届时按现场反推，而不是靠常驻
+      一台设备"预防性"验）。
+    - **B3/E3 并不因此整条结项**：B3 里**不依赖 16KB 的那两件仍在** —— SELinux enforcing 上下文与
+      `targetSdk` 提取策略的真机验证（它们同样只在特定设备上测得到），以及 `espresso` /
+      `androidx-test-junit` 目录项的处置（用起来或删）。E3 作为"要不要立设备道"的产品面问句，
+      **本项只裁掉了其中 16KB 那一半**，剩下的两件仍待拍板。
+    - **顺带如实标注一条不对称**：`docs/log/2026-09-29.md:39` 记的「四条负向校验均实测变红」里
+      **包含 16KB 对齐那条** —— 即门禁本身被反向证伪过（改坏会红），这是它可作判据的依据。取消的是
+      **真机复验**，不是门禁。
+
+35. **输入通道三选一：`auto`/`adb`/`root` 平级、必须显式、绝不降级（2026-10-06，用户口径）**：
+    - **拍板**（用户原话「点击什么的不要按降级使用，脚本内传入 auto 表示启用无障碍，adb 则是 adb，
+      root 则是 root」+ 三问三答「两者都管（含节点 click）」「两者都要（按调用 + 会话级）」
+      「必须显式传，无默认」）：§9.3 的输入面从「`InputProvider` 一条实现 + 口头提过的 root/adb」
+      改成**三条平级通道 + 显式选路**。取值 `auto`（无障碍）/ `adb`（Shizuku）/ `root`（`su`）。
+    - **不是降级链，是判据**：指定的那条不可用 → `ERR_PERMISSION_DENIED`（带引导），**绝不改用
+      别的通道**。这一条与 §9.5 的 `DEGRADED` 哲学**刻意相反**（那里是「能力受限但仍可用」），
+      因为三者**可观测后果不同**：无障碍注入会被前台应用看出（`FLAG_SECURE` 类对抗、与输入法/
+      悬浮窗争抢），root 注入在系统层不留无障碍痕迹，adb 注入的进程身份是 shell。对「签到/抢购/
+      压测」这类场景，**走了哪条通道是语义的一部分**，静默换通道等于让脚本作者以为在测 A 实际在测 B。
+    - **「必须显式」落成两处**：(1) 单次调用的载荷带 `channel`；(2) 会话级 `a11y.setInputChannel`
+      设本脚本的通道。**两者都没有 → `ERR_INVALID_PARAM`**（`requiredChannel`），**不预置 `auto`
+      缺省** —— 本仓别处「不传即用缺省」的惯例在这里**刻意不成立**：缺省等于「什么都没说 = 走了
+      无障碍」，而那正是这套机制要消灭的静默。会话值是**显式选择的一种**（`setInputChannel` 是
+      脚本自己发的帧），所以它算「说过」。
+      **JS 侧不预检**（与 `engines.exec` 的 `timeoutMillis` 同一条「校验不写两遍」纪律）：
+      `ChannelOptions.channel` 在类型上仍是可选（设过会话值之后省略是**合法**写法，类型系统看不见
+      会话状态），判据只有一处 —— 宿主 handler。
+    - **会话态挂「连接」而不是「handler」**：`A11yNamespaceHandler` 是**全局单例**（一个
+      `BridgeRouter` 挂一套 handler、所有脚本共用），字段级会话态会让脚本 A 设的通道漏给脚本 B
+      —— 一个**静默的跨脚本串扰**。改为 `InputChannelSession`（`AbstractCoroutineContextElement`），
+      `NewlineFrameServer` **每连接建一个**、作为上下文元素传给该连接的所有帧任务：隔离是
+      **结构上**的（同连接共享、跨连接天然不共享），不靠人记得清。
+    - **节点动作在非 auto 通道降级为坐标注入**：`click`/`longClick`/`scroll` 在 `auto` 走节点语义
+      （`ACTION_CLICK`/`ACTION_LONG_CLICK`/`ACTION_SCROLL`）；`adb`/`root` **没有节点语义可用**
+      （shell 面只有 `input` 命令），改为解出节点 `bounds` 再注入（点中心 / 按方向在节点内划一条，
+      手指方向与内容方向相反）。语义是「点这个控件**所在的位置**」，不是「对这个控件发 action」。
+      **`copy`/`paste` 不在此列**：它们是纯语义动作、没有第二条通道可选，所以**不要求** `channel`
+      （实现上从 `nodeAction` 拆出 `refAction` —— 复用会让它们开始要一个没有意义的参数，
+      `A11yNamespaceHandlerTest` 当场抓住过）。
+    - **shell 面只有直线**：`input tap` / `input swipe` 两个原语，**没有轨迹** —— 经 `adb`/`root` 的
+      `gesture` 逐笔画串行注入、每条只取首尾两点。真轨迹要 `sendevent`（按设备事件节点写，**未落地**）。
+      这是 shell 面的**真实上限**，写在 §9.3 与 facade KDoc 里让调用方知道，而不是假装发了轨迹。
+      `canPerformGestures` 同理：`auto` 问服务能力位，`adb`/`root` **没有对应开关**（能不能用取决于
+      进程身份，而那正是该通道被接线的前提）故恒 `true`；真正的失败以**命令退出码**形式出现在动作
+      调用里，**不折成 false**（false 的语义是「系统拒绝这次注入」，与「这条通道现在没了」是两回事）。
+    - **引入 Shizuku 依赖（本项最重的一笔）**：`dev.rikka.shizuku:api` + `:provider` 13.1.5，
+      落 `gradle/libs.versions.toml`（**冻结文件**，本项即维护者授权）与
+      `platform/capabilities/build.gradle.kts`。**为什么非要它**：应用自己 fork 的 `sh` 身份仍是
+      应用 uid，`input` 注不进事件；要让注入以 **shell uid** 发生，必须借一个由 adb 启动的服务进程
+      —— Shizuku 就是那个服务。**为什么代码里走反射而不是 import**：JVM 单测跑在 mock android.jar 上，
+      碰 `Shizuku` 静态初始化即炸；反射的失败面（类不在/签名变了）**全部折成 `ERR_PERMISSION_DENIED`**
+      —— 「没装」与「版本不兼容」对用户是同一句话：去装/去更新。
+      **provider 的 `<provider>` 节点必须显式声明**（AAR 只带 meta-data 与类，不带节点；
+      解包 `provider-13.1.5.aar` 实测），authority = `${applicationId}.shizuku`（Shizuku 侧按类里
+      硬编码的 `.shizuku` 后缀找），`exported=true` + `moe.shizuku.manager.permission.API_V23`
+      （signature 级，只有 Shizuku 管理器持有）是它的**设计形态**，不是漏配 —— 这是本应用**唯一**
+      exported 且非系统绑定权限的组件。**依赖停更于 2023-09**（Maven Central `lastUpdated=20230921`），
+      锁最新版；升级 = 一件事一个提交。
+    - **未真机验证（诚实缺口）**：设备道 2026-10-06 已裁（第 34 项 / backlog B3/E3）。JVM 侧钉住的
+      是「命令怎么拼、退出码怎么判、通道怎么映射、缺席怎么拒」；**真机上装好 Shizuku 后能不能注进去、
+      bounds→坐标这条映射准不准，尚无人跑过**。真机第一次使用应当拿 `adb`/`root` 与 `auto` 对一遍行为。
+    - **`adb` 通道的接线是探测式的**：`PlatformWiring` 只在 `ShizukuInput.isAvailable()`（装了 **且**
+      服务活着，两问都要 —— 只问「类在不在」会把「装了但没启动」报成可用）为真时登记该通道；
+      `root` 恒登记（走既有 `su -c`，真无 root 时命令自己失败）；`auto` 恒登记。**登记与否只决定
+      「这条通道现在有没有」，绝不改变调用方选的那条**。
+
+36. **`ui/` 与 Telegram 的关系定性更正：不是「衍生作品」，是「前端 UI 实现与风格参考」（2026-10-06，用户裁定）**：
+    - **拍板**：`ui/` 的对外定性从第 33 项写的「含**衍生自** Telegram Android 的部分」改为
+      **「前端 UI 的实现与风格参考自 Telegram Android」**；许可口径**维持 `GPL-2.0-only` 不变**，
+      只改**理由的写法**。第 33 项正文一字不动（只追加，见上），本项记这次更正与它的依据。
+    - **为什么原来的定性是过度自称**：跟踪树里**零 vendored 上游源文件** —— `find . -name '*.java'`
+      只命中 `.gradle/` 缓存、跟踪面零命中；`ui/` 全部是 Kotlin / Compose 重写（上游是 Java +
+      Android View）。实际借用的是**版式尺寸、间距层次、色值与键名、缓动控制点**，外加**少数几处
+      算法步骤**（底栏宽度分配、菜单错相浮现、删除粒子）。把这一组关系称「衍生作品」比事实更重：
+      **它把定性问题当成已决问题写进了对外文档**，而「是否构成衍生」正是本仓反复声明**不做**的
+      那个法律判断（第 33 项末句的性质声明）。
+    - **`only` 的理由随之改写（结论不变，论证换了）**：原写法是「GPL-2.0-only 与 GPL-3.0 不兼容
+      ⇒ `or later` 事实上不可行使」——**这句话把结论挂在了那个未经复核的法律判断上**，而它正是
+      本仓不做判断的那件事。新写法：**`only` 是本仓自己的保守选择** —— 在参考面未经复核前，
+      不对外附加一条可能走不通的授权路径。两处落地：`README.md` 许可段、`NOTICE` 第 1 节。
+    - **上游锚定（取代第 33 项「未做①：上游 commit 未钉死」）**：锚 **12.10.6（build 7112）**，
+      commit `f2908b14133bbffbf7ab04f641ecb5faf533242`（发布 2026-09-30T17:51:11Z）。依据是
+      「参考发生在 2026-10-02 起的批次，当时上游最新版即 12.10.6，且它至今仍是 master 最新提交」
+      —— 两端都成立，不是推测。**不用 release tag 作锚**（用户裁定）：上游 tag 命名不统一
+      （`release-9.7.6_3721` 与 `release-11.4.2-5469` 两种分隔符都出现过，且没有 `release-12.*`），
+      钉一条会漂的字符串不如钉 sha。第 33 项「未做①」据此结项，`backlog.md` A9 同步结项。
+    - **GPL-2.0 第 1 节的两件义务补进 `NOTICE` 第 2 节**：①版权声明（`Copyright (C) DrKLO/Telegram
+      项目贡献者`，来源即上游仓库 —— 上游 `LICENSE` 是 GPL-2.0 全文，**未另附**单独的版权持有人行，
+      照实写明而不是自己编一个）；②担保免责声明。这两条**与「衍生与否」无关**：只要用了受版权
+      保护的表达，就是分发时的硬性义务。第 2(a) 节要的「改动日期」一并补上（2026-10-02 起）。
+    - **许可正文随包（纯机械缺件，同批补）**：APK 的 `assets/third-party/` 此前只有
+      `THIRD_PARTY_NOTICES.md` + 七份第三方原文，**缺 `LICENSE` 与 `NOTICE`** —— 而包内那份
+      `THIRD_PARTY_NOTICES.md` 第 3 节正写着「见 `LICENSE`」「见 `NOTICE`」，**这两个链接在 APK 里
+      是断的**，同时「随附本许可副本」（§1(c)）也没兑现。`prepareNoticesAssets` 增加这两份的拷贝
+      （仓库根同名，改名即断链），断言 8 件 → **10 件**。`prepareNoticesAssets` 自己那段 KDoc 里
+      「只在仓库里放一份、装到用户手机上就没有，等于没声明」对本仓自己的两份**一字不差地成立**，
+      先前只是没想到。
+    - **未做（如实登记）**：① `ui/` 里 25 处「逐字/照抄/原样/复刻/移植」措辞未改（其中 10 处带
+      具体上游类名）—— 按本次分级，多数应写成「按 TG 的 X 规格」，但那是纯注释改动且触及 `:ui`
+      多个文件，另开一批；② 与上游**仍未逐行比对**（`NOTICE` 里的诚实登记保留）。
+
 2026-09-30 拍板（外部审查整改步骤 7；非 §18 编号项，原口径不涉）：
 
 13. **`images` 匹配链路提速方案**（2026-09-30 评审拍板；A2–A4 实测 ❌ 后的出路裁决）：
@@ -817,6 +933,10 @@
 | **APK 的 ABI 声明面**（backlog B10 待裁定：装不装得上） | `docs/backlog.md` B10；`app/build.gradle.kts`；`docs/design/03-technology.md`（§3 SDK 基线）、`docs/design/13-roadmap-budget.md`（§17 兼容矩阵） | **只留 `arm64-v8a`**（2026-10-06 拍板）：加 `ndk { abiFilters += "arm64-v8a" }`。不加这条时 APK 声明四个 ABI，而后三个（`armeabi-v7a`/`x86`/`x86_64`）**不是引擎带来的** —— 是 `libandroidx.graphics.path.so` 贡献的，引擎四件（libnoden/libnode/libc++_shared/libopencv）只在 `lib/arm64-v8a/`。声明面比交付面宽三个 ABI = 对 32 位与 x86 设备**承诺了跑不了的东西**。取「只留 arm64」而不是「维持四个」的理由：§3/§13 已把代价写明（「放弃 32 位旧机」），而「装得上、能看界面、一跑脚本才以 `ERR_FILE_NOT_FOUND` 告终」不是更友好的降级 —— 它把一次安装期就能给的答复推迟到用户配好任务之后。代价照单全收：32 位设备与 x86_64 模拟器**装不上**（Play 也按此过滤）。**P1 补 x86_64（§17 兼容矩阵）时把该 ABI 加回那一行即可**，届时引擎产物与 `prepareEngineNativeLibs` 的 ABI 子目录要同步多一份 | 2026-10-06 |
 | **SDK 基线的两处漂移**（backlog 未列，本批顺带裁定：文档写 compile/target 36 而 catalog 写 35；两份设计卷写 minSdk 24 而 catalog/CLAUDE.md/`VERSIONS.env` 写 26） | `gradle/libs.versions.toml`；`docs/design/03-technology.md:16`；`docs/design/13-roadmap-budget.md:144`；`README.md` 前置条件表 | **以文档为准，改 catalog**（2026-10-06 拍板）：`compileSdk`/`targetSdk` 35 → **36**（§3/§17 的「compile&target 36（Android 16）」是更早拍下的口径，catalog 落后于它）；`minSdk` 反向 —— **26 为准**，两份设计卷里的「minSdk 24」是过期字面（`node-runtime-build/VERSIONS.env` 的 `ANDROID_API=26` 与 `CLAUDE.md`「API 26 = minSdk 冻结值」同口径，且 24 与 26 之间没有任何一项设计依赖 API 24/25）。连带：`ci.yml`（×2）与 `e2e-nightly.yml`（×1）的 SDK 组件装 `platforms;android-36` + `build-tools;36.0.0`；README 前置条件表同步。**APK 侧实证**：`aapt2 dump badging` 出 `compileSdkVersion='36'` / `minSdkVersion:'26'` / `targetSdkVersion:'36'` | 2026-10-06 |
 | **CI 出的 APK 不含引擎二进制**（backlog B5：怎么把「真形态 APK」做成可复现的门） | `docs/backlog.md` B5；`.github/workflows/ci.yml`（android-build job）；`engine/node-process/scripts/build-native.sh`；`build-logic/src/main/kotlin/autoscript.engine-natives.gradle.kts` | **新开独立 workflow `engine-native.yml`，`ci.yml` 一字不动**（2026-10-06 拍板）。B5 的真堵点不是「取不到产物」而是「**没有任何 workflow 产出 `noden` / `bridge_native.node`**」：node-slice（libnode + npm）与 image-native（libopencv）的 artifact 都在且未过期，可跨 workflow 取；只有这两个引擎件从来没有生产者。所以新 workflow 自己跑 `build-native.sh`（NDK r28c + Node 头文件包），再取上述两条 artifact 喂 `LIBNODE`/`NPM_CLI_ROOT`/`LIBOPENCV` 起 `assembleDebug`，最后断言 `lib/arm64-v8a/` 四件齐 + npm 素材件数 + `aapt2 dump badging` 的 ABI 只有 arm64。**不进 `ci.yml` 的理由是分钟预算**：Node 头文件包 + NDK 722MB 下载与 C++ 交叉编译是分钟级，塞进 PR 门会把「秒级红绿」变成「十分钟才知道」—— PR 门仍由 `ci.yml` 的 assembleDebug（无引擎件、装配期只 warn）守着，真形态 APK 是独立可点的门。**诚实边界**：该 workflow 取的是 node-slice/image-native 的**最新成功 artifact**，与本次 commit 的源码未必同源 —— 它的断言对象是「装配链能不能把四件摆对、ABI 面收没收敛」，不是「引擎二进制的可复现构建」（后者归 node-slice/image-native 自己的门） | 2026-10-06 |
+| **`ui/` 是「衍生自 Telegram Android 的部分」**（本文件第 33 项的定性，2026-10-06 上午） | `README.md` 许可段；`NOTICE` 第 2 节；本表上方第 33 项那行 | **改称「前端 UI 的实现与风格参考自 Telegram Android」**（2026-10-06，用户裁定，口径全文见本文件**第 36 项**）：跟踪树里**零 vendored 上游源文件**（`find . -name '*.java'` 跟踪面零命中），`ui/` 是 Kotlin/Compose 重写，借用的只是版式尺寸 / 色值键名 / 缓动控制点 + 少数几处算法步骤。原定性把**本仓自己声明不做**的那个法律判断（「是否构成衍生」）当成已决写进了对外文档。**许可口径不变**（仍 `GPL-2.0-only`），只把 `only` 的**理由**从「上游逼的（不兼容 GPL-3.0）」改成「本仓自己的保守选择」。第 33 项正文一字不动 | 2026-10-06 |
+| backlog **A9**「`NOTICE` 表里『逐字 / 逐句』的说法未与上游核实」（2026-10-06 登记） | `docs/backlog.md` A9（已移除）；本文件第 36 项 | **不做了，整行移除**（2026-10-07，用户裁定，口径全文见本文件**第 37 项**）：那是**署名措辞的精度**问题，不是许可义务 —— 第 1 节要的版权声明与担保免责、第 2(a) 节的修改说明与日期已于第 36 项补齐并随 APK 出。核实做了一半就停：抽查的几处（`cascade()` / `onMeasure` / 缓动常量 / `SIZE = 48` / 缩放时长）**都站得住**，但抽查出两处**上游不存在的类名**（`TopicsLayoutSwitcher`、`ReverseOrder`）也一并「不追」（同属注释举例，非署名义务），如实记在第 37 项 | 2026-10-07 |
+| `ADB_INPUT` 三态**恒 `DEGRADED`**（「未就绪时输入走无障碍手势」这条降级路径真实存在） | `AndroidSystemStateReader` 的映射表；`PermissionCenter.guideText(ADB_INPUT)` 的文案 | **改口径**（2026-10-07，本文件**第 38 项**）：批 61（§9.3 三通道三选一）**已经废掉那条降级路径** —— 指定 `adb` 而不可用就是 `ERR_PERMISSION_DENIED`，绝不改用别的通道。故改成真探测：`ShizukuInput.isAvailable()` 就绪 → `GRANTED`，不就绪 → `DENIED`（与无障碍/root/使用情况访问同档）；文案里那句降级承诺同批删掉 | 2026-10-07 |
+| backlog **D7**「大文件余量：`AppShellApplication` 与 `Scheduler` 还有没有值得付的刀口」（2026-10-02 登记） | `docs/backlog.md` D7；`app-service/scheduler/.../core/Scheduler.kt`；`app/src/main/kotlin/com/autoscript/AppShellApplication.kt` | **结项**（2026-10-07，口径全文见本文件**第 39 项**）：`Scheduler` 类体是单一内聚状态机，**无值得付的接缝**（拆大方法要把八九个构造参数摊成 `internal`，是拿封装换行数）；只外迁三个顶层声明（`ScheduledTask`/`RecoveryRecord`/`DefaultDeadlines`）。`AppShellApplication` 的读侧零重复不变式（不搬），写侧取一个刀口 —— 四类 APK 资产的读法抽成 `shell/AssetsRead.kt`（**该文件不可单测**，已如实登记） | 2026-10-07 |
 ### 附：§12.2 被反转口径原文照抄（2026-09-30 步骤 6 摘录前的原文）
 
 > - **语义层**（handler）住 `:platform:capabilities` 的 `SystemNamespaces.kt`，纯 JVM 可测（假 SPI 注入即可跑）：参数校验（spec 守卫、必填字段、`timeout > 0`）、枚举字面量解析（`ShellMode`/`DialogMode`，拼错即报错不静默套默认）、默认值（shell 超时 30s）、错误分类**透传**（`AutojsException.error` 原码回桥）、响应形状编码（与 `extras.ts` 逐字对齐）；
@@ -832,3 +952,83 @@
 §7.7 的 `TM_CCOEFF_NORMED` 长篇实测注记（2026-09-25）目前仍在契约正文里。
 它**读起来像决策**（「口径改了」在末句），但主体是「为什么 CCOEFF 而不是 CCORR」
 的判据论证。这一轮不动；下次迁移时按「判据留契约、变更进本文件」切开。
+
+37. **`NOTICE` 与 `ui/` 的「逐字 / 逐句」措辞不再逐处核实（2026-10-07，用户裁定；backlog A9 据此结项）**：
+    - **拍板**：**不做**「拿上游源码逐处核对 `ui/` KDoc 里那些『逐字移植 / 逐句对着写 / 逐字抄』
+      的说法、并按实情降级措辞」这件事，`ui/` 里那 25 处措辞**原样保留**。`backlog.md` A9 整行移除。
+    - **理由**：这是**署名措辞的精度**问题，不是许可义务问题 —— GPL-2.0 第 1 节要的两件（版权声明、
+      担保免责）与第 2(a) 节的「修改说明 + 日期」已于**第 36 项**补齐并随 APK 出（`assets/third-party/`）；
+      剩下的只是「本仓自述的口径比事实重不重」。花一批工时逐处比对去调这个，收益不抵成本。
+    - **本项落地前已做的核实（留档，免得将来有人以为没核过）**：把上游 12.10.6
+      （`f2908b14133bbffbf7ab04f641ecb5faf533242`）部分克隆到本机后抽查了几处 ——
+      `cascade()` 与上游 `AndroidUtilities.java:5215` **逐字一致**（连行号都对得上）、
+      `MainTabsLayout.onMeasure` 的三趟试排 / `maxTabTextWidthIfEq` / 两端夹逼与 `TabBarMeasure.kt`
+      **一一对应**、`EASE_OUT_QUINT = (.23, 1, .32, 1)` 与 `FragmentFloatingButton.SIZE = 48` 一致、
+      `ScaleStateListAnimator.apply(view, .1f, 1.5f)` 的 80ms 线性 / 350ms `OvershootInterpolator(1.5)`
+      一致。**同时抽查出两处上游不存在的类名**：`TopicsLayoutSwitcher`（`Motion.kt` 的 KDoc 引用）
+      与 `ReverseOrder`（`ProjectScreen.kt:416` 的 KDoc 引用）在上游 12.10.6 全树**零命中**。
+    - **那两处不存在的类名怎么处置**：**本项一并明确「不追」**（同上理由 —— 那是注释里的举例，
+      不是署名义务）。如实记在这里，不散在 `ui/` 的 KDoc 里改来改去。
+    - **性质声明**（与第 33/36 项同）：本项是**工程侧的成本裁定**，不是法律意见；若将来因分发形态
+      变化需要更精确的署名，届时按本表另起一行。
+
+38. **能力引导文案改成「与三态无关」，`ADB_INPUT` 的三态读数随批 61 修正（2026-10-07；backlog A8）**：
+    - **背景**（A8 的现场）：真机上「精确闹钟」那一行状态标 **可用**，紧接着那行引导文案却是
+      「精确闹钟未允许：请前往…」——同一条目同时说可用与未允许。根因不是版式：`guideText`
+      八条里**六条按拒绝态起句**，而契约（`CapabilityRow.guide` 的 KDoc）写的是「GRANTED 时也有，
+      呈现层不按三态去猜该不该显示它」。意图与数据对不上。
+    - **裁定：改数据这一头（选项①），显示逻辑不动**。八条逐条重写成「这项能力是干什么的 +
+      怎么让它可用」，于是三态下都成立。**不**推翻「永远显示」那条口径 —— 撤下显示是
+      **批 47 已经做过的事**（用户口径「去除各个权限的描述」，设置页不再渲染 `guide`），
+      本项管的是**将来再渲染时**文案必须自洽。
+      - 代价如实记：文案变长（每条多一句用途），且**不再随三态变**——用户读到的是固定说明，
+        当前态由同一行的 `stateLabel` 表达（两者本来就不该由同一份文案重复说）。
+      - 钉子：`PermissionCenterTest` 新增两条 —— 「不按拒绝态起句」（`startsWith("未"/"没"/"不")`
+        即红 + 必须以「能力名：」起头），以及「`ADB_INPUT` 文案不承诺降级」。
+    - **顺带修正一处过期口径（本项真正的行为变更）**：`AndroidSystemStateReader` 里
+      `ADB_INPUT` 此前是**恒 `DEGRADED` 常量**，理由写的是「Shizuku 尚未集成，但引导文案承诺的
+      降级路径（未就绪时输入走无障碍手势）真实存在」。**批 61（§9.3 三通道三选一）把那条路
+      废掉了** —— 指定 `adb` 而该通道不可用就是 `ERR_PERMISSION_DENIED`，绝不改用别的通道。
+      即：那条「降级路径」已经不存在，继续报 `DEGRADED` 是拿旧口径骗人，而文案里那句承诺
+      更是对用户的假承诺。
+      - 改法：探针加 `adbInputAvailable()`（`ShizukuInput.isAvailable()` 一句转问 —— 唯一的
+        Shizuku 接触点仍在平台模块，`:app` 不碰 `rikka.shizuku.*`），映射改成
+        `就绪 → GRANTED / 不就绪 → DENIED`，与 `ACCESSIBILITY`/`ROOT`/`USAGE_ACCESS` 同档
+        （都是「没有替代路径」的能力）。
+      - **出厂态 DENIED 集合随之从四种变五种**（`AndroidSystemStateReaderTest` 那条钉死的断言
+        同批更新，并写明为什么）——这正是那条断言存在的意义：它逼着这次变更被显式确认一次。
+      - 边界如实登记：Shizuku 在跑但**尚未授权本应用**时，`isAvailable()` 的 binder 问询拿不到
+        服务 → 也判 `DENIED`；文案因此把「授权本应用」与「装/启动 Shizuku」并列写。
+        真机上「装好之后到底能不能注进去」仍未验（backlog **B14**，与本项无关）。
+    - **同批（D7 大文件余量）两个刀口**：见下条。
+    - **性质**：工程口径变更，无法律含义。
+
+39. **大文件余量（D7）收口：余下两个文件里只有一个值得付刀口（2026-10-07）**：
+    - **背景**：外审按 2026-10-01 前的快照点名四个大文件，批 6 已拆过一轮；剩下没拆的是
+      `AppShellApplication`（Android 生命周期本体）与 `Scheduler`（登记为「两个 DTO + 一个类，
+      **无干净接缝**」）。D7 的问题是「这两个里还有没有值得付的刀口」，不是「能不能拆」——
+      任何文件都能拆，问题是拆完**读起来是否更好**。
+    - **先纠一个度量口径**：两个文件都是**注释密集**的（KDoc 占了近半行数），裸行数高估了问题。
+      逐类数过（总行 / 空行 / 注释行 / 代码行）之后才动刀 —— 结论是「拆的收益在**口径集中**，
+      不在行数下降」。
+    - **`Scheduler`：类体内无值得付的接缝，只外迁了三个顶层声明**。类本体是一台约四百多行的
+      **单一内聚状态机**（触发入口、恢复、提交三件事共享同一份可变状态），两个大方法
+      （`onTrigger`/`recoverUncommitted`）若要外迁，得把八九个构造参数摊成 `internal` 暴露 ——
+      那是**把封装换成行数**，不划算。真正的接缝是**三个不属于这台状态机的顶层声明**：
+      `ScheduledTask`（登记载荷的形状）、`RecoveryRecord`（恢复的返回值形状）、
+      `DefaultDeadlines`（一个零状态的纯函数常量）—— 它们与「怎么调度」是两件事，各自成文件，
+      语义逐字未改（只有 KDoc 补了出处段）。
+    - **`AppShellApplication`：读口那一半无重复不变式，写口那一半有一个真刀口**。先把「读侧」
+      （`HostSummary` 的几个实现）查了一遍：它们只是把 `AssembledShell` 的字段转手，**零重复
+      不变式**，抽出去只是搬家 —— 不做。真刀口在 `installWithFiles` 那张九十行的具名参数表里：
+      四类 APK 资产（内置脚本 / facade dist / addon / npm CLI 素材）的读法各带一条**降级口径**
+      （枚举失败算不算「没货」、读失败与缺件同不同形），四段 `try/catch` 混在参数表里，
+      读者看得到「怎么吞」看不到「为什么这条这么吞」。抽成 `shell/AssetsRead.kt` 之后，
+      `installWithFiles` 每类资产只剩一行。
+    - **诚实边界（写进了 `AssetsRead` 的 KDoc）**：那个文件**不可单测**（参数是 `AssetManager`，
+      JVM 上造不出真实例）—— 与 `CapabilityCenterRead` 不同，后者吃 `:domain` 的接口、能注入
+      假实现。抽出来的收益是「口径集中且可读」，**不是「可测」**；如实记下来，免得将来有人
+      以为 `shell/` 下的文件都自带单测缝。
+    - **结论**：D7 结项 —— 余下两个文件里，`Scheduler` 的类体**没有值得付的接缝**（这是复核
+      结论，不是没看），`AppShellApplication` 只取上面那一个刀口。**行数不写进文档**
+      （会漂，见 `CONTRIBUTING.md` 的「别写会漂的数字」）；要现值就 `wc -l` 现读。

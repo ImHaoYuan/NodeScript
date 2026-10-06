@@ -3,7 +3,6 @@ package com.autoscript
 import android.app.Application
 import android.os.Process
 import android.util.Log
-import com.autoscript.appservice.npm.AssetTreeCliSource
 import com.autoscript.appservice.npm.NpmCliDeployer
 import com.autoscript.domain.host.CapabilityCenterSnapshot
 import com.autoscript.domain.host.ConsoleSnapshot
@@ -28,6 +27,7 @@ import com.autoscript.shell.AndroidPermissionGates
 import com.autoscript.shell.AndroidScreenGate
 import com.autoscript.shell.AppShell
 import com.autoscript.shell.AppShellKit
+import com.autoscript.shell.AssetsRead
 import com.autoscript.shell.AssembledShell
 import com.autoscript.shell.AutoScriptForegroundService
 import com.autoscript.shell.BootRecovery
@@ -178,6 +178,10 @@ class AppShellApplication : Application(), HostSummary {
      * 桥如实 `ERR_SERVICE_DISABLED`；screen 走 §9.2 a11y 截图路径（MediaProjection
      * 高清会话是后续升级，换 producer 即插）；走 [install] 的调用方仍可自行覆盖注入。
      *
+     * APK 资产（内置脚本 / facade dist / addon / npm CLI 素材）的读法与各自的降级口径
+     * 在 [AssetsRead]（2026-10-07 backlog D7 自本方法外迁）：那四段 `try/catch` 的吞法
+     * 逐条不同，混在这张九十行的具名参数表里读不出"为什么这条这么吞"。
+     *
      * 失败如实降级：装配抛错 → 记日志 + 壳保持 null（[alarmWork] 继续漏投记账），
      * **绝不让一个半装的壳冒充就绪**（那会让闹钟投给一个没有 scheduler 的路线）。
      *
@@ -237,44 +241,22 @@ class AppShellApplication : Application(), HostSummary {
                 },
                 // 首批内置脚本（§9.6 `assets/scripts/<projectId>/`）：枚举 + 按需读，
                 // 补部署只补缺不覆盖 —— 用户"清除数据"后重装配时缺的脚本从这里回来。
-                scriptProjects = try {
-                    appContext.assets.list("scripts")?.toList() ?: emptyList()
-                } catch (_: Exception) {
-                    emptyList()      // 枚举失败 = 无资产来源（不炸装配，deployReport 如实为空）
-                },
-                assetReader = { projectId ->
-                    com.autoscript.appservice.scriptrepo.assets.AndroidAssetsSource(
-                        appContext.assets, projectId,
-                    ).readScripts()
-                },
+                // 四类资产的读法（枚举失败=空 / 缺货=null 的降级口径）在 [AssetsRead]，
+                // 那里逐条写了为什么；本类只递 `AssetManager`。
+                scriptProjects = AssetsRead.scriptProjects(appContext.assets),
+                assetReader = { projectId -> AssetsRead.scriptsOf(appContext.assets, projectId) },
                 // facade dist（§12.4 资产交付轨）：`assets/bridge-dist/` 全量读成扁平 map。
                 // 枚举或任一读失败 = 整体空 map（**宁可这次不落，不可半量落**：半量 + 孤儿
                 // 清理会把"读失败那个文件"当成旧版删掉）—— bridgeDistReport 如实为空。
-                bridgeDist = try {
-                    val names = appContext.assets.list("bridge-dist")?.toList() ?: emptyList()
-                    names.associateWith { name ->
-                        appContext.assets.open("bridge-dist/$name").use { it.readBytes() }
-                    }
-                } catch (_: Exception) {
-                    emptyMap()
-                },
+                bridgeDist = AssetsRead.bridgeDist(appContext.assets),
                 // bridge addon（§19 交付轨）：单文件资产，没货 = null（不注入的诚实缺省，
                 // 不是"空文件注入"）。读失败与没货同形 —— 引擎侧缺文件降级，不半装。
-                bridgeAddon = try {
-                    appContext.assets.open("bridge-addon/bridge_native.node").use { it.readBytes() }
-                } catch (_: Exception) {
-                    null
-                },
+                bridgeAddon = AssetsRead.bridgeAddon(appContext.assets),
                 // vendored npm CLI 素材（§10.2 调用链首段）：源 = `assets/npm/**`，
                 // 键形状 `npm/<rel>`（随包任务 prepareNpmCliAssets 产出）。本类只递
                 // Android 侧的资产读口，**落位与执行体注入都在 AppShellKit**（源在不在、
                 // 锚齐没齐、有没有 Node 宿主，一处判完；诊断原文见 built.npmCliFailure）。
-                npmCliSource = AssetTreeCliSource(
-                    root = "npm",
-                    listDir = { dir -> appContext.assets.list(dir) },
-                    openManifest = { appContext.assets.open("npm-manifest.json") },
-                    openFile = { path -> appContext.assets.open(path) },
-                ),
+                npmCliSource = AssetsRead.npmCliSource(appContext.assets),
                 // npm 执行体的 Node 宿主 = 与脚本引擎同一个 noden（§19 交付位）：
                 // 设备上它就是 nativeLibraryDir/libnoden.so，ProcessBuilder 直接 exec。
                 npmNodeBin = nativeDir.resolve("libnoden.so").toString(),

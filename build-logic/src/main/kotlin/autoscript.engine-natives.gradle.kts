@@ -262,11 +262,17 @@ val prepareNpmCliAssets = tasks.register("prepareNpmCliAssets") {
     }
 }
 
-// ── 第三方许可声明随包（backlog D8）─────────────────────────────────────────
+// ── 许可声明随包（backlog D8）──────────────────────────────────────────────
 // 为什么声明文件也要进 APK：仓里有一份 `THIRD_PARTY_NOTICES.md` 只解决「审计者看得到」，
 // 而随 APK 分发的二进制（Node / OpenCV / libc++ …）其许可条款**必须随分发一起可达**——
 // 只在仓库里放一份、装到用户手机上就没有，等于没声明。落位 `assets/third-party/`，与
 // 能力中心的「关于/许可」页将来取用是同一个键。
+//
+// **本仓自己的 `LICENSE` 与 `NOTICE` 同样随包**（2026-10-06 补）：上面那条理由对本仓自己的
+// 两份文件一字不差地成立，而先前只拷了第三方那份。缺它们的症状是具体的：包内
+// `THIRD_PARTY_NOTICES.md` 第 3 节写着「见 `LICENSE`」「见 `NOTICE`」——**这两个链接在 APK 里
+// 是断的**；且 GPL-2.0 第 1 节要求随程序给接收者一份本许可的副本，`LICENSE` 不在包里就没兑现。
+// 拷进来同时接上链接与义务，两件事一次做完。
 //
 // 与前三件的纪律差别（刻意不同）：本件**在 git 里**（生成物已入库，评审面可见），所以
 // 缺件是**仓库破损**而不是「本机没构建」——按 bridgeDist 的口径红，不按选填件的口径只 warn。
@@ -291,9 +297,18 @@ val prepareNoticesAssets = tasks.register("prepareNoticesAssets") {
             )
         }
         src.asFile.copyTo(File(out, "THIRD_PARTY_NOTICES.md"), overwrite = true)
+        var copied = 0
+        // 本仓自己的两份也随包（见上段 KDoc）：`LICENSE` 是 GPL-2.0 全文（§1 要求随附的副本），
+        // `NOTICE` 是源码面署名。文件名与仓库根一致 —— 包内 THIRD_PARTY_NOTICES.md 里那两条
+        // 相对链接（`LICENSE` / `NOTICE`）指向的就是它们，改名即断链。
+        listOf("LICENSE", "NOTICE").forEach { name ->
+            val f = rootProject.layout.projectDirectory.file(name).asFile
+            require(f.isFile) { "仓库根 $name 缺位（许可正文与源码面署名是分发义务）" }
+            f.copyTo(File(out, name), overwrite = true)
+            copied++
+        }
         // 逐字原文一并随包：清单只说「见原文」，原文不在包内等于让用户去网上找。
         // 文件名与生成器 licenses/ 下的名字一致（清单里的链接指向同名件）。
-        var copied = 0
         // 放行判据 = 生成器 COMPONENTS 表里的原文文件（`licenses/` 下的七件；libjpeg-turbo
         // 是**子目录**，因为它自己的 LICENSE.md 里有一条指向 README.ijg 的相对链接 ——
         // 拍平到一层会让那条链接断，与脚本 KDoc 同一口径）。**不是**「目录里所有文件」：
@@ -322,8 +337,8 @@ val prepareNoticesAssets = tasks.register("prepareNoticesAssets") {
             "node-runtime-build/licenses/ 无许可原文可随包（$licensesDir）—— 清单指向的原文缺失"
         }
         logger.lifecycle(
-            "[notices] 许可声明随包：THIRD_PARTY_NOTICES.md + $copied 份逐字原文 → " +
-                "assets/third-party/",
+            "[notices] 许可声明随包：THIRD_PARTY_NOTICES.md + $copied 份原文" +
+                "（七份第三方逐字原文 + 本仓 LICENSE / NOTICE）→ assets/third-party/",
         )
     }
 }

@@ -134,7 +134,7 @@ class P0LoopbackTest {
             val clicked = assembled.shell.router.dispatch(
                 BridgeRequest(
                     4, "a11y", "click",
-                    """{"ref":{"refId":$refId,"generation":$gen}}""",
+                    """{"ref":{"refId":$refId,"generation":$gen},"channel":"auto"}""",
                     10_000L,
                 ),
             )
