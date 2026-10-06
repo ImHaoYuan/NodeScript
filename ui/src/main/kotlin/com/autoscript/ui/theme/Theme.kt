@@ -126,14 +126,14 @@ data class Colors(
      *
      * 存的是**合成本屏底之后的实色**（TG 那边是 alpha 色叠在顶栏上，本仓的搜索栏不在
      * 顶栏里，叠的是屏底）：浅色 = 5% 的 `0xFF1A1D21` 叠白 → `0xFFF4F4F4`；
-     * 深色 = 7% 的白叠 [background]（`0xFF181819`）→ `0xFF282829`。
+     * 深色 = 7% 的白叠 [background]（批 61 起 `0xFF161E27`）→ `0xFF262E36`。
      * **深色下它比屏底亮**，浅色下才比屏底暗一档 —— 原先两套都写成"比 [surface] 深"
      * 是把深色那半抄反了（TG 的 tint 是白，叠上去只会更亮）。
      */
     val fieldBackground: Color,
     /**
      * 分组头底（TG `graySection`：GraySectionCell 那条 32dp 的分组条底色）。
-     * 浅色在白卡上比卡底浅一档灰、深色比屏底微亮（`0xFF0B0B0C` vs `0xFF181819` 有意更暗 ——
+     * 浅色在白卡上比卡底浅一档灰、深色比屏底**更暗**（`0xFF0B0B0C` vs `0xFF161E27` ——
      * 深色下 TG 的 graySection 本来就是"近黑的条"，`Theme.java` 深色缺省即 `0xff0b0b0c`）。
      */
     val graySection: Color,
@@ -215,13 +215,27 @@ data class Colors(
      * 浮层提示（toast）底（TG `key_undo_background` → 回退 `key_chat_gifSaveHintBackground`）。
      *
      * 浅色取 TG 的 `0xE21F2B38`（深蓝灰、89% 不透明）；**深色不照抄**：TG night 的
-     * `undo_background` = `0xF5181818`，与本仓深色屏底 [background]（`0xFF181819`）几乎
+     * `undo_background` = `0xF5181818`，与本仓深色屏底 [background]（`0xFF161E27`）几乎
      * 同值 —— 原样贴上去就是"深灰浮层压深灰页"，等于看不见，故取 [surface]（`0xFF232326`）
      * 这一档，明度差与 TG night 里 `0xFF181818` 压在 `windowBackgroundWhite` 上的关系一致。
      */
     val toastBackground: Color,
     /** 浮层提示的字（`key_undo_infoColor` → 回退 `key_chat_gifSaveHintText` = 白；深浅同值）。 */
     val toastText: Color,
+
+    /**
+     * 编辑器右下那颗"去最底/最顶"圆钮的底（**用户口径：白色**，深浅同值）。
+     *
+     * **这一组是本仓自定义的**（`Colors` 里少数几个不来自 TG 的键，故单列一段）：TG 没有
+     * 代码编辑器，没有可抄的键。白底 + 淡灰描边是为了让它从**两种主题的正文里**都浮起来 ——
+     * 浅色下白圆与白底页几乎同色，靠那道灰边分开；深色下白圆本身就跳出来了。
+     * 用户明确要求"白色"，故深色也保持白（不跟着主题翻成深底），只让描边跟着主题走。
+     */
+    val editorChipBackground: Color,
+    /** 上面那颗圆钮的描边（用户口径"淡淡的灰边"）：浅色 `0xFFDCDCDC`、深色 `0xFF4A5563`。 */
+    val editorChipBorder: Color,
+    /** 上面那颗圆钮的图标色：底恒为白，故**深浅同值**取深灰（不能跟着 [text] 走）。 */
+    val editorChipIcon: Color,
 
     /**
      * 文件类型头像的底色表（TG `AvatarDrawable` 的 `avatar_background*` 色序）：
@@ -282,6 +296,10 @@ val LightColors = Colors(
     checkboxCheck = Color(0xFFFFFFFF),
     toastBackground = Color(0xE21F2B38),
     toastText = Color(0xFFFFFFFF),
+    // 编辑器右下那颗圆钮：白底 + 淡灰边（本仓自定义，见 [Colors.editorChipBackground]）。
+    editorChipBackground = Color(0xFFFFFFFF),
+    editorChipBorder = Color(0xFFDCDCDC),
+    editorChipIcon = Color(0xFF5A6672),
     // avatar_background{Red,Orange,Violet,Cyan,Blue,Pink} + Green（ThemeColors.java 默认值）。
     fileAvatarColors = listOf(
         Color(0xFFFF845E),
@@ -296,11 +314,15 @@ val LightColors = Colors(
 
 /** 深色（`night.attheme`）。 */
 val DarkColors = Colors(
-    background = Color(0xFF181819),
+    // **用户指定的屏底**（2026-10-06 批 61）：#161E27，带一点蓝的深灰 —— 这是本仓
+    // **故意偏离** TG night 的 `windowBackground`（0xFF181819，中性深灰）的一处，
+    // 用户口径优先。改它的连带面见下面 [surfaceMuted] 与 [fieldBackground]。
+    background = Color(0xFF161E27),
     surface = Color(0xFF232326),
-    // TG 的设置页灰底（night.attheme `windowBackgroundGray` = #000000，纯黑）：
-    // 深色下白卡片浮在黑底上，卡片与底的对比来自明度差，不靠描边。
-    surfaceMuted = Color(0xFF000000),
+    // 设置/管理/任务中心三屏的**屏底**（TG 的 `windowBackgroundGray`，night = 纯黑）：
+    // 与 [background] 同值 —— 它俩在深色下本来就是"同一块底"的两种叫法。用户口径把
+    // "夜间的黑"统一定成 #161E27 之后，这里再留纯黑就会出现"设置页比首页更黑"的断层。
+    surfaceMuted = Color(0xFF161E27),
     divider = Color(0xFF000000),
     text = Color(0xFFFFFFFF),
     textSecondary = Color(0xFF828282),
@@ -320,9 +342,12 @@ val DarkColors = Colors(
     tabSelected = Color(0xFF229AF0),
     tabSelectedText = Color(0xFF229AF0),
     pressedOverlay = Color(0x16FFFFFF),
-    // 白 7% 叠 [background](0xFF181819) —— 与下面 menuBackground 同值纯属巧合（TG 的
-    // 深色子菜单底也是"比底亮一档的深灰"），两个键在 TG 里各是各的，别合并。
-    fieldBackground = Color(0xFF282829),
+    // 白 7% 叠 [background]（0xFF161E27）→ 0xFF262E36。批 61 换屏底时**跟着重算**：
+    // 这两个键在 TG 里本来就是一"配方"关系（见 [Colors.fieldBackground] 的 KDoc），
+    // 底换了而配方不换，那个"比屏底亮一档"的结论就不成立了。
+    // 与下面 menuBackground 同值纯属巧合（TG 的深色子菜单底也是"比底亮一档的深灰"），
+    // 两个键在 TG 里各是各的，别合并。
+    fieldBackground = Color(0xFF262E36),
     graySection = Color(0xFF0B0B0C),
     graySectionText = Color(0xFF838384),
     // 这三个键 night.attheme 都设了。
@@ -344,10 +369,14 @@ val DarkColors = Colors(
     menuSelector = Color(0x19FFFFFF),
     checkboxFill = Color(0xFF5EC245),
     checkboxCheck = Color(0xFFFFFFFF),
-    // TG night 的 `undo_background`（0xF5181818）与本仓深色屏底同值 → 会看不见，
+    // TG night 的 `undo_background`（0xF5181818）与本仓深色屏底几乎同值 → 会看不见，
     // 上抬到 [surface] 那一档（见 [Colors.toastBackground] 的说明）。
     toastBackground = Color(0xF5232326),
     toastText = Color(0xFFFFFFFF),
+    // 编辑器右下那颗圆钮：白底（用户口径，深色也不翻）+ 深一档的灰边。
+    editorChipBackground = Color(0xFFFFFFFF),
+    editorChipBorder = Color(0xFF4A5563),
+    editorChipIcon = Color(0xFF5A6672),
     fileAvatarColors = listOf(
         Color(0xFFFF845E),
         Color(0xFFFEBB5B),

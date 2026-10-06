@@ -1,14 +1,31 @@
 package com.autoscript.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -18,18 +35,32 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.autoscript.ui.components.ActionBar
@@ -38,6 +69,10 @@ import com.autoscript.ui.components.LocalTabBarHidden
 import com.autoscript.ui.components.LocalToast
 import com.autoscript.ui.components.TabBarBottomClearance
 import com.autoscript.ui.components.color
+import com.autoscript.ui.components.pressable
+import com.autoscript.ui.state.EditorAffordance
+import com.autoscript.ui.state.EditorJump
+import com.autoscript.ui.state.EditorScroll
 import com.autoscript.ui.state.StatusTone
 import com.autoscript.ui.theme.ThemeColors
 import kotlinx.coroutines.CancellationException
@@ -90,7 +125,11 @@ fun ScriptEditorScreen(
         onDispose { tabBarHidden.value = false }
     }
     // null = 还没读到（或正在读）：与「读到了但是空文件」（空串）必须区分开。
-    var text by remember { mutableStateOf<String?>(null) }
+    //
+    // 存的是 **TextFieldValue 而不是 String**：光标位置也是编辑器状态的一部分 ——
+    // "点正文下方的空白把光标送到文末"（用户口径）要能**主动设选区**，而 String 那套重载
+    // 的选区归 Compose 内部管，外面够不着。
+    var value by remember { mutableStateOf<TextFieldValue?>(null) }
     var loadError by remember { mutableStateOf<String?>(null) }
     var saveError by remember { mutableStateOf<String?>(null) }
     var dirty by remember { mutableStateOf(false) }
@@ -100,13 +139,14 @@ fun ScriptEditorScreen(
     // 换文件（key 变）重读：编辑器是整屏面，同一个实例被复用到另一个文件上时必须把
     // 上一位的状态清干净，否则会拿着 A 的内容去存 B。
     LaunchedEffect(projectId, relPath) {
-        text = null
+        value = null
         loadError = null
         saveError = null
         dirty = false
-        val loaded = loadScriptText(projectId, relPath, onRead)
-        text = loaded.text
-        loadError = loaded.error
+        val read = loadScriptText(projectId, relPath, onRead)
+        // 读失败时正文是 null（不是空串），光标位置无从谈起 —— 两处一起置空。
+        value = read.text?.let { TextFieldValue(it) }
+        loadError = read.error
     }
 
     /** 退回上一层（返回键与 ‹ 共用）：有未保存改动先问一句，不静默丢。 */
@@ -116,7 +156,8 @@ fun ScriptEditorScreen(
 
     BackHandler { close() }
 
-    val body = text
+    // 局部 val：`value` 是可变的，下面 when 的分支里要的是"读到了"那一档的非空值。
+    val loaded = value
     Column(modifier.fillMaxSize().background(palette.background)) {
         ActionBar(
             title = displayName,
@@ -128,13 +169,13 @@ fun ScriptEditorScreen(
                 ActionBarAction(
                     text = if (saving) "保存中…" else "保存",
                     // 没改动 / 还没读到 / 正在存 → 不可点（见类 KDoc）。
-                    enabled = body != null && dirty && !saving,
+                    enabled = loaded != null && dirty && !saving,
                     onClick = {
-                        val content = body ?: return@ActionBarAction
+                        val current = loaded ?: return@ActionBarAction
                         scope.launch {
                             saving = true
                             saveError = null
-                            saveError = saveScriptText(projectId, relPath, content, onSave)
+                            saveError = saveScriptText(projectId, relPath, current.text, onSave)
                             saving = false
                             // 存失败：那句原文留在正文上方，**不收键盘**（还要接着改）。
                             if (saveError != null) return@launch
@@ -161,36 +202,31 @@ fun ScriptEditorScreen(
         }
         when {
             loadError != null -> EditorNotice(text = "读不到这个文件：$loadError")
-            body == null -> EditorNotice(text = "读取中…")
-            else -> Box(
-                Modifier
+            loaded == null -> EditorNotice(text = "读取中…")
+            // 换文件时编辑器会**整块重建**（重读期间这一支不在树上）：滚动位置、光标、
+            // 手指方向都不跨文件继承 —— 不需要再给它们加 key。
+            else -> EditorBody(
+                value = loaded,
+                onValueChange = { next ->
+                    // **只有正文真的变了才标脏**：点正文下方的空白只是把光标挪到文末
+                    // （用户口径），正文一个字没动 —— 那时亮起"保存"、退出还要问
+                    // "有未保存的修改"，就是在骗人。
+                    val edited = next.text != loaded.text
+                    value = next
+                    if (edited) {
+                        dirty = true
+                        // 一改动就把上一次的保存失败结论收掉：那句话说的是**上一次**的
+                        // 内容，留在屏幕上会让人以为这次也没存上。
+                        saveError = null
+                    }
+                },
+                modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
                     // 底栏留白：编辑器住页签条**下面**那一层（外壳画的底栏浮在页内容之上），
-                    // 不留白就会被胶囊底栏压住最后几行。
-                    .padding(bottom = TabBarBottomClearance())
-                    .verticalScroll(rememberScrollState()),
-            ) {
-                BasicTextField(
-                    value = body,
-                    onValueChange = {
-                        text = it
-                        dirty = true
-                        // 一改动就把上一次的保存失败结论收掉：那句话说的是**上一次**的内容，
-                        // 留在屏幕上会让人以为这次也没存上。
-                        saveError = null
-                    },
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-                    // 代码用等宽：脚本里对齐的赋值/缩进是读得出来的信息，比例字体把它抹平了。
-                    textStyle = TextStyle(
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 14.sp,
-                        lineHeight = 20.sp,
-                        color = palette.text,
-                    ),
-                    cursorBrush = SolidColor(palette.accent),
-                )
-            }
+                    // 不留白就会被胶囊底栏压住最后几行（编辑态底栏已收起，这里只剩导航栏）。
+                    .padding(bottom = TabBarBottomClearance()),
+            )
         }
     }
 
@@ -266,6 +302,301 @@ internal suspend fun saveScriptText(
  */
 internal data class ScriptLoad(val text: String?, val error: String?)
 
+/**
+ * 正文那一层：**行号槽 + 正文 + 右下那颗跳转钮**（含它上面的气泡）。
+ *
+ * 单独一个函数有两个理由：① [ScriptEditorScreen] 已经贴着 detekt 的长函数线；
+ * ② 它自带四份状态（滚动轴、行高换算、排版结果报回来的行数、手指方向）—— 留在屏里
+ * 会和保存/退出那套混在一起。
+ *
+ * @param value 正文与**光标位置**（选区由这一层改，见"点空白送到文末"那一段）。
+ * @param onValueChange 内容或选区变了（调用方据此标脏、清掉上一次的保存失败结论）。
+ */
+@Composable
+private fun EditorBody(
+    value: TextFieldValue,
+    onValueChange: (TextFieldValue) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val palette = ThemeColors
+    val density = LocalDensity.current
+    val vScroll = rememberScrollState()
+    val focusRequester = remember { FocusRequester() }
+    val scope = rememberCoroutineScope()
+    // 下面这三个都由**排版结果**（`onTextLayout`）报回来：
+    // - 正文自己占的高度：判断"点在不在正文下方"要用它；
+    // - **折行之后**的视觉行数：气泡那个数与"超没超出一屏"都按它算（按逻辑行会少）；
+    // - 行号槽那一列字：折行时一个逻辑行占好几个视觉行，行号只写在**第一个**视觉行上。
+    // 存 String 而不是 TextLayoutResult：字符串是等值比较，布局回调万一再来一次
+    // （同一个布局），等值的写入不会触发重组，也就不会自激。
+    var contentHeightPx by remember { mutableStateOf(0f) }
+    var visualRows by remember { mutableStateOf(0) }
+    var gutterText by remember { mutableStateOf("") }
+    // 手指方向：往下拖 = 往上看（见 [EditorScroll.affordance]）。默认 false = 去最底。
+    var towardTop by remember { mutableStateOf(false) }
+    LaunchedEffect(vScroll) {
+        var last = vScroll.value
+        snapshotFlow { vScroll.value }.collect { now ->
+            if (now != last) {
+                towardTop = now < last
+                last = now
+            }
+        }
+    }
+    // 正文与行号槽**共用同一套字体度量**（同一个 TextStyle，只换对齐与颜色）：换字号、
+    // 换行高、换字距都只改一处，否则第 n 个数字会逐行偏离第 n 行。
+    val codeStyle = remember(palette.text) {
+        TextStyle(
+            fontFamily = FontFamily.Monospace,
+            fontSize = EditorFontSize,
+            lineHeight = EditorLineHeight,
+            letterSpacing = EditorLetterSpacing,
+            color = palette.text,
+        )
+    }
+    val gutterStyle = remember(codeStyle, palette.textTertiary) {
+        codeStyle.copy(textAlign = TextAlign.End, color = palette.textTertiary)
+    }
+
+    BoxWithConstraints(modifier.fillMaxSize()) {
+        val viewportHeight = maxHeight
+        val viewportPx = with(density) { viewportHeight.toPx() }
+        val lineHeightPx = with(density) { EditorLineHeight.toPx() }
+        // 正文上沿到整行上沿的距离（判断"点的是不是正文下方"时要用）。
+        val topPaddingPx = with(density) { EditorVerticalPadding.toPx() }
+        // 正文上下那两块留白（上 12dp + 下 60dp 让位给圆钮）：判断"超没超出一屏"时
+        // 它们是内容的一部分，要从视口里扣掉。
+        val contentPaddingPx = with(density) { (EditorVerticalPadding + EditorChipReserve).toPx() }
+        // 槽宽按**逻辑行**的行数留（最大行号是几位就留几位）。
+        val lines = EditorScroll.lineCount(value.text)
+        val gutterWidth = EditorGutterStart + EditorGutterDigit * EditorScroll.gutterDigits(lines) + EditorGutterEnd
+        val gutterWidthPx = with(density) { gutterWidth.toPx() }
+        // 气泡里那个数与按钮去哪一头：**只在"跨过一行"或"方向翻面"时才变值** ——
+        // 直接读 `vScroll.value` 会让整块编辑面每滚一帧重组一次。
+        val affordance by remember(viewportPx, lineHeightPx, visualRows) {
+            derivedStateOf {
+                // `vScroll.value` 是 Int（px 整数），几何那层一律吃 Float。
+                EditorScroll.affordance(vScroll.value.toFloat(), viewportPx, lineHeightPx, visualRows, towardTop)
+            }
+        }
+        Box(Modifier.fillMaxSize().verticalScroll(vScroll)) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    // 正文不足一屏时，下面那一块**也要收得到点击**（用户口径：点空白把光标
+                    // 送到文末）。不给最小高度，那块空白根本不属于编辑器，点了没反应。
+                    .heightIn(min = viewportHeight)
+                    // 手势挂在**内边距之外**这一层：这样 `at` 的坐标就是整行的坐标，
+                    // "在不在正文下方"只需和正文高度比，不用再去减内边距。
+                    .pointerInput(value.text, contentHeightPx) {
+                        detectTapGestures { at ->
+                            // 只认**正文下方、且不在行号槽里**的空白：正文本身有自己的落光标
+                            // 逻辑（点哪落哪），行号槽点了不该动光标。
+                            val belowText = at.y > contentHeightPx + topPaddingPx
+                            if (belowText && at.x > gutterWidthPx) {
+                                // `composition = null`：正在输入法组词时改选区要先收掉
+                                // 那一段组词，否则光标会跳回组词开头。
+                                onValueChange(
+                                    value.copy(
+                                        selection = TextRange(value.text.length),
+                                        composition = null,
+                                    ),
+                                )
+                                focusRequester.requestFocus()
+                            }
+                        }
+                    }
+                    // 下方留出那颗圆钮的位置：滚到最底时最后一行正好停在钮上方，
+                    // 而不是被它压住半行（钮是浮层，不参与布局，只能这样让位）。
+                    .padding(top = EditorVerticalPadding, bottom = EditorChipReserve),
+                verticalAlignment = Alignment.Top,
+            ) {
+                // 行号槽：一条淡灰竖线把它和正文分开（用户口径）。数字与正文**同一套行高**
+                // （同一个 TextStyle 派生的），所以第 n 个数字恰好落在第 n 个视觉行上。
+                Box(
+                    Modifier
+                        .width(gutterWidth)
+                        .drawBehind {
+                            // 竖线画在槽的**右缘**：贴着正文那一侧，不占正文的宽度。
+                            val lineWidth = EditorGutterLineWidth.toPx()
+                            drawRect(
+                                color = palette.divider,
+                                topLeft = Offset(size.width - lineWidth, 0f),
+                                size = Size(lineWidth, size.height),
+                            )
+                        },
+                ) {
+                    Text(
+                        text = gutterText,
+                        style = gutterStyle,
+                        modifier = Modifier.fillMaxWidth().padding(end = EditorGutterEnd),
+                    )
+                }
+                // 正文：**保持折行**（不改成横向滚动）—— 手机屏宽下十几二十个字就折了，
+                // 让用户为每个长行左右拉一次是拿"行号对齐好写"换走了"能读"。行号按**逻辑行**
+                // 给（见 [EditorScroll.gutterLabels]），折出来的续行留空，与 Acode 一致。
+                BasicTextField(
+                    value = value,
+                    onValueChange = onValueChange,
+                    modifier = Modifier
+                        .weight(1f)
+                        .focusRequester(focusRequester)
+                        .padding(start = EditorTextStart, end = EditorTextEnd),
+                    textStyle = codeStyle,
+                    cursorBrush = SolidColor(palette.accent),
+                    onTextLayout = { layout ->
+                        contentHeightPx = layout.size.height.toFloat()
+                        visualRows = layout.lineCount
+                        gutterText = EditorScroll.gutterLabels(
+                            visualRows = layout.lineCount,
+                            firstRowOfLine = logicalLineRows(layout, value.text),
+                        )
+                    },
+                )
+            }
+        }
+        EditorJumpChip(
+            affordance = affordance,
+            // 气泡只在正文**超出一屏**时出现：没超出时"屏幕外还有几行"是个假问题。
+            // 比的是"正文能不能占满视口"（上下留白不算正文，要从视口里扣掉）。
+            showBubble = EditorScroll.overflows(visualRows, lineHeightPx, viewportPx - contentPaddingPx),
+            onJump = {
+                val toTop = affordance.jump == EditorJump.TOP
+                scope.launch {
+                    vScroll.animateScrollTo(if (toTop) 0 else vScroll.maxValue)
+                    // 跳完**把方向翻过来**：刚去了顶部，下一次有用的是"去底部"。不翻的话
+                    // 钮会停在"去顶部"上、再点一次什么都不发生 —— 看起来像按钮坏了。
+                    // （用户口径只规定了"手指方向 → 钮的方向"，跳转后的方向由这里补齐。）
+                    towardTop = !toTop
+                }
+            },
+            modifier = Modifier.align(Alignment.BottomEnd).padding(EditorChipMargin),
+        )
+    }
+}
+
+/**
+ * 每个**逻辑行**（`\n` 分隔）的第一个字落在第几个**视觉行**（折行之后）。
+ *
+ * 折行打开时"第几行"有两个口径：逻辑行（用户数出来的行）与视觉行（屏幕上占的行）。
+ * 行号要按逻辑行给，所以得知道每一行的**起点**落在哪个视觉行上 —— 这个映射只有
+ * 排版结果知道（`getLineForOffset`），文本本身算不出来。
+ */
+private fun logicalLineRows(layout: TextLayoutResult, text: String): List<Int> {
+    val rows = ArrayList<Int>()
+    var offset = 0
+    while (true) {
+        rows.add(layout.getLineForOffset(offset))
+        // 末尾的 `\n` 后面那个空行也是一个逻辑行（光标能落上去），所以按"下一个换行符"
+        // 推进而不是"最后一个换行符就收工"：`indexOf` 返回 -1 才是真的没有下一行了。
+        val next = text.indexOf('\n', offset)
+        if (next < 0) return rows
+        offset = next + 1
+    }
+}
+
+/**
+ * 编辑器右下那颗圆钮与它上面的气泡。
+ *
+ * 形态按用户口径：**正圆、白底、一圈淡灰描边**（让它从两种主题的正文里都浮起来）。
+ * 钮上那个箭头与"去最底/去最顶"同步翻面（见 [EditorScroll.affordance]），气泡里是
+ * **你要去的那一头**在屏幕外还剩几行 —— 气泡与钮说的是同一件事，不各说各的。
+ *
+ * @param affordance 去哪一头 + 气泡上的数字。
+ * @param showBubble 正文有没有超出一屏（没超出就不摆气泡）。
+ */
+@Composable
+private fun EditorJumpChip(
+    affordance: EditorAffordance,
+    showBubble: Boolean,
+    onJump: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val palette = ThemeColors
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        AnimatedVisibility(
+            visible = showBubble,
+            enter = fadeIn(tween(EDITOR_CHIP_FADE_MILLIS)) + slideInVertically { it / 2 },
+            exit = fadeOut(tween(EDITOR_CHIP_FADE_MILLIS)) + slideOutVertically { it / 2 },
+        ) {
+            Box(
+                Modifier
+                    .background(palette.editorChipBackground, RoundedCornerShape(EditorBubbleRadius))
+                    .border(EditorChipBorderWidth, palette.editorChipBorder, RoundedCornerShape(EditorBubbleRadius))
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+            ) {
+                Text(
+                    text = affordance.offscreenLines.toString(),
+                    color = palette.editorChipIcon,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Box(
+            Modifier
+                .size(EditorChipSize)
+                .background(palette.editorChipBackground, CircleShape)
+                .border(EditorChipBorderWidth, palette.editorChipBorder, CircleShape)
+                .pressable(role = Role.Button, shape = CircleShape, onClick = onJump),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = if (affordance.jump == EditorJump.TOP) "↑" else "↓",
+                color = palette.editorChipIcon,
+                style = MaterialTheme.typography.titleMedium,
+            )
+        }
+    }
+}
+
+/** 正文字号（等宽 14sp，与重构前一致）。 */
+private val EditorFontSize = 14.sp
+
+/** 正文行高：行号槽、气泡那个数、点空白的判据**全按它算** —— 改它要三处一起看。 */
+private val EditorLineHeight = 20.sp
+
+/** 字间距（用户口径：别让字连在一起）。等宽字体的 CJK 与数字挤在一起最难认。 */
+private val EditorLetterSpacing = 0.5.sp
+
+/** 正文上下留白（行号槽与正文共用同一份，否则第一行就对不齐）。 */
+private val EditorVerticalPadding = 12.dp
+
+/** 行号槽左内边距。 */
+private val EditorGutterStart = 6.dp
+
+/** 行号槽**每一位数字**的宽度（14sp 等宽 + 0.5sp 字距 ≈ 8.9dp，取 9dp 留一点余量）。 */
+private val EditorGutterDigit = 9.dp
+
+/** 行号槽右内边距（那条竖线画在它的右缘）。 */
+private val EditorGutterEnd = 8.dp
+
+/** 行号槽那条竖线的宽度（px 由 `drawBehind` 里换算，这里只存 dp 值）。 */
+private val EditorGutterLineWidth = 1.dp
+
+/** 正文左内边距（与行号槽的竖线之间留一口气）。 */
+private val EditorTextStart = 12.dp
+
+/** 正文右内边距。 */
+private val EditorTextEnd = 16.dp
+
+/** 右下那颗圆钮的直径（与"回到顶部"那颗同档）。 */
+private val EditorChipSize = 44.dp
+
+/** 圆钮与气泡的描边宽度（用户口径"淡淡的灰边"）。 */
+private val EditorChipBorderWidth = 1.dp
+
+/** 气泡的圆角。 */
+private val EditorBubbleRadius = 8.dp
+
+/** 圆钮距屏幕右下角的距离。 */
+private val EditorChipMargin = 16.dp
+
+/** 正文下方的留白：让出右下那颗圆钮（直径 + 外边距 + 一口气）的位置。 */
+private val EditorChipReserve = 60.dp
+
+/** 气泡出现/消失的时长（与全仓那几条小过渡同档）。 */
+private const val EDITOR_CHIP_FADE_MILLIS = 160
 /** 读不到 / 读取中这两句的落位（居中一行，次级色）—— 与正文同一块地方，不另起一屏。 */
 @Composable
 private fun ColumnScope.EditorNotice(text: String) {

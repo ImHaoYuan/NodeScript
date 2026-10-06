@@ -54,6 +54,8 @@
     <ID>FunctionNaming:Scaffolds.kt$@Composable fun ToneText( text: String, tone: StatusTone, modifier: Modifier = Modifier, style: androidx.compose.ui.text.TextStyle = MaterialTheme.typography.bodyMedium, maxLines: Int = Int.MAX_VALUE, overflow: TextOverflow = TextOverflow.Ellipsis, )</ID>
     <ID>FunctionNaming:ScriptEditorScreen.kt$@Composable fun ScriptEditorScreen( projectId: String, relPath: String, displayName: String, onRead: suspend (projectId: String, relPath: String) -&gt; String, onSave: suspend (projectId: String, relPath: String, content: String) -&gt; Unit, onClose: () -&gt; Unit, modifier: Modifier = Modifier, )</ID>
     <ID>FunctionNaming:ScriptEditorScreen.kt$@Composable private fun ColumnScope.EditorNotice(text: String)</ID>
+    <ID>FunctionNaming:ScriptEditorScreen.kt$@Composable private fun EditorBody( value: TextFieldValue, onValueChange: (TextFieldValue) -&gt; Unit, modifier: Modifier = Modifier, )</ID>
+    <ID>FunctionNaming:ScriptEditorScreen.kt$@Composable private fun EditorJumpChip( affordance: EditorAffordance, showBubble: Boolean, onJump: () -&gt; Unit, modifier: Modifier = Modifier, )</ID>
     <ID>FunctionNaming:SettingsCells.kt$@Composable internal fun SettingIconBlock(colors: SettingIconColors, glyph: GlyphKind)</ID>
     <ID>FunctionNaming:SettingsCells.kt$@Composable internal fun SettingsCard(content: @Composable () -&gt; Unit)</ID>
     <ID>FunctionNaming:SettingsCells.kt$@Composable internal fun SettingsCellRow( title: String, colors: SettingIconColors? = null, glyph: GlyphKind? = null, modifier: Modifier = Modifier, onClick: (() -&gt; Unit)? = null, trailing: (@Composable () -&gt; Unit)? = null, )</ID>

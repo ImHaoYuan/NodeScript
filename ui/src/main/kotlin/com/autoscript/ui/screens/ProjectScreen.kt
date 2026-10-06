@@ -18,7 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -308,7 +308,7 @@ fun ProjectScreen(
                     state = listState,
                     contentPadding = PaddingValues(top = 4.dp, bottom = TabBarBottomClearance()),
                 ) {
-                    items(visible, key = { ProjectState.keyOf(it) }) { file ->
+                    itemsIndexed(visible, key = { _, item -> ProjectState.keyOf(item) }) { index, file ->
                         val key = ProjectState.keyOf(file)
                         FileRow(
                             file = file,
@@ -340,6 +340,19 @@ fun ProjectScreen(
                                 selected = ProjectState.toggleSelection(selected, key)
                             },
                         )
+                        // 行间那条淡灰分割线（用户口径：`test.txt` 与 `main.js` 之间那条）。
+                        // **最后一行不画**：列表末尾挂一条悬空的线，读起来像"下面还有内容"。
+                        // 左内缩对齐**文字左缘**（12 外边距 + 52 头像 + 12 间距）—— 线从头像
+                        // 底下穿过去，"头像属于哪一行"就糊了。
+                        if (index < visible.lastIndex) {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = FileRowDividerInset)
+                                    .height(1.dp)
+                                    .background(ThemeColors.divider),
+                            )
+                        }
                     }
                     if (state.load.isLoaded && visible.isEmpty()) {
                         item { EmptyFilesHint(filtered = query.isNotBlank(), inFolder = currentFolder != null) }
@@ -646,6 +659,14 @@ private fun FileRow(
 /** 行尾 ⋮ 的触控目标（Material 最小可达性 48dp）。 */
 private val FileRowMoreTouch = 48.dp
 
+/**
+ * 行间分割线的左内缩：与**文字左缘**对齐。
+ *
+ * 12dp 行外边距 + 52dp 头像格 + 12dp 间距 —— 三个数分别写死在 `FileRow` 的布局里，
+ * 这里把和写成常量：改头像尺寸时至少这一处会**显式**跟着改（写 76.dp 就没有这个提醒）。
+ */
+private val FileRowDividerInset = 12.dp + 52.dp + 12.dp
+
 /** 选中遮罩的圆角（`DialogCell` 的 `cornersRadius = dp(8) * cornerProgress`）。 */
 private val FileRowSelectedRadius = 8.dp
 
@@ -907,8 +928,8 @@ private val FabSubRise = 64.dp
  * - **描边 0.4dp**（`setStrokeWidth(dpf2(0.4f), dpf2(0.4f))`），色随深浅：
  *   上边浅色 `0x20000000` / 深色 `0x11FFFFFF`（[FabSubStrokeTop]）；
  * - 底是**模糊背板**（把身后的内容模糊后上浮），本仓没有实时模糊，
- *   取 `key_windowBackgroundWhite` 的实色近似 —— 浅色下就是白，深色下是 `#181819`
- *   （[ThemeColors.background]）。
+ *   取 `key_windowBackgroundWhite` 的实色近似 —— 浅色下就是白，深色下是 `#161E27`
+ *   （[ThemeColors.background]，批 61 的用户口径值）。
  * - 图标取 `key_actionBarDefaultIcon`（[ThemeColors.barIcon]：浅色偏冷深灰
  *   `#FF404E56`，**不是**正文黑）；按下底 = `key_listSelector`
  *   （[ThemeColors.menuSelector] 同档）。形状要一起给 [pressable]：按压遮罩按矩形画，
