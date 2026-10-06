@@ -51,6 +51,12 @@
   [`.github/CODEOWNERS`](.github/CODEOWNERS) 里逐条指了人（本仓目前是单一维护者，无第二人可指；
   见 `docs/design/18-19-ledger.md` §18 第 3 项「不发行正式版」）。CODEOWNERS 是**机器可读**的那份，
   本行是人读的镜像；两者不一致时以 CODEOWNERS 为准。
+- **`docs/` 全目录同样是冻结面，且其中四份是「只追加」**：`docs/design/` 是契约（改它 =
+  改行为）；`docs/log/`、`docs/design-status.md`、`docs/design-decisions.md`、`docs/backlog.md`
+  是台账 —— **只允许在顶部新增，不许删改既有条目**（被推翻的记账原地划掉并注明日期，不删除）。
+  下游 PR 动冻结面、或让台账的既有条目消失，`ci.yml` 的 `frozen-paths` job 会当场红
+  （脚本 = [`.github/scripts/check-frozen-paths.sh`](.github/scripts/check-frozen-paths.sh)，
+  本机同一条命令可跑）。维护者自己不受此门约束（`author_association` 是 OWNER/MEMBER 时跳过）。
 - **升级依赖 = 一件事一个提交**，并跑全量门。
 
 ## 提交信息

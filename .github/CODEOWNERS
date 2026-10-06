@@ -15,9 +15,20 @@
 /build.gradle.kts               @Ventus-Pluviam   # 根构建脚本
 /build-logic/                   @Ventus-Pluviam   # 约定插件 + 共享架构门/测试夹具源
 
-# ── 契约与安全面 ──
-# `docs/design/` 是**契约的单一事实来源**（改契约 = 改行为，必须与代码同批）；
-# `.github/workflows/` 是门禁本身；`SECURITY.md` 是支持范围与密钥口径。
-/docs/design/                   @Ventus-Pluviam
-/.github/                       @Ventus-Pluviam
+# ── 契约、台账与安全面 ──
+# 上面那条 `*` 已经覆盖全仓，下面这几行是**写明意图**（哪些面属于"要改先提出来"），
+# 不是扩大覆盖范围 —— 真正让 CODEOWNERS **强制生效**的开关在 ruleset `main-protect` 的
+# 「Require review from Code Owners」，不勾它这里只是自动请求评审。
+#
+# 整个 `docs/` 都归维护者，其中：
+#   · `docs/design/` 是**契约的单一事实来源**（改契约 = 改行为，必须与代码同批）；
+#   · `docs/log/`、`docs/design-status.md`、`docs/design-decisions.md`、`docs/backlog.md`
+#     是**只追加**台账 —— **不许删改既有条目**。2026-10-07 实测被删过：PR #44 的 a8ac99b
+#     把 `docs/log/2026-10-06.md` 里 main 的批 58–62 五条删了（−203 行）、把 README 的
+#     2026-10-07 整块删了 —— 而 `check-doc-links.sh` **抓不到**（它只验链接目标存在）。
+#     现在由 `ci.yml` 的 `frozen-paths` job（`check-frozen-paths.sh`）守着。
+# 列 `/docs/` 而不是逐条列那四份：反正 `*` 已全覆盖，逐条列只会变成"加了新文件忘了加这里"
+# 的第二处事实来源（本仓对"同一事实写两遍"的代价有惨痛先例）。
+/docs/                          @Ventus-Pluviam
+/.github/                       @Ventus-Pluviam   # 门禁本身（含上面那道冻结面门）
 /SECURITY.md                    @Ventus-Pluviam
