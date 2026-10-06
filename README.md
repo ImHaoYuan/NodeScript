@@ -37,7 +37,7 @@
 | 需要 | 版本 | 说明 |
 |---|---|---|
 | JDK | **17** | 编译与单测都用它（`compileOptions` / `kotlinOptions` 均钉 17） |
-| Android SDK | `platforms;android-35` + `build-tools;35.0.0` + `platform-tools` | `minSdk 26` / `targetSdk 35`（版本钉在 [`gradle/libs.versions.toml`](gradle/libs.versions.toml)） |
+| Android SDK | `platforms;android-36` + `build-tools;36.0.0` + `platform-tools` | `minSdk 26` / `targetSdk 36`（版本钉在 [`gradle/libs.versions.toml`](gradle/libs.versions.toml)） |
 | Node.js | **24** | 构建 facade dist 与跑 `bridge/js` 测试；与 `node-runtime-build/VERSIONS.env` 同口径 |
 | Android NDK | r28c | **只有**要自己编引擎/图像核（C++）时才需要，见下 |
 | Gradle | 不用装 | 用仓库里的 `./gradlew`（wrapper 8.9，与 AGP 8.5.2 匹配） |
@@ -65,6 +65,12 @@ npm --prefix bridge/js run build
 的候选位提供产物（`node-runtime-build/out/libnode.so`，或 `LIBNODE=` / `LIBOPENCV=` 显式指路；
 三件齐时另需 `ANDROID_NDK_HOME`）。C++ 侧的交叉编译与真机红灯测试纪律见
 [`node-runtime-build/`](node-runtime-build/)。
+
+**CI 出两份 APK**：PR 门（[`ci.yml`](.github/workflows/ci.yml) 的 `android-build` job）出的那份
+**不含引擎二进制**（分钟级，只证明装配链通）；[`.github/workflows/engine-native.yml`](.github/workflows/engine-native.yml)
+出的是**真形态** —— 它自己跑 `build-native.sh` 编 `noden` + `bridge_native.node`，再跨 workflow 取
+node-slice / libopencv 的 artifact 起 `assembleDebug`，末尾断言 `lib/arm64-v8a/` 四件齐 + npm 素材
++ `native-code` 恰为 `arm64-v8a`。装到设备上真跑脚本要用后者。
 
 ## 测试
 

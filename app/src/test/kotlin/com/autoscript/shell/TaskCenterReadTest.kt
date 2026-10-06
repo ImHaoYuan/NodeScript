@@ -42,9 +42,12 @@ class TaskCenterReadTest {
         state: RunState = RunState.RUNNING,
         startedAtMillis: Long? = 1000L,
         finishedAtMillis: Long? = null,
+        exitCode: Int? = null,
+        crashSummary: String? = null,
     ) = RunRecord(
         id = id, projectId = "p1", scriptPath = "a.js", runNonce = "n$id",
         state = state, startedAtMillis = startedAtMillis, finishedAtMillis = finishedAtMillis,
+        exitCode = exitCode, crashSummary = crashSummary,
     )
 
     private fun recoveryRecord(expired: Boolean) = RecoveryRecord(
@@ -146,6 +149,25 @@ class TaskCenterReadTest {
             snap.runs.first { it.engineRunId == 12L }.intentRunId,
             "「读了没有」与独立执行都如实 null —— 不拿 runNonce 之类凑一个 id",
         )
+    }
+
+    @Test
+    fun `B11 诊断字段逐字段投影 —— 退出码与崩溃摘要原样透出`() = runBlocking {
+        val snap = TaskCenterRead.snapshot(
+            tasks = emptyList(),
+            nextFireAt = { null },
+            degradedTaskIds = emptySet(),
+            runs = listOf(
+                record(state = RunState.CRASHED, exitCode = 3, crashSummary = "TypeError: boom"),
+                record(id = 12L, state = RunState.RUNNING),
+            ),
+        )
+        val crashed = snap.runs.first { it.engineRunId == 11L }
+        assertEquals(3, crashed.exitCode)
+        assertEquals("TypeError: boom", crashed.crashSummary)
+        val plain = snap.runs.first { it.engineRunId == 12L }
+        assertNull(plain.exitCode, "无诊断字段 → null（不是 0）")
+        assertNull(plain.crashSummary)
     }
 
     @Test

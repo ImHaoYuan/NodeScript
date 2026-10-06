@@ -104,7 +104,7 @@ internal fun IntentStore.StoredRow.toIntentRun(): IntentRun = IntentRun(
     outcome = outcome?.let {
         when (it.name) {
             "SUCCEEDED" -> RunOutcome.Succeeded
-            "FAILED" -> RunOutcome.Failed
+            "FAILED" -> RunOutcome.Failed()
             "CANCELLED" -> RunOutcome.Cancelled
             "CRASHED" -> RunOutcome.Crashed(it.detail)
             "INTERRUPTED" -> RunOutcome.Interrupted
@@ -120,7 +120,7 @@ internal fun IntentStore.StoredRow.toIntentRun(): IntentRun = IntentRun(
 
 internal fun RunOutcome.toStored(): IntentStore.StoredOutcome = when (this) {
     RunOutcome.Succeeded -> IntentStore.StoredOutcome.SUCCEEDED
-    RunOutcome.Failed -> IntentStore.StoredOutcome.FAILED
+    is RunOutcome.Failed -> IntentStore.StoredOutcome.FAILED
     RunOutcome.Cancelled -> IntentStore.StoredOutcome.CANCELLED
     is RunOutcome.Crashed -> IntentStore.StoredOutcome.crashed(message)
     RunOutcome.Interrupted -> IntentStore.StoredOutcome.INTERRUPTED

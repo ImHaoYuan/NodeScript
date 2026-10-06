@@ -91,7 +91,7 @@ class ControllerRunDispatcherArchiveTest {
 
         val report = d.dispatchToReport(pending("nonce-gate", intentRunId = 1))
 
-        assertEquals(RunOutcome.Failed, report.outcome)
+        assertEquals(RunOutcome.Failed(), report.outcome)
         assertNull(report.link, "未投递引擎 → 如实无关联")
         assertTrue(engines[0].executed.isEmpty(), "门禁拒绝不得投递引擎")
     }

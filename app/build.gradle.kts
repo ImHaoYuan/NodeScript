@@ -26,6 +26,22 @@ android {
         // 单调递增，并同步 §13/§14 的交付轨。
         versionCode = 1
         versionName = "0.1.0"
+        // ABI 面：**只留 arm64-v8a**（backlog B10，2026-10-06 拍板）。
+        //
+        // 不加这条时 APK 声明四个 ABI（`aapt2 dump badging` 实读 arm64-v8a / armeabi-v7a /
+        // x86 / x86_64）—— 后三个**不是引擎带来的**，是 `libandroidx.graphics.path.so`
+        // 贡献的，而引擎四件（libnoden / libnode / libc++_shared / libopencv）只在
+        // `lib/arm64-v8a/`。声明面比交付面宽三个 ABI = 对 32 位与 x86 设备承诺了跑不了的东西。
+        //
+        // 取「只留 arm64」而不是「维持四个」的理由：契约 §3/§13 已把代价写明
+        // （「放弃 32 位旧机」），而「装得上、能看界面、一跑脚本才以 ERR_FILE_NOT_FOUND
+        // 告终」不是更友好的降级 —— 它把一次安装期就能给的答复推迟到用户配好任务之后。
+        // 代价照单全收：32 位设备与 x86_64 模拟器**装不上**（Play 也按此过滤）。
+        // **P1 补 x86_64（§13 兼容矩阵）时，把该 ABI 加回这一行即可** —— 届时引擎产物
+        // 与 `prepareEngineNativeLibs` 的 ABI 子目录要同步多一份，别只改这里。
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

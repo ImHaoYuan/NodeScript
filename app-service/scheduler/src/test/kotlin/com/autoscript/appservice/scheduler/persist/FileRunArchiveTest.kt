@@ -124,6 +124,44 @@ class FileRunArchiveTest {
     }
 
     @Test
+    fun `B11 诊断字段往返：退出码与崩溃摘要落盘后可 replay`() = runBlocking {
+        val archive = FileRunArchive(dir)
+        val crashed = RunRecord(
+            id = 77, projectId = "p1", scriptPath = "a.js", runNonce = "n77",
+            state = RunState.CRASHED,
+            startedAtMillis = 10, finishedAtMillis = 20,
+            exitCode = 3,
+            crashSummary = "TypeError: x is not a function\n    at a.js:1",
+        )
+        archive.put(crashed, EngineRunLink(7, 77))
+        archive.close()
+
+        val second = FileRunArchive(dir)
+        assertEquals(crashed, second.record(77), "两个诊断字段随记录往返（含换行的摘要不被 JSON 转义破坏）")
+        assertEquals(3, second.record(77)!!.exitCode)
+        second.close()
+    }
+
+    @Test
+    fun `B11 向后兼容：旧行（无诊断字段）replay 不炸且两字段为 null`() = runBlocking {
+        // 旧版本写的行：整行没有 exitCode / crashSummary 两个键 —— 必须仍能 parse（append 式新增）
+        Files.write(
+            dir.resolve("run-archive.jsonl"),
+            (
+                """{"op":"put","id":5,"projectId":"p1","scriptPath":"a.js","runNonce":"n5",""" +
+                    """"state":"CRASHED","startedAt":1,"finishedAt":2,"intentRunId":3}""" + "\n"
+                ).toByteArray(),
+        )
+        val archive = FileRunArchive(dir)
+        val rec = archive.record(5)!!
+        assertEquals(RunState.CRASHED, rec.state, "旧行照常解析")
+        assertNull(rec.exitCode, "旧行没有退出码 → 如实 null（不是 0）")
+        assertNull(rec.crashSummary, "旧行没有摘要 → 如实 null")
+        assertEquals(EngineRunLink(3, 5), archive.link(5))
+        archive.close()
+    }
+
+    @Test
     fun `裁定失败不落盘：拒绝写入后 replay 无残留`() = runBlocking {
         val archive = FileRunArchive(dir)
         archive.put(run(1, RunState.SUCCEEDED), EngineRunLink(1, 1))

@@ -9,6 +9,8 @@ import com.autoscript.appservice.scheduler.core.RunOutcome
 import com.autoscript.appservice.scheduler.core.ScreenGuarantee
 import com.autoscript.appservice.scheduler.core.TriggerSource
 import com.autoscript.domain.engine.EngineId
+import com.autoscript.domain.engine.EngineStatus
+import com.autoscript.domain.engine.RunSummary
 import com.autoscript.domain.engine.StopResult
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -39,11 +41,15 @@ class ControllerRunDispatcherTest {
         failOnExecute: Boolean = false,
         stopResult: StopResult = StopResult.Clean,
         autoExitAfterMillis: Long? = 50,
+        summary: RunSummary? = null,
+        statusAfterAutoExit: EngineStatus = EngineStatus.STOPPED,
     ): Triple<ControllerRunDispatcher, RuntimeController, MutableList<FakeEngineForDispatcher>> {
         val engines = MutableList(capacity) {
             FakeEngineForDispatcher(EngineId(it), autoExitAfterMillis = autoExitAfterMillis).also { e ->
                 e.failOnExecute = failOnExecute
                 e.stopResult = stopResult
+                e.summaryToReturn = summary
+                e.statusAfterAutoExit = statusAfterAutoExit
             }
         }
         val pool = FixedEnginePool({ id -> engines[id.poolIndex] }, capacity)
@@ -70,7 +76,7 @@ class ControllerRunDispatcherTest {
     @Test
     fun `屏幕门禁拒绝回 Failed 且不占槽`() = runBlocking {
         val (d, controller, engines) = rig(gate = ScreenGate { ScreenGateDecision.Deny("熄屏") })
-        assertEquals(RunOutcome.Failed, d.dispatch(pending()))
+        assertEquals(RunOutcome.Failed(), d.dispatch(pending()))
         assertTrue(engines[0].executed.isEmpty(), "门禁拒绝不得投递引擎")
         assertTrue(controller.activeRunIds().isEmpty())
     }
@@ -102,10 +108,26 @@ class ControllerRunDispatcherTest {
     }
 
     @Test
-    fun `软停超时回 Failed`() = runBlocking {
-        val (d, _, _) = rig(stopResult = StopResult.TimedOut(partial = false))
+    fun `软停超时回 Failed 且带进程摘要`() = runBlocking {
         // 脚本自退出（STOPPED）后 release 走 quiesce → TimedOut → StopTimeout → Failed
-        assertEquals(RunOutcome.Failed, d.dispatch(pending()))
+        val summary = RunSummary(exitCode = 1, stderrTail = "Error: 软停没排净")
+        val (d, _, _) = rig(stopResult = StopResult.TimedOut(partial = false), summary = summary)
+        assertEquals(
+            RunOutcome.Failed(exitCode = 1, crashSummary = "Error: 软停没排净"),
+            d.dispatch(pending()),
+            "B11：进程侧摘要摊平进 outcome（scheduler 不许依赖 domain.engine，见 RunOutcome KDoc）",
+        )
+    }
+
+    @Test
+    fun `崩溃结算 Crashed 带进程摘要与退出码`() = runBlocking {
+        val summary = RunSummary(exitCode = 3, stderrTail = "TypeError: x is not a function")
+        // 引擎自报 CRASHED（脚本抛错）→ awaitCompletion 走 settleKilled → Completed.Killed(summary)
+        val (d, _, _) = rig(summary = summary, statusAfterAutoExit = EngineStatus.CRASHED)
+        val outcome = d.dispatch(pending())
+        val crashed = assertInstanceOf(RunOutcome.Crashed::class.java, outcome)
+        assertEquals(3, crashed.exitCode, "退出码随 outcome 出来")
+        assertEquals("TypeError: x is not a function", crashed.crashSummary, "stderr 尾部随 outcome 出来")
     }
 
     @Test

@@ -133,8 +133,16 @@ EXPORTED="$("$NM" -D "$LIBNODE" | awk '$2=="T"{print $3}' | grep -x '_ZN4node5St
 step "node::Start 三方一致: $DECLARED"
 
 step "addon 导出 napi_register_module_v1"
-"$NM" -D "$OUT/bridge_native.node" | grep -q 'napi_register_module_v1' \
-  || fail "bridge_native.node 缺 napi_register_module_v1"
+# **不用 `nm … | grep -q`**：脚本开了 `pipefail`，而 `grep -q` 命中即退 → nm 还在写
+# （符号表 150KB+，远超 64KB 管道缓冲）就被 SIGPIPE 打死 → 管道状态 141 ≠ 0 →
+# `|| fail` 当场误报。实测复现率约 1/5（nm 写完与 grep 退出的竞态），且**只**在
+# 这份产物上偶发 —— 是"看起来像符号缺失"的假红。改成先把符号表收进变量再匹配：
+# 无管道、无 SIGPIPE、判定确定（`case` 里是纯字符串匹配）。
+addon_syms="$("$NM" -D "$OUT/bridge_native.node")"
+case "$addon_syms" in
+  *napi_register_module_v1*) : ;;
+  *) fail "bridge_native.node 缺 napi_register_module_v1" ;;
+esac
 
 step "装载闭包契约（NEEDED + RUNPATH，2026-09-29 真机实证口径）"
 # 反例即失败：曾经"看着对"的两个形态在真机上分别栽在

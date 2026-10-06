@@ -237,7 +237,8 @@ class RuntimeControllerTest {
         )
         engines[0].stopResult = StopResult.TimedOut(partial = false)
         engines[0].statusToReturn = EngineStatus.QUIESCING // 四步 quiesce 未净
-        assertEquals(RuntimeController.Completed.StopTimeout, c.awaitCompletion(started.runId))
+        val completed = c.awaitCompletion(started.runId)
+        assertEquals(RuntimeController.Completed.StopTimeout(engines[0].summaryToReturn), completed, "StopTimeout 带 settle 时点的引擎摘要")
         assertEquals(PoolStats(1, free = 1, busy = 0), c.stats())
     }
 
@@ -253,7 +254,13 @@ class RuntimeControllerTest {
             c.start(PoolAcquireRequest("p2", "b.js")),
         )
         engines[0].statusToReturn = EngineStatus.CRASHED
-        assertEquals(RuntimeController.Completed.Killed, c.awaitCompletion(a.runId))
+        val summary = com.autoscript.domain.engine.RunSummary(exitCode = 137, stderrTail = "FATAL: oom")
+        engines[0].summaryToReturn = summary
+        assertEquals(
+            RuntimeController.Completed.Killed(summary),
+            c.awaitCompletion(a.runId),
+            "Killed 带 settle 时点从引擎侧取回的进程摘要",
+        )
         assertEquals(setOf(b.runId), c.activeRunIds(), "只收走本 run 的槽位")
         assertEquals(PoolStats(2, free = 1, busy = 1), c.stats())
         c.stop(b.runId)
@@ -263,7 +270,11 @@ class RuntimeControllerTest {
     @Test
     fun `awaitCompletion 未知 runId 回 UnknownRun`() = runBlocking {
         val (c, _) = controller()
-        assertEquals(RuntimeController.Completed.UnknownRun, c.awaitCompletion(999L))
+        assertEquals(
+            RuntimeController.Completed.UnknownRun(null),
+            c.awaitCompletion(999L),
+            "未知 runId：无句柄可问，摘要如实 null",
+        )
     }
 
     @Test

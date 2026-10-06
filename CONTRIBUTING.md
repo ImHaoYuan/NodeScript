@@ -102,9 +102,15 @@ type(scope): 摘要
 - 从 `main` 切分支开发（`feat/…`、`fix/…`、`docs/…`），PR 回 `main`。
 - **不要为了触发 CI 而直推 `main`**：push 到分支、开 PR 即跑全套门。
 - PR 描述里写清：改了哪些文档、跑了哪道门、结果如何（红过就说红过）。
-- Android 构建与 Lint（`./gradlew :app:assembleDebug` / `:app:lintDebug`）已在 PR 门里
-  （`ci.yml` 的 `android-build` job）。注意 CI 出的 APK **不含引擎二进制**（那些产物不在 git，
-  装配期缺位只 warn）——改了装配面仍建议本机跑一次并说明。
+- Android 构建与 Lint（`./gradlew lintDebug` / `:app:assembleDebug`）已在 PR 门里
+  （`ci.yml` 的 `android-build` job）。**那个 job 出的 APK 不含引擎二进制**（那些产物不在 git，
+  装配期缺位只 warn）—— 它证明的是「装配链通不通」，不是「设备上跑不跑得起来」。
+  「**真形态 APK**」（四件引擎 .so + addon + npm 素材都在包里）由独立 workflow
+  [`.github/workflows/engine-native.yml`](.github/workflows/engine-native.yml) 出：它自己跑
+  `build-native.sh` 编 `noden`/`bridge_native.node`，再跨 workflow 取 node-slice / libopencv 的
+  artifact 起 `assembleDebug`，末尾逐件断言（**不在 PR 门里** —— 分钟级，见
+  [`docs/backlog.md`](docs/backlog.md) B5 与 [`docs/design-decisions.md`](docs/design-decisions.md)）。
+  改了装配面仍建议本机跑一次并说明。
 
 ## 安全问题
 

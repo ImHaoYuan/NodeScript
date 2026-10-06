@@ -32,6 +32,10 @@ data class RunRecord(
     val state: RunState,
     val startedAtMillis: Long? = null,
     val finishedAtMillis: Long? = null,
+    /** 进程退出码（backlog B11 诊断面；从引擎侧摘要折入；未知为 null）。 */
+    val exitCode: Int? = null,
+    /** 崩溃摘要：stderr 尾部（utf-8，截断见 [com.autoscript.domain.engine.RunSummary.MAX_DETAIL]）。 */
+    val crashSummary: String? = null,
 )
 
 enum class RunState { PENDING, RUNNING, SUCCEEDED, FAILED, CRASHED, CANCELLED }

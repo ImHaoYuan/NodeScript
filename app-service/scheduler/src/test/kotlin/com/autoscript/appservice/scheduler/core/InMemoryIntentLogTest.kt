@@ -42,7 +42,7 @@ class InMemoryIntentLogTest {
         val log = log()
         val a = log.appendStart("p", "a.js", "nonce-1", TriggerSource.EVENT, 5000)
         log.commit(a.runId, RunOutcome.Succeeded)
-        val again = log.commit(a.runId, RunOutcome.Failed)
+        val again = log.commit(a.runId, RunOutcome.Failed())
         assertEquals(RunOutcome.Succeeded, again?.outcome, "首次 COMMIT 结果不可被二次覆盖")
         assertTrue(!log.uncommitted().any { it.runId == a.runId })
     }

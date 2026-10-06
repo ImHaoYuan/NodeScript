@@ -3,6 +3,7 @@ package com.autoscript.appservice.runtime
 import com.autoscript.domain.bridge.HandleRef
 import com.autoscript.domain.engine.EngineStatus
 import com.autoscript.domain.engine.KillCause
+import com.autoscript.domain.engine.RunSummary
 import com.autoscript.domain.engine.StopResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -238,9 +239,12 @@ class RuntimeController(
      */
     sealed interface Completed {
         data object StoppedClean : Completed   // 优雅退出
-        data object StopTimeout : Completed    // 软停超时（已 kill 兜底）
-        data object Killed : Completed         // 看门狗/killAll 强杀
-        data object UnknownRun : Completed     // 未知 runId（已结算/从未存在）
+        /** 软停超时（已 kill 兜底）——失败类：带 settle 时点从引擎侧取回的进程摘要（backlog B11）。 */
+        data class StopTimeout(val summary: RunSummary? = null) : Completed
+        /** 看门狗/killAll 强杀、以及自然 CRASHED 结算——失败类：带进程摘要（同 [StopTimeout]）。 */
+        data class Killed(val summary: RunSummary? = null) : Completed
+        /** 未知 runId（已结算/从未存在）——失败类：无句柄可问，摘要如实 null。 */
+        data class UnknownRun(val summary: RunSummary? = null) : Completed
         data object TimedOut : Completed       // 等待超时（仍在途，调用方决定后续）
     }
 
@@ -250,7 +254,7 @@ class RuntimeController(
      * FakeEngine 语义下 stop 后即 STOPPED，可直接结算。
      */
     suspend fun awaitCompletion(runId: Long, timeoutMillis: Long = 30_000): Completed {
-        val handle = guard.withLock { active[runId] } ?: return Completed.UnknownRun
+        val handle = guard.withLock { active[runId] } ?: return Completed.UnknownRun(null)
         val deadline = System.currentTimeMillis() + timeoutMillis
         while (true) {
             val status = try {
@@ -365,28 +369,38 @@ class RuntimeController(
         const val POLL_INTERVAL_MILLIS: Long = 200
     }
 
-    /** 完成结算：release 槽位 + 归档在途表（与 stop/killAll 串行，经 guard）。 */
+    /**
+     * 完成结算：release 槽位 + 归档在途表（与 stop/killAll 串行，经 guard）。
+     *
+     * 摘要取在**句柄收走之前**：槽位还在本 run 手里时才能问引擎进程（[ScriptEngine.lastRunSummary]），
+     * release 之后句柄已回池、同一引擎可能已被下一次 execute 复用 —— 那时问到的就是别的 run 的摘要。
+     */
     private suspend fun settleDone(runId: Long): Completed {
         val handle = guard.withLock {
             startedAt.remove(runId)
             active.remove(runId)
-        } ?: return Completed.UnknownRun
+        } ?: return Completed.UnknownRun(null)
         heartbeats.forget(runId)
+        val summary = handle.slot.engine.lastRunSummary()
         return when (pool.release(handle)) {
             StopResult.Clean -> Completed.StoppedClean
-            is StopResult.TimedOut -> Completed.StopTimeout
+            is StopResult.TimedOut -> Completed.StopTimeout(summary)
         }
     }
 
-    /** 强杀结算：只收走本 run 的槽位（release 走 quiesce+kill 兜底），不碰其他在途。 */
+    /**
+     * 强杀结算：只收走本 run 的槽位（release 走 quiesce+kill 兜底），不碰其他在途。
+     * 摘要同样在收走前取（见 [settleDone] KDoc 同一窗口口径）。
+     */
     private suspend fun settleKilled(runId: Long): Completed {
         val handle = guard.withLock {
             startedAt.remove(runId)
             active.remove(runId)
-        } ?: return Completed.UnknownRun
+        } ?: return Completed.UnknownRun(null)
         heartbeats.forget(runId)
+        val summary = handle.slot.engine.lastRunSummary()
         pool.release(handle)
-        return Completed.Killed
+        return Completed.Killed(summary)
     }
 
     /** 仅 RUNNING 判活的看门狗喂样口径（SUSPENDED 不存在于本状态机，见 EngineStatus）。 */

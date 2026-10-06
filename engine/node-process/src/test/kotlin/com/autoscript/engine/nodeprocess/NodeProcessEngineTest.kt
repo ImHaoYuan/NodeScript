@@ -6,6 +6,7 @@ import com.autoscript.domain.engine.EngineId
 import com.autoscript.domain.engine.EngineRunRequest
 import com.autoscript.domain.engine.EngineStatus
 import com.autoscript.domain.engine.KillCause
+import com.autoscript.domain.engine.RunSummary
 import com.autoscript.domain.engine.StopResult
 import java.nio.file.Files
 import java.nio.file.Path
@@ -58,6 +59,8 @@ class NodeProcessEngineTest {
         var alive: Boolean = true,
         var exitCode: Int? = null,
     ) : SpawnedProcess {
+        /** 假缝捕获的 stderr 尾部（`SpawnedProcess.stderrTail` 的返回值，测试驱动态字段）。 */
+        var capturedStderrTail: String = ""
         var destroyCalls = 0
         var destroyForciblyCalls = 0
         /** destroy() 后是否退（false = 忽略 SIGTERM，用于 TimedOut 案）。 */
@@ -85,6 +88,8 @@ class NodeProcessEngineTest {
         }
 
         override fun waitFor(timeoutMillis: Long): Boolean = !alive
+
+        override val stderrTail: String get() = capturedStderrTail
     }
 
     private fun writeScript(rel: String = "a.js", body: String = "process.exit(0)"): Path {
@@ -243,14 +248,33 @@ class NodeProcessEngineTest {
         // 自然退出码 0 → STOPPED；pid 随退出回 null（receipt 快照另存，见 §8.4）
         launcher.nextProcess.alive = false
         launcher.nextProcess.exitCode = 0
+        launcher.nextProcess.capturedStderrTail = "启动噪声，不是病因\n"
         assertEquals(EngineStatus.STOPPED, runBlocking { e.status() })
         assertNull(e.pid, "已退出 pid 回 null（§8.4 契约）")
+        // exit 0 也快照摘要（RunSummary(0, tail) 无害）——只有「无事实」才回 null（backlog B11）
+        assertEquals(
+            RunSummary(exitCode = 0, stderrTail = "启动噪声，不是病因\n"),
+            runBlocking { e.lastRunSummary() },
+            "干净退出也留摘要：诊断读口要看「上次跑了什么」，状态归类不依赖它",
+        )
 
-        // 自然退出码 ≠0 → CRASHED（脚本抛错/宿主 exit 2/3/4 都走这条）
-        val l2 = FakeLauncher().also { it.nextProcess = FakeProcess(pid = 9, alive = false, exitCode = 3) }
+        // 自然退出码 ≠0 → CRASHED（脚本抛错/宿主 exit 2/3/4 都走这条）；带 stderr 尾部摘要
+        val l2 = FakeLauncher()
+            .also { it.nextProcess = FakeProcess(pid = 9, alive = false, exitCode = 3) }
+            .also { it.nextProcess.capturedStderrTail = "TypeError: x is not a function" }
         val e2 = engine(l2)
         runBlocking { e2.execute(request()) }
         assertEquals(EngineStatus.CRASHED, runBlocking { e2.status() }, "自然非零退出 = CRASHED")
+        assertEquals(
+            RunSummary(exitCode = 3, stderrTail = "TypeError: x is not a function"),
+            runBlocking { e2.lastRunSummary() },
+            "CRASHED 时 lastRunSummary 带退出码 + stderr 尾部（病因的权威落点）",
+        )
+        // 下次 execute 清空旧摘要（新执行体从零计）
+        val l3 = FakeLauncher()
+        val e3 = engine(l3)
+        runBlocking { e3.execute(request()) }
+        assertNull(runBlocking { e3.lastRunSummary() }, "execute 后未退净 = 无事实，旧摘要清空")
     }
 
     @Test

@@ -311,7 +311,7 @@ spawn/打包），JS 目录独缺，脚本 `ERROR_CODES.includes('ERR_IO')` 为 
 > `SO_PEERCRED` 通，facade→addon→桥→宿主全链 6 帧往返（生产布局 `lib/arm64-v8a/` +
 > 无 `LD_LIBRARY_PATH`）；失败形态按设计：addon 缺位 = 降级照跑，socket 给错 = exit 3。
 > **未覆盖**：16KB 页机（该机 PAGE_SIZE=4096）、非 root 的 SELinux enforcing 上下文、
-> `nativeLibraryDir` 提取路径、targetSdk 35 的 app 数据区 exec 策略 —— 仍需 16KB 模拟器
+> `nativeLibraryDir` 提取路径、targetSdk 36 的 app 数据区 exec 策略 —— 仍需 16KB 模拟器
 > 镜像或真机。`.so` strip 归 CI 打包管线。
 
 **符号面（动态 T，稳定 ABI）：**
