@@ -114,6 +114,7 @@ class ModuleGraphTest {
         ":platform:system" to setOf(":domain"),
         // 呈现层只认 :domain（HostSummary 读口 + DTO）；反向依赖 :app 会成环。
         ":ui" to setOf(":domain"),
+        ":bridge:treesitter" to emptySet(),
     )
 
     @Test
@@ -235,3 +236,4 @@ class ModuleGraphTest {
         error("未找到仓库根（上溯 ${System.getProperty("user.dir")} 未见 settings.gradle.kts）")
     }
 }
+// 测试完整性自检已在上面的 ModuleGraphTest 里
