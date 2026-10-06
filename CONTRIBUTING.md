@@ -8,8 +8,8 @@
 1. 从 `main` 切分支：`git checkout -b feat/…`（命名与 PR 纪律见下「分支与 PR」）。
 2. 改代码。**只有动契约语义**（`docs/design/*.md` 描述的行为）时才需要先读对应分卷；
    纯 bug 修 / 文案修不用。
-3. 跑门（与 CI 逐字同源，全量命令见下「提交前必跑的门」；最短集 = 文档链接门 +
-   13 个 JVM 测试任务 + `npm --prefix bridge/js test`）。
+3. 跑门（与 CI 逐字同源；最短集 = 文档链接门 + 13 个 JVM 测试任务 +
+   `npm --prefix bridge/js test`，命令见 [`README.md`](README.md) 测试段）。
 4. push 分支、开 PR（描述按模板勾，**结果如实写** —— 红过就说红过）。
 5. CI 绿了等评审合并。**不要为触发 CI 直推 `main`**。
 
@@ -71,20 +71,17 @@ type(scope): 摘要
 
 ## 提交前必跑的门
 
-与 CI **逐字同源**（任务清单的事实来源是 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)）：
+与 CI **逐字同源**。**命令清单不在这里**（README 的「测试」段有可直接复制的全量块，
+任务清单的事实来源是 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) ——
+本仓有过「同一份命令写两遍、改一处忘另一处」的先例）。改代码前请确认跑过这五件：
 
-```bash
-npm --prefix bridge/js ci && npm --prefix bridge/js run build   # :app 随包任务要 dist
-./gradlew :domain:test :bridge:java:test :app-service:runtime:test :app-service:scheduler:test \
-  :app-service:script-repo:testDebugUnitTest :app-service:permission-center:test \
-  :app-service:packager:test :app-service:npm:test :platform:capabilities:testDebugUnitTest \
-  :platform:system:testDebugUnitTest :engine:node-process:testDebugUnitTest \
-  :ui:testDebugUnitTest :app:testDebugUnitTest
-npm --prefix bridge/js test          # facade（TS）单测
-npm --prefix bridge/js run gen:wire && git diff --exit-code   # 改过 bridge/schema 就要跑（生成物漂移即红）
-npm --prefix bridge/js run docs:api && git diff --exit-code   # 改过 bridge/js 的公开注释/签名就要跑（typedoc → docs/api/，漂移即红）
-bash .github/scripts/check-doc-links.sh   # 文档相对链接门
-```
+| 门 | 何时必跑 |
+|---|---|
+| JVM 单测（13 个任务，全量命令见 [`README.md`](README.md) 测试段） | 每次 |
+| `npm --prefix bridge/js test` | 每次 |
+| `npm --prefix bridge/js run gen:wire && git diff --exit-code` | 改过 `bridge/schema` |
+| `npm --prefix bridge/js run docs:api && git diff --exit-code` | 改过 `bridge/js` 的公开注释/签名 |
+| `bash .github/scripts/check-doc-links.sh` | 每次（秒级） |
 
 - **`skipped` / `aborted` 不算绿**：守卫在 `build-logic` 的 `autoscript.test-guard` 里，测试出现跳过即红。
   设计上就该环境门禁的少数 E2E 在 `TestGuard.ENV_GATED` 名单内；其余要放行得显式 `-PallowSkipped=<类名>`，

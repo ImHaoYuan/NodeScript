@@ -44,15 +44,25 @@
 ## 构建
 
 - **前置工具一律走环境变量约定，机器路径不写进本文件**：`JAVA_HOME`（JDK 17）、`ANDROID_HOME`（或仓库根 `local.properties` 的 `sdk.dir=`，已 gitignore；需 platform-35 + build-tools 35 + platform-tools）、`ANDROID_NDK_HOME`（只在编 C++ 时要）。本机（这台开发机）三处都已配好，**具体值见 `CLAUDE.local.md`**（不入库、已 gitignore）—— 别再往跟踪文件里写 `/root/…` 这类路径。
-  **CI 同款 `./gradlew …` 命令可本机直跑**（13 个测试任务，2026-09-30 实测全绿）——CI 仍是权威门，但本机已能同源复现。**本机快速门 = 同一条 `./gradlew` 命令**（`tools/jvm-test*` 旁路已删，
-  2026-09-30）：约定插件 `autoscript.test-guard` 把「skipped/aborted ≠ 绿」守卫做进 Gradle，本机与 CI 同一口径、无第二口径脚本。
-- **CI 验证门**：`.github/workflows/ci.yml` —— JVM 单测（13 个测试任务，即全部带 `src/test`
-  的模块 —— 「15 个模块」「13 个测试任务」两个数**从 `settings.gradle.kts` 的 include 与
-  `ci.yml` 的 `./gradlew` 行派生**，`:domain` 的 `ModuleGraphTest` 守着（文档里写了数字就必须
-  等于派生值）；清单：`:domain`、`:bridge:java`、`:app-service:{runtime,scheduler,script-repo,permission-center,packager,npm}`、`:platform:{capabilities,system}`、`:engine:node-process`、`:ui`、`:app`）+ archUnit + `bridge/js` 的 npm test + **文档链接门**（`docs-check` job = `bash .github/scripts/check-doc-links.sh`，扫全部 `*.md` 的 markdown 相对链接是否指向存在的文件；本机同一条命令可跑，零依赖秒级），跑在 ubuntu-latest（JDK 17 + Gradle 8.9 + Android SDK license + Node 24）。
-  **Android 构建与 Lint 已进 PR 门**（2026-10-01 批 5 / B1）：`android-build` job = `./gradlew lintDebug`（**全模块**：单跑 `:app` 看不见库模块的 NewApi，`checkDependencies` 缺省 false —— 首次全模块跑就抓出 13 处 `Stream#toList` API34 / `getMainExecutor` API28 级真错）+ `./gradlew :app:assembleDebug`，APK 与 lint 报告上传 artifact。**该 APK 不含引擎二进制**（noden/libnode/libopencv/npm 素材都不在 git，装配期「缺位只 warn」）—— 补齐路径记在 `docs/backlog.md` 的 **B5**。
-  **真 npm E2E 走 nightly**：`.github/workflows/e2e-nightly.yml`（`schedule` + `workflow_dispatch`）跑**与 ci.yml 逐字同一条命令、只是不带 `-PskipNpmE2E`**（三条真 npm 路径：`HostNodeNpmE2ETest` / `NpmCacheSeedDeployerTest` / `P0LoopbackTest`），跑完由 `bash .github/scripts/check-e2e-ran.sh` **验尸**：缺 XML / `tests=0` / `skipped>0` 都红 —— 因为 `assumeTrue` 诚实跳过在本机对、在 CI 上会退化成"一片绿的假通过"。宿主 npm 路径由测试源集的 `HostNpm` 现查（`npm root -g` → node prefix 推 → 老静态位兜底），不再写死 `/usr/lib/node_modules/npm`。
-  **`bridge/js/dist` 是构建产物**（2026-09-30 步骤 7 出库、不入 git）：jvm-tests job 前置 `npm --prefix bridge/js ci && run build`（`:app` bridgeDist 随包任务与 e2e 测试要 tsc 产物），js-tests job 另跑 `npm run gen:wire && git diff --exit-code` 门（`bridge/schema/wire.schema.json` → 两份生成物同步）。
+  **本机与 CI 同一口径**：跑的就是 ci.yml 里那条 `./gradlew`（全量命令见
+  [`README.md`](README.md) 测试段），没有第二套脚本；「skipped/aborted ≠ 绿」的守卫做在约定插件
+  `autoscript.test-guard` 里。
+- **CI 门**：清单的事实来源是 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) 本身
+  （**本文件不复述任务名与命令** —— 复述过的都漂了）。要知道每道门「为什么存在、红了意味着
+  什么」，看下面这张表；要改门，直接读 yml。跑在 ubuntu-latest（JDK 17 + Gradle 8.9 +
+  Android SDK license + Node 24）。
+
+  | job | 干什么 | 不变式（改它之前先读这条） |
+  |---|---|---|
+  | `jvm-tests` | 13 个测试任务的 JVM 单测 + archUnit + detekt + jacoco 报告 | 「15 个模块」「13 个测试任务」两个数**从 `settings.gradle.kts` 的 include 与 `ci.yml` 的 `./gradlew` 行派生**，`:domain` 的 `ModuleGraphTest` 守着 —— 文档里写了数字就必须等于派生值。前置 `npm --prefix bridge/js ci && run build`：`:app` 的随包任务硬依赖 tsc 产物（`bridge/js/dist` **不入 git**） |
+  | `js-tests` | `bridge/js` 的 npm test + `gen:wire && git diff --exit-code` | wire 生成物两份必须与 `bridge/schema/wire.schema.json` 同步，漂移即红 |
+  | `docs-check` | `bash .github/scripts/check-doc-links.sh` | 全部 `*.md` 的相对链接必须指向存在的文件；**扫到 0 条也红**（门没跑起来 ≠ 门绿了） |
+  | `android-build` | `./gradlew lintDebug` + `:app:assembleDebug`，两者上传 artifact | lint **不加模块前缀**：单跑 `:app` 看不见库模块的 NewApi（`checkDependencies` 缺省 false）。**该 APK 不含引擎二进制**（都不在 git，装配期「缺位只 warn」）—— 补齐路径记在 `docs/backlog.md` 的 B5 |
+
+- **真 npm E2E 走 nightly**：`.github/workflows/e2e-nightly.yml` 跑**与 ci.yml 逐字同一条命令、
+  只是不带 `-PskipNpmE2E`**，跑完由 `bash .github/scripts/check-e2e-ran.sh` **验尸**：缺 XML /
+  `tests=0` / `skipped>0` 都红 —— 因为 `assumeTrue` 诚实跳过在本机对、在 CI 上会退化成
+  「一片绿的假通过」。这条纪律是本仓「skipped ≠ 绿」的源头，别绕过它。
 - **可用 GitHub Actions 跑远端 CI**：远端 `origin` = `git@github.com:Ventus-Pluviam/NodeScript.git`（**公开仓**，SSH 可推；2026-10-02 实测 `gh api repos/… --jq .visibility` = `public`，原写「私有仓」是过期口径）。`ci.yml` 在 `push→main` 与 `pull_request` 时触发——把分支 `git push origin <分支>` 后开 PR 即跑全套门（PR 门 = JVM 单测 + archUnit + npm test + 文档链接门 + Android 构建/Lint；真 npm E2E 只在 nightly），不用等合入 main 才知道红绿。本机 `gh` token 若无该仓权限（`gh pr create` 报 404/解析不到仓库），用 push 后远端打印的 PR 链接手动开 PR；
   看不到 runs 输出时以本机 `./gradlew` 同源复现为准。**不要为触发 CI 直推 main**。
 - **本机快速门**：与 CI **逐字同源**的 `./gradlew`（ci.yml L 任务行），单模块跑 `./gradlew :<模块>:test`（纯 JVM）或 `:<模块>:testDebugUnitTest`（android 模块）。守卫在约定插件里：测试出现 skipped/aborted 即红（`TestGuard.ENV_GATED` 只放行设计上环境门禁的 E2E；其余用 `-PallowSkipped=<类名>` 显式放行）。**`:ui`/`:app` 同源直跑**（`./gradlew :ui:testDebugUnitTest :app:testDebugUnitTest`）。
