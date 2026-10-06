@@ -93,6 +93,49 @@ class NpmOfflineBundleImporterTest {
         assertFalse(Files.exists(escaped), "绝不允许写到 bundle 之外的路径：$escaped")
     }
 
+    /**
+     * 路径检疫三类形态逐条钉住（2026-10-06 补第三类）。
+     *
+     * 前两类原本就有实现、没测试；第三类（盘符）原本**只有 KDoc 承诺、没有实现** ——
+     * 这条测试就是那次「注释 > 实现」的回归闸：三类各来一个正例，再拿几个合法名确认
+     * 不会误伤（检疫过宽会把正常 bundle 整批拒掉，那是另一种坏法）。
+     */
+    @Test
+    fun `路径检疫三类形态：绝对路径、反斜杠、盘符一律拒，合法名放行`() {
+        // 拒：绝对路径、反斜杠逃逸、`..` 段（含深藏在中段的）
+        for (bad in listOf(
+            "/etc/passwd",
+            "\\\\server\\share\\x",
+            "../escape.bin",
+            "_cacache/content-v2/sha512/aa/bb/../../../../escape.bin",
+            "..",
+        )) {
+            assertTrue(NpmOfflineBundleImporter.isUnsafePath(bad), "该拒：$bad")
+        }
+        // 拒：盘符形态（`C:foo` 是驱动器相对路径，前两类都拦不住）
+        for (bad in listOf("C:foo", "C:/foo", "c:\\foo", "Z:../x")) {
+            assertTrue(NpmOfflineBundleImporter.isUnsafePath(bad), "盘符该拒：$bad")
+        }
+        // 放行：cacache 真实条目名与含点/含冒号但不成盘符的合法名
+        for (ok in listOf(
+            "_cacache/content-v2/sha512/ab/cd/" + "0".repeat(124),
+            "_cacache/index-v5/de/ad/beef",
+            "lib/1.2.3/foo:bar.js",
+            "a.b.c",
+        )) {
+            assertFalse(NpmOfflineBundleImporter.isUnsafePath(ok), "不该拒：$ok")
+        }
+    }
+
+    @Test
+    fun `盘符条目在 import 里被点名拒收，不静默放过`() {
+        val payload = "z".toByteArray()
+        val zip = bundle(payload, extraEntry = "D:evil.bin" to "pwned".toByteArray())
+        val r = NpmOfflineBundleImporter.import(zip, cacheDir)
+        assertTrue(r.rejected.any { it == "D:evil.bin" }, "盘符条目必须进 rejected：${r.rejected}")
+        assertEquals(1, r.imported, "合法条目照常导入")
+    }
+
     @Test
     fun `非 content-v2 条目忽略（index-v5 不导入）`() {
         val payload = "y".toByteArray()

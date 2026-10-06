@@ -106,11 +106,28 @@ object NpmOfflineBundleImporter {
     /** 只收 content-v2 常规文件；index-v5 由 npm 自己按需生成（导索引 = 导出「缓存出现过的历史」）。 */
     internal fun isCacacheContent(name: String): Boolean = name.startsWith("_cacache/content-v2/")
 
-    /** zip slip 检疫：`..` 段、绝对路径、盘符形态一律拒（cacheDir 之外一字节都不写）。 */
+    /**
+     * zip slip 检疫：`..` 段、绝对路径、盘符形态一律拒（cacheDir 之外一字节都不写）。
+     *
+     * **2026-10-06 修**：KDoc 一直写着「盘符形态」，实现却只查了前两类 —— 注释承诺 >
+     * 实现。第三类补上 `[DRIVE_LETTER]`。危害本来就不大（本导入器从不把条目名当路径用，
+     * 落点由 integrity 十六进制经 [NpmCacheSeedDeployer.contentPath] 反推，见 import()），
+     * 但「注释说的比代码做的多」在安全面上是会误导下一个改这里的人的，按实现补齐注释或
+     * 按注释补齐实现，二选一；这里选后者（拒绝一个 `C:…` 条目零代价）。
+     */
     internal fun isUnsafePath(name: String): Boolean {
         if (name.startsWith("/") || name.contains("\\")) return true
+        if (DRIVE_LETTER.containsMatchIn(name.take(2))) return true
         return name.split('/').any { it == ".." }
     }
+
+    /**
+     * 盘符形态（`C:foo` / `C:/foo`）—— 只判**开头两字符**：`C:foo` 在 Windows 上是
+     * 「C 盘的当前目录」这种驱动器相对路径，不是绝对路径，Java 的 `Paths.get("C:/x")`
+     * 在 Linux 上更只是个普通相对名，所以前两类检查都拦不住它。段中间的冒号不判：
+     * 那不是盘符，误伤合法文件名。
+     */
+    private val DRIVE_LETTER = Regex("^[A-Za-z]:")
 
     private fun integrityBase64Of(hex: String): String {
         val raw = ByteArray(hex.length / 2) { hex.substring(it * 2, it * 2 + 2).toInt(16).toByte() }
