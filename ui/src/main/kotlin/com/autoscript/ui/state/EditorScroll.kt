@@ -2,6 +2,7 @@ package com.autoscript.ui.state
 
 import kotlin.math.ceil
 import kotlin.math.floor
+import kotlin.math.roundToInt
 
 /**
  * 编辑器的**行数几何**：行号槽要几行、右下那颗钮这一下去哪头、它上面那个气泡该显示几。
@@ -46,6 +47,25 @@ object EditorScroll {
     /** 行号槽要留几位数（三位数的文件不该按一位数留宽）。 */
     fun gutterDigits(lines: Int): Int = lines.coerceAtLeast(1).toString().length
 
+    /**
+     * 缩放提交后，让**手指底下那个内容点**留在同一个屏幕位置所需的滚动值。
+     *
+     * 推导（长度单位一律 px）：内容点 `A = 滚动值 + 手指在视口里的坐标`；倍率 `r` 让内容相对
+     * [fixedPx] 那一点线性伸缩 —— 垂直是正文**上留白**（首行上沿）、水平是正文**左内边距**，
+     * 这两截是 dp 内边距、不随字号走，所以它们是不动点：`A' = fixedPx + (A - fixedPx) * r`。
+     * 要让它仍停在原处，滚动值就得是 `A' - 手指在视口里的坐标`。
+     *
+     * 只夹下界（负滚动不存在）：上界要按**新排版**的 `maxValue` 夹，而这里算的时候新排版还没跑，
+     * 自己估一个上界只会估错 —— 上界交给 `ScrollState` 自己。
+     */
+    fun anchoredScroll(
+        oldScrollPx: Int,
+        anchorViewportPx: Float,
+        fixedPx: Float,
+        ratio: Float,
+    ): Int = (fixedPx + (oldScrollPx + anchorViewportPx - fixedPx) * ratio - anchorViewportPx)
+        .roundToInt()
+        .coerceAtLeast(0)
 
     /**
      * 这一下按钮该画成"去最顶"还是"去最底"，以及气泡上那个数字。

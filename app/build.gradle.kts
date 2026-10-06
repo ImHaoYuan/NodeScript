@@ -48,6 +48,26 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+    // 本机「性能包」：R8 全量优化 + 资源收缩，签名用 **debug keystore**。
+    //
+    // 为什么要它（用户口径"优化 apk，看看能不能增强性能"）：debug 包的
+    // `android:debuggable=true` 让 ART 只做校验级编译（跑起来是解释 + JIT），dex 也没过 R8 ——
+    // 同一份代码在 release 形态下快得多（脚本侧那套 JSON/桥解码尤其明显），体积也小一截。
+    //
+    // 为什么签 debug keystore：只为能**直接盖在既有 debug 安装上升级**（同签名、同 versionCode），
+    // 本机不必卸载重装。**这不是发行物** —— 本仓不发行正式版（§18 第 3 项），正式签名轨在
+    // `:app-service:packager`（§14）。真要发行：换自己的 signingConfig，versionCode 递增。
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            signingConfig = signingConfigs.getByName("debug")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+        }
+    }
     sourceSets {
         getByName("main") {
             // 生成位在 build/ 下（不提交二进制副本）；prepareBridgeDistAssets 在资产合并前跑。

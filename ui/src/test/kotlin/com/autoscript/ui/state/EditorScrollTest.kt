@@ -70,6 +70,38 @@ class EditorScrollTest {
     }
 
     @Test
+    fun `缩放提交后_手指底下那个内容点还在原处`() {
+        // 判据不是"算出来等于某个数"，而是**不变量**：锚点那个内容点在缩放前后落在同一个
+        // 视口位置（差一位取整）。这一条错了的表现是"松手瞬间画面跳一下"，极难归因。
+        val oldScroll = 500
+        val anchor = 100f
+        val fixed = 12f
+        val ratio = 1.5f
+        val after = EditorScroll.anchoredScroll(oldScroll, anchor, fixed, ratio)
+        val scaled = fixed + (oldScroll + anchor - fixed) * ratio
+        assertEquals(anchor, scaled - after, 1f)
+    }
+
+    @Test
+    fun `倍率没变时滚动值原地不动`() {
+        assertEquals(500, EditorScroll.anchoredScroll(500, 100f, 12f, 1f))
+    }
+
+    @Test
+    fun `缩放的倍率不作用在不动点上`() {
+        // 锚点正好压在不动点上（内容坐标 = 正文上留白 100px）：那个点不随字号走，
+        // 于是滚动值也一分不动。倍率换成什么都不该影响它。
+        assertEquals(40, EditorScroll.anchoredScroll(40, 60f, 100f, 2.5f))
+        assertEquals(40, EditorScroll.anchoredScroll(40, 60f, 100f, 0.5f))
+    }
+
+    @Test
+    fun `顶着顶部缩小时夹到0`() {
+        // 滚到顶（0）、手指在视口 50px 处、倍率减半：公式给的是负数，滚动值只能到 0。
+        assertEquals(0, EditorScroll.anchoredScroll(0, 50f, 0f, 0.5f))
+    }
+
+    @Test
     fun `往下拖去最顶_数上方的行`() {
         val a = EditorScroll.affordance(40f, viewport, line, 10, towardTop = true)
         assertEquals(EditorJump.TOP, a.jump)
