@@ -4,6 +4,11 @@
 > backlog C6）。各分卷正文原先内嵌的「已落地 / 实测」叙事整段搬来此处，正文侧只留结论 +
 > 指回本节的链接。搬迁**逐字**（不做压缩），行内判据与实测数字一字未改；只删掉了搬运处的空行。
 >
+> **2026-10-06 又搬来两段**（同一口径：契约卷留结论、叙事下沉）：
+> [`18-19-ledger.md`](design/18-19-ledger.md) 的 §19 结语（12 KB 的「下一步 / 已跑通」）
+> 与 [`07-bridge.md`](design/07-bridge.md) §7.7 的第三～六次实测（11 KB 的四轮调参记录）。
+> 两处的原文都**逐字**保留在下面各自的节里。
+>
 > **分卷正文里的锚不用改**：`09-capabilities.md` / `08-execution.md` 等卷写的
 > `design-status.md#实现注记自各分卷外迁逐字保留` 在 [`design-status.md`](design-status.md)
 > 留了一节同名占位指向本文件 —— § 锚与条目文本都没变，只是内容换了文件。
@@ -38,16 +43,19 @@
 按 `grep -c '已落地|已接线|已通桥面|已接生产|已全部落地|实现已接|已落'` **重新测量**
 （下表数字为 2026-10-01 实测，行号一律不写 —— 旧表的行号在折行与外迁后已全部失效）：
 
-| 文件 | 命中行 | 命中字节 | 备注 |
-|---|---|---|---|
-| `13-roadmap-budget.md` | 15 | 4,649 | 该卷主题本就是**进度/预算**，「已落地」是其正文而非错位 |
-| `18-19-ledger.md` | 14 | 3,425 | §18/§19 沿革卷，同理 |
-| `07-bridge.md` | 12 | 1,401 | §7.7 实测记账（「第六次实测」类）自带只追加纪律 |
-| `09-capabilities.md` | 6 | 1,604 | §9.1/§9.4/§9.6 散句，与所在契约条目同段 |
-| `08-execution.md` | 4 | 681 | §8.1/§8.5 残句 |
-| `10-npm.md` | 3 | 770 | §10.5 审批机制与裁决处置 |
-| `12-js-api.md` | 3 | 670 | §12.2 接线散文（表格第四列另有专项口径） |
-| `06-modules.md` | 1 | 474 | 模块表一行 |
+**2026-10-06 重测**（口径同上；`18-19-ledger.md` 与 `07-bridge.md` 的两大段已按本节
+开头的说明搬走，所以这两行的数字掉下来了）：
+
+| 文件 | 命中行 | 备注 |
+|---|---|---|
+| `13-roadmap-budget.md` | 15 | 该卷主题本就是**进度/预算**，「已落地」是其正文而非错位 —— 不迁 |
+| `07-bridge.md` | 11 | §7.7 判据行与最新一轮实测（旧四轮已迁入本文件） |
+| `09-capabilities.md` | 6 | §9.1/§9.4/§9.6 散句，与所在契约条目同段 |
+| `08-execution.md` | 4 | §8.1/§8.5 残句 |
+| `10-npm.md` | 4 | §10.5 审批机制与裁决处置 |
+| `12-js-api.md` | 3 | §12.2 接线散文（表格第四列另有专项口径） |
+| `06-modules.md` | 1 | 模块表一行 |
+| `18-19-ledger.md` | 1 | 只剩 §18 台账里的一处（§19 已迁） |
 
 **判断**：这 ~14 KB 与所在节的主题绑定（进度卷、沿革卷、实测记账卷），逐行抠出会
 把契约散文切碎，收益低于风险，故**本轮不动**。真要迁应先给这三卷定性（它们是不是
@@ -60,6 +68,317 @@
 ## 实现注记（自各分卷外迁，逐字保留）
 
 各分卷正文原先内嵌的「已落地 / 实测」叙事整段搬来此处，正文侧只留结论 + 指回本节的链接。搬迁**逐字**（不做压缩），行内判据与实测数字一字未改；只删掉了搬运处的空行。
+
+### §19 结语（自 `18-19-ledger.md` 外迁，逐字保留）
+
+> **原文 2026-10-06 整段搬来**（该卷 §19 现在只留结论一句 + 指回本节的链接）。
+> 搬的是「下一步 / 已跑通 / 还剩什么」那批落地叙事 —— 契约卷不该拿 12 KB 记进度。
+
+AutoScript 的骨架可以一句话记住：
+
+> **三个进程、一个异步桥、每脚本一个 Node 进程。**
+
+架构的全部取舍都锚定在五条铁律上：脚本不进主进程、跨进程必异步、每次操作有 TTL、teardown 四步 quiesce、依赖单向接缝可替换。这个骨架让「写脚本→跑起来→守护它→定时它→打包走」的 P0 闭环与 AutoJsPro 对整个 API 面的演进式补齐，是同一条路的两个阶段，而不是两个项目。
+
+下一步（建议与后续迭代方向，需你确认后开工）：
+1. **§18 九项已全部拍板**（第 8/9 项 2026-09-25；第 1-7 项 2026-09-26）：1 不要沙箱 / 2 一步到位每脚本一进程 / 3 不发行 / 4 ICU 只要 zh+en / 5 P0 不切第三进程 / 6 原生优先 / 7 官方 registry + 安装时让用户选脚本。**没有待你拍板的开放项了**（§18 保留作决策台账）；
+2. ~~Node 垂直切片~~ **已跑通**：Node 24 → 16KB 对齐 `libnode.so` → `:node` 进程执行并回传，构建走 Actions（`.github/workflows/node-slice.yml`，本地禁编）；P0 回环 `P0LoopbackTest`（装 axios → 读 UI 树 → 点节点 → 看 console）已绿；
+3. ~~npm 切片~~ **已跑通**：vendored npm CLI + 专用安装会话 + 零 spawn 主路径 + 种子离线首装已在生产装配里（§10.11 P0 主体 + §19 中段的 wire 形状修复）；
+4. **下一步**（按可执行性排序）：(a) 等设备的那笔账——§7.7 实测数字 + exec/dlopen / findColor 红测；(b) ICU **已闭环**：旗标改 + Actions 重编 success + 体积差已回填 §15（`libnode.so` +10.70 MiB），
+  仅剩 zh/en 的 `Intl.*` 运行期实测归真机那批；(c) ~~§14 P0 剩余项按 §12.2 接线现状表逐条核~~ **已核完（2026-09-26），并据此收口第三处落差**：核过的 P0 条目（构建链、
+  桥、a11y、看门狗 CPU/OOM、调度器、权限门禁、CI 门）实为已落；被裁的如实标裁（打包整轨 2026-09-23 后移、§18 第 10 项 npm 呈现层暂不排期、lifecycle 脚本 = P1）。
+  核出的真落差是 **npm 事件面双侧无投递方** —— `onProgress`/`onWarning`/`onApproval` 订阅了但生产永远不响（两个 SharedFlow 零订阅、`feedWarning` 零生产调用者、
+  `InstallFailure` 连订阅口都没有），「订阅了却收不到」正是 §10.5-3/`feedWarning` 自己点名要禁的最恶失败面。接法沿用仓库既有的游标拉取（桥没有宿主→脚本推送面，
+  §7.5）：`:domain` 补 `drainEvents`/`drainApprovals` + 四个 DTO（§10.7），`InstallCoordinator` 两条 512 环由 `emit()`/`requestApprove` 唯一投递，`NpmBridgeHandler` 上桥 `events`/`approvals`，
+  JS 侧 `pumpInstallEvents`/`pumpApprovals` 轮询泵 + 新增 `onFinished`，`warning` 一律过 `feedWarning` 校验 kind。钉子：`NpmEventDrainTest` 12 例（环语义/回包三件套/wire 逐字映射/
+  参数校验）+ `npm-events.test.cjs` 11 例（首订立拉、游标不重复、瞬时错不推进游标、NOT_IMPLEMENTED 响亮、未知 type/phase/action 响亮、定时器自停）。**第 10 项（脚本库/
+  编辑器页、npm 呈现层）2026-09-26 拍板暂不排期**。
+
+**本仓库的推进顺序（已落地的按 §12.2 接线现状表为准，勿按上表臆造）**：契约与纯 JVM 层（`:domain` / `:bridge:java` / 各 app-service / `:platform:{capabilities,system}` 的 handler —
+— 后者为 2026-09-30 步骤 6 归位后的口径）已逐块落地并有单测；`AppShellApplication` 已从 11 行桩变成**闹钟/门禁的装配入口**（`AlarmSchedulerProvider` + `AndroidAlarmPort` + `AndroidScreenGate` + 静态注册的 `AlarmReceiver` → `AlarmDispatch` → `Scheduler.onTrigger`，
+漏投记账不静默丢弃），`AppShell.assemble` 的**生产调用方已落地**：`AppShellKit.assemble(filesDir, cacheDir, schedulerProvider, screenGate)`（`:app` 装配包，纯 JVM 可测）是那条路径的单一落点 —
+— 目录约定（`files/.autojs` 两个持久寄存器 + `files/scripts` 项目根 + `cacheDir/npm-cache`）与持久句柄的成对释放都收在它里面，`AppShellApplication.onCreate` 在 IO 域调它（`installWithFiles`），
+装配失败如实降级成"壳保持 null + 闹钟继续漏投记账"而不是半装冒充就绪；引擎工厂**生产已换 `NodeProcessEngine`**（`AppShellApplication.installWithFiles` 注入，`nativeLibraryDir/libnoden.so`+`libnode.so` 候选位；
+socket 名 = 桥监听 `BridgeSocketListener` **绑定成功才注入**（失败离线降级），`addonPath = ScriptPaths.bridgeAddonFile(filesDir)`（§19 交付轨 2026-09-24 接线：`assets/bridge-addon/` → `BridgeAddonDeploy` 落位，
+文件缺位即降级不注入 —— 与 bridgeDistPath 同一条选填纪律；jniLibs 三件套 `libnoden.so`/`libnode.so`/`libc++_shared.so` 由 `prepareEngineNativeLibs` 三件齐才落包、半套红，
+`extractNativeLibs=true` 保证 exec 有真文件）；缺件由 execute 预检**点名绝对路径**——比笼统"未接入"更可操作）；`AppShellKit` 缺省仍是 `UnavailableEngine`（`:app-service:runtime`，
+见其 KDoc）——**JVM 配方/测试不经 Application 装配时每次执行如实 `CRASHED` + 真原因进意图日志**，而不是开机后什么都不发生。开机恢复的接线点（`AppShell.bootRecover` → `Scheduler.recoverUncommitted`，
+`AppShellApplication.install` 在 IO 域触发；持久形态 `JournalFileStore` + `PersistentIntentLog` 已有 `AppShellProductionWiringTest` 覆盖），npm 侧已有生产装配（`NpmShellKit.assembleHandler(filesDir, cacheDir)` → `assemble(npmHandler = …)`，
+`NpmShellKitTest` + 同一接线测试覆盖）；归档侧意图日志与运行档案双持久（`JournalFileStore` + `FileRunArchive`，同一 `JsonLine` 行格式，`FileRunArchiveTest` 与 `InMemoryRunArchiveTest` 同语义锚点），
+`AssembledShell` 同时是任务中心的**读口**（`taskCenter()` = `scheduler.tasks()` + `archive.unfinished()`/`link()` + 恢复账经参数给入；`runsOf`/`runRecord`/`unfinishedRuns` 保留为窄读口，
+避免 UI 自开第二个 `FileRunArchive` 造成写侧两份视图）兼**操作面**（`registerTask`/`cancelTask`/`runTaskNow` 直通壳持有的同一个 `Scheduler` —— store-first 先落盘后动内存/
+闹钟，绝不另开第二个 `FileTaskStore`）；**任务中心全链已接上（2026-09-24）**：`AppShellApplication.taskCenter()`（壳未装配即抛，不冒充空清单）→ `:domain` 的 `TaskCenter.kt` 呈现 DTO → `:ui` 的 `TaskCenterScreen`（三页签之二：
+任务行 + 未结算执行 + 恢复账；2026-09-24 再接**操作面** —— 登记/取消/立即执行三写口 + `TaskCenterOps` 语义闸门 + `runTaskNow` 先查后触发的不哑火边界，见 §8.6）；
+**控制台全链也已接上（2026-09-24）**：`AppShellApplication.console()`（壳未装配即抛，不冒充「暂无日志」）→ `:domain` 的 `Console.kt` 呈现 DTO → `:app` 的 `ConsoleRead` + `AssembledShell.consoleView`（读壳持有的收集器与在途表，
+不另开第二份）→ `:ui` 的 `ConsoleScreen`（页签之三：行累积 + 丢包/拉满/在途两端对照，见 §7.3 末）；`AppShellKitTest` 覆盖自装配全路径（目录落位、门禁拒绝不投递、
+启动失败不写孤儿档案、真起引擎落终态记录、落盘遗留经 `bootRecover` 重投）。a11y 的 Android 真实现注入**已接**（`PlatformWiring` → `a11yHandler`：`AndroidUiTree`/
+`AndroidGestureInput` 经 `SystemA11yBridge`，服务未连如实 `ERR_SERVICE_DISABLED`），screen 的生产注入**同批已接**（`PlatformWiring.screenHandler`，§9.2 a11y 截图路径）；dialogs 的生产注入**也已接**（`PlatformWiring.of` 构造 `AndroidDialogHost`，
+AUTO 选路/强制降级拒绝/通知回调回投 + TTL 双清）；仍待的是 MediaProjection 高清会话（授权 UI + FGS，换 producer 即插）；脚本内容侧装配期补部署已接上（`ScriptDeployRecovery` 在 `AppShellKit.assemble` 时跑一次：
+只补缺不覆盖、空清单如实为空、失败不投毒，`deployReport`/`deployFailures()` 随壳暴露给能力中心）；§8.4 已闭环（判据/采样/`EngineWatchdog` 调度/`HeartbeatLedger` 心跳打点；
+pid 归属表仍归在途账不另建），Kotlin spawn 半边已送 pid 与心跳、桥监听 `BridgeSocketListener` 已接、addon JS 消费面 `attachNative` 已接（见 §8.4 末），设备面只剩真机联调（facade dist 随包 + 打包入口 attach 接线与 jniLibs 三件套/
+addon 落位 2026-09-24 均已落 —— assets 构建拷贝 → `BridgeDistDeploy` 落位 `filesDir/node_modules/auto` → env 注入 → kBootstrap `attachNative`，全链有 `BridgeDistPackagingEntryTest`；
+二进制侧 `prepareEngineNativeLibs` → `lib/arm64-v8a/{libnoden,libnode,libc++_shared}.so` + addon 走 assets → `BridgeAddonDeploy` → `addonPath`，APK 条目已实测）一道；§8.3 的 drift 已有裁决方（`EngineWatchdog` drift 连段 + `KillCause.DRIFT`：
+连续 3 轮对不上杀掉重来）；§8.6 已闭环（dispatcher 排队默认上限按触发源分级 + `PendingRun` deadline 记账与过期不重投；**无人 await 的 run 自带期限（2026-10-01）**：
+`TimeoutEnforcer{WATCHDOG}` + 看门狗期限线（`KillCause.TIMEOUT`）+ `engines.exec` 的 `timeoutMillis` 必填；注册表持久 `TaskStore`/`FileTaskStore`（`tasks.jsonl`，upsert+tombstone，
+与意图日志同一 `.autojs` 目录、同一追加纪律）：`schedule`/`cancel` 先落盘后动内存/闹钟，`bootRecover` 先 `restoreTasks` 续排再重投意向，`AppShellKit` 建第三持久并随壳释放），
+**Android 触发侧也已接上**（预拉/Exact/降级记账 + 静态接收器回投 + 屏幕门禁生产实现） + 开机续排（`RECEIVE_BOOT_COMPLETED` + 静态 `BootReceiver`：重启清掉全部闹钟，
+没有它持久注册表再完整也没人续排；receiver 无判断只记日志，续排/重投走 `Application.onCreate` 正常装配路径，避免与 `install` 的恢复并发撞车）。**§8.7 保活与电源（`:main` 侧）也已接上**：
+`AutoScriptForegroundService`（specialUse FGS，`PROPERTY_SPECIAL_USE_FGS_SUBTYPE="automation"`，清单静态声明、`exported=false`）+ `ForegroundKeeper`（start/stop/renew + 15 分钟守护 ticker）+ `WakeLockLedger`（token 引用计数 + 超时自动释放，
+**取锁失败不记账**）+ `AndroidWakeLockOps`（真 `PARTIAL_WAKE_LOCK`，`setReferenceCounted(false)`）；**屏幕门禁的持锁判定就此收口**——`AppShellApplication.screenGateOf` 传 `ForegroundKeeper::lockHeld`（= 账本 `isHeld`，
+步骤 6d 起根包经读口不碰 platform 类型），§8.7 原「恒真 = 明写的待接」作废；保活事实经 `ShellSummary.keepAliveActive`（`:domain`，无默认值）透到 `:ui` 首屏（「保活已生效」/
+「保活未生效：熄屏的亮屏任务会被拒绝」，不藏二级页）。服务经进程级邮箱 `ForegroundHost` 现取 Keeper（**服务不自装配**，避 service → 根包成环）、`START_NOT_STICKY`（续期统一走 `Application.onCreate` 装配路径，
+与 `BootReceiver` 同纪律）；`onTerminate()` 真机上从不被调用，只为测试收口 + 给「谁来停」一个落点。引擎侧 `power_manager` **已落地（2026-09-24）**：`PowerManagerNamespaceHandler` 直驱 `foregroundKeeper()` 的同一本账（`hold(token, timeoutMillis)` 插口当年就是照这个形状留的，
+账本零改）+ `powerManagerHandler` 独立缝 + `auto.power` 双侧契约（见 §8.7 与 §12.2 接线表）。**§9.5 能力中心的全链也已接上（2026-09-23）**：`AndroidCapabilityProbes`(6 事实) → `AndroidSystemStateReader`(判据唯一出处) + `AndroidGrantLauncher`(去向唯一出处) → `AppShellApplication.permissionCenter()` → **读口** `HostSummary.capabilityCenter()`/
+`openCapabilitySettings()`（`:domain`，`CapabilityCenterSnapshot`/`CapabilityRow`，`canRequestGrant` 是 `CapabilityLifecycle` 的投影）→ 拼装 `CapabilityCenterRead.snapshot`（`:app` 壳装配包，
+纯 JVM 可测：全量枚举 + 逐项现问三态 + 同一份 `guideText` + 降级任务账）→ `:ui` 的 `CapabilityScreen`（纯状态 DTO，JVM 可测）：三态各自的中文说法、引导文案原样透传、
+降级任务单列一段（§8.6「可能偏差」）、**没读到 ≠ 一个能力都没有**（`NOT_LOADED` 与 `failed` 分开且保留原异常文案）；刷新走「回前台/切页签」重问一次（授完权回来看到的是刚问过的结论，
+不是离开时的缓存；读失败不自激重读）。§9.4/§9.6 的五个系统命名空间（`dialogs`/`shell`/`device`/`app`/`floatingWindow`）已落地到**语义层**（2026-09-30 步骤 6 重排：
+契约 `:platform:system`（2026-10-01 D3 起按命名空间拆子包：`shell/ShellContracts.kt`、`device/DeviceContracts.kt`、`app/AppContracts.kt`、`floatingWindow/FloatingWindowContracts.kt`；此前是同名的 `SystemHostContracts.kt` 一份四面）—— `DialogHost` 六型留 `:domain`；handler `:platform:system` 十一件各住自己子包（`Shell`/`Device`/`App`/`FloatingWindow` 原为 `SystemNamespaces.kt` 的「四内」，D3 拆出）+ `:platform:capabilities` `DialogsNamespaceHandler` 一件；
+原「`:domain` SystemContracts + capabilities SystemNamespaces」口径见 design-decisions）、`AppShell.assemble` 的 `systemHandlers` 束 + `AppShellKit.assemble` 的透传（五个字段各自可空，
+未注入即如实 `ERR_NOT_IMPLEMENTED`）与 `bridge/js` 的 `extras.test.cjs` 双侧契约测试，三者串成一条线且都有单测；SPI 的 Android 实现**已落四件**（`:platform:system` 的 `AndroidShellExecutor`/
+`AndroidDeviceInfoProvider`/`AndroidAppLauncher`/`AndroidFloatingWindowHost`，入口 `SystemSpis.of(context)`，27 契约测试并进了 CI 测试任务表），`dialogs` 的 `DialogHost` 亦已落地（`AndroidDialogHost` 编排 + `…capabilities.device` 设备面，
+构造在 `PlatformWiring.of`，按 domain KDoc 住 :platform:capabilities）；**那次把 `SystemSpis` + `CapabilityNamespaces` 拼进 `AppShellKit.assemble` 的生产调用已落地**（`com.autoscript.shell.PlatformWiring`：
+`of(context)` = `SystemSpis.of` → `inject` → `systemHandlers` + `datastore`/`zip`/`settings`/`notification`/`clipboard`/`sensors`/`images` 七独立缝，`AppShellApplication.installWithFiles` 调用；
+拓扑靠 §6 **包级例外二**放行——仅 shell 装配包可依赖 `:platform:capabilities`/`:platform:system`，`ArchitectureTest`「平台实现只许装配包碰」+ `ModuleGraphTest` 允许集量化执行）。
+**`a11y` 的生产调用已接**（无障碍服务本体 `AutoScriptAccessibilityService` + `PlatformWiring` 注入，服务未连桥如实 `ERR_SERVICE_DISABLED`）；**`screen` 也已接**（§9.2 a11y 截图路径，
+与 a11y 同底），MediaProjection 高清会话是后续升级（换 producer 即插），不再是接线缺口。**`images` 桥面与 native 真实现均已接，P1 桥消费方五算子也已于 2026-09-29 全开**（`toGrayscale`/
+`crop`/`resize`/`rotate` 产新帧 + `findFeature` 回模板中心；宿主机语义门禁 **422 例**附上（2026-10-01 复核；该日 D7 拆 TU 前后逐例同值，见 §9.2 末），真机红测待补）—— §12.2 第七条独立缝：`:domain` `ImageAnalyzer` + `ImagesNamespaceHandler` + `images.ts` 双侧契约齐全；
+native 侧 `:bridge:image` 的 `libopencv.so`（OpenCV 4.14 静态链接）+ `:platform:system` 的 `NativeImageAnalyzer`/`JniOps` 也齐了，`PlatformWiring.of` 构造（so 缺位 → null → 桥回 `ERR_NOT_IMPLEMENTED`，
+看不见像素的内存分析器只能假装匹配成功，那比没有更坏 —— 这条防线保留）。**`auto.npm` 的 wire 形状漂移已修**（与 `a11y.waitFor` 同一类事故：JS facade 读一个宿主从不发的键，
+两侧各自的测试都没抓到，因为 JS mock 自己回的那个形状）：`install` 曾被 JS 声明成 `Promise<InstallResult>{name,version,integrity,linkedBins}`，而宿主回的是字面量 `true`—
+—现宿主回 `:domain` 的 `InstallHandle`（`{handleId,projectId,enqueuedAtMillis}`），facade 改成 `InstallQueued`，并在两侧注释里钉死「门面此刻还不知道会装出什么版本，
+回猜的版本号就是伪造」（§10.8/§12.3 文档里 `install → {name,version,integrity}` 的示例同批改掉：`InstallResult`/`ResolvedPkg` 两个 DTO 至今没有任何实现方产出）；
+`audit` 的键名 `vulnerabilities` → `vulns`（§10.8 与 `AuditReport.vulns` 都读它）；`list` 不再发恒 0 的 `sizeBytes`（lockfile 量不到尺寸，尺寸的两条真来源是 `offlineGap` 与 `storage`）；
+`offlineGap` 补上 JS 漏声明的 `version`；`requestApprove` 新增 `scripts` 校验 + 回显（与 `setRegistry` 的 scope 同一条纪律：宿主不认的字段被静默丢弃比报错更糟）；
+`ApprovalRequest` 的 JS 侧形状改与 `:domain` 逐字段对齐（`scripts` 是入参不是宿主字段）；`InstallEvent.phase` 从 `unpack/link/failed` 改到 `:domain` 六个阶段（`queued/resolve/download/reify/post-check/done`，
+失败由 `InstallFailure` 表达）。钉子：Kotlin +4 / JS `npm-contract.test.cjs` +9，反证过任一侧单独漂移立刻红。native/NDK 侧已出空壳：`:bridge:native` addon 控制面（`invoke`/
+`setSocketFd`/`setup`/`droppedData` + 读线程 + TSF 接线）与 `:engine:node-process` 宿主 `main.cpp`（§7.8 启动序）均已落地，经本机 NDK r28c 交叉编译验证（`engine/node-process/scripts/build-native.sh`：
+AArch64 ELF、`node::Start` 三方符号对表、LOAD≥16KB）；`:bridge:image` 也已落地 C++ 面（`imgnative.cpp` 计算核 + `images_jni.cc` 装载面），OpenCV 构建轨在 Actions（`image-native.yml`），
+本机不编译。**Kotlin spawn 执行链已落并本机验证**（`NodeProcessEngine` 16 单测 + `:app` 垂直切片 E2E：spawn → unix 桥 → console/心跳 → `SUCCEEDED` 归档；main.cpp abstract 连接 + `SO_PEERCRED` uid 门禁 + kBootstrap 自动心跳；
+addon invoke payload 字符串化金样；生产桥监听 `BridgeSocketListener`：abstract 绑定 + uid 门禁 + `NewlineFrameServer` serve，JVM 假缝单测 6 例；facade addon 消费面 `attachNative()`：
+setup(onFrame) 按 id 结算 + invoke 注入 + `errFromThrown` 保留真码，mock 6 例 + env 门禁真 addon 全环），仍待真机：设备侧 exec/dlopen 红测（16KB 页机 + targetSdk 提取策略；
+jniLibs 三件套与 addon 落位、facade dist 随包与打包入口 attach 接线均已落，见第 2 条切片路线）。
+
+### §7.7 实测记账：第三～六次（自 `07-bridge.md` 外迁，逐字保留）
+
+> **原文 2026-10-06 整段搬来**（§7.7 现在只留判据表 + 第七次实测块 + 指回本节的链接）。
+> 搬的是四轮调优的逐次记录（第三次评审 patch 验证 / 第四次相位探针门 / 第五次 FastPath
+> 与场景端缓存 / 第六次大模板形态与 findFeature 四修）—— 契约卷不该拿 19 KB 记调参过程。
+
+> **2026-09-30 第三次实测（评审 patch 验证轮 → 采纳，commit `852fb45`；云手机同机
+> 同 `scr.raw`，A = patch 默认 vs B = `FORCE_EXACT=1`，×100 中位）**：
+> patch = 外部评审 `vision-optimized.patch`（粗筛下限 80→48px、`kMinCoarseSide`
+> 24→12、0.25× 候选带宽 +0.05、needle prep 独立锁缓存）；验证走临时分支 +
+> PR #11（验后分支已删），全门禁绿后采纳：
+>
+>   | 项 | 二次实测（`7d92faf`） | **三次 A（采纳）** | 三次 B（强制精确） | 判据 |
+>   |---|---|---|---|---|
+>   | A4 match 370×80 全帧 | 62.98ms | **24.47ms** | 888.97ms | <40ms ✅ **转绿** |
+>   | A4 match 48×48 全帧 | 855.5ms | 948.5ms† | 857.4ms | <40ms ❌（内容受限） |
+>   | A4-region 48×48 @300×150 | 16.57ms | 16.88ms | 16.95ms | <40ms ✅ |
+>   | A4-region 370×80 @540×190 | 11.77ms | 9.77ms | 29.96ms | <40ms ✅ |
+>   | A2 decode+match×2 | 171.75ms | **94.61ms** | 1877.3ms | <700ms ✅ |
+>   | A3 findColor ROI | 0.870ms | 0.854ms | 0.877ms | <10ms ✅ |
+>
+>   - **判据行裁决（2026-09-30，拍板「转绿（形态注明）」）**：`matchTemplate
+>     1080p <40ms` 按**原全帧口径**转绿 —— 依据是 370×80 形态 24.47ms（**判据原文
+>     一字未改**，改的是数字）。†48×48 形态**不进此绿字**：真机模板灰度 std 6.29
+>     <12 + 频率门 0.69 <0.8 双拦 → 恒精确路径（948ms 与基线 855ms 同量级，
+>     run 间噪声），形态注明如实挂 ❌，出路 = `region` 16.9ms 推荐姿势。
+>   - **门禁诊断（48×48 被拦是保精度，不是门太严）**：该模板 0.25× 自检互相关
+>     只有 0.69，**低于候选带宽 thr0.9−margin0.15=0.75** —— 硬放进粗筛，真峰会
+>     落在带宽之下 → 零候选 → **必假漏检**。双门按回精确路径 = 与旧行为逐位同解。
+>     370×80 则 std 19.45 / rt 0.812 双过 → 0.25× 粗筛（这就是 24.47ms 的来源）。
+>   - **精度面结论（采纳依据）**：报出的坐标/置信度永远由**原 4 通道全图
+>     `matchTemplate` 在精配窗内重算**，阈值/未命中/坐标口径一字未动；粗筛只决定
+>     「提名哪些窗」。假漏检是唯一残余风险面，四层压住：①三道门（尺寸/灰度 std/
+>     频率自检，不适合的模板走原路径）②host 差分双跑 372 检查（同位置 + 置信度
+>     ≤2e-3 或同未命中）③真机探针 conf=1.0000 同位（A4/A4-small 均验）④
+>     `FORCE_EXACT=1` 回退阀。已知边缘：370×80 的 rt=0.812 仅高于门槛 0.012，
+>     贴门内容粗峰可能跌破带宽 → `MARGIN` 环境旋钮加宽（付速度）或回精确兜底。
+>   - needle prep 缓存（独立锁 `g_match_cache_mu`，锁序 `g_mu→cache_mu` 两处一致）：
+>     模板端准备 <1ms/次，真机分辨率测不出收益 —— 随 patch 采纳，账在代码评审面。
+>
+> **2026-09-30 第四次实测（相位探针门 + 自适应 K，commit `0ec6ef4`，PR #12；云手机同机
+> 同 `scr.raw`，A = 默认 vs B = `FORCE_EXACT=1`，×100 中位）**：
+> 改动 = 评审二轮原型移植 —— **相位探针门**替换静态 scale-cycle 0.8 门：按粗筛栅格
+> 相位 {1,2,3}²（0.25×）反射填充（边 12）互打，取真位置 ±2 窗最差分 →
+> `NeedlePrep.phase_worst`（与 thr 无关、随 prep 缓存）；**每调用地板**
+> `floor = min(thr − 粗带宽 + headroom, 0.97)` 绑带宽 —— 闭掉静态 0.8 门在高阈值
+> （thr−带宽 > 0.8，如 thr=0.99 → 0.84）下放行「够不着候选带宽模板」的假漏洞。
+> 另加 **自适应 K**（精配预算 `8×96×398` 定容：`K = min(32, max(t.max_candidates,
+> round(预算/精配窗面积)))`，窗小 K 升到 32 补重复峰召回、窗大维持地板 8；pad 升
+> `ceil(1/sc)·3+2`）与新 knob `AUTOSCRIPT_MATCH_HEADROOM`（缺省 0.05）；候选带宽
+> 与地板单源 `coarse_margin_of(sc)`：
+>
+>   | 项 | 三次 A（`852fb45`） | **四次 A（相位门）** | 四次 B（强制精确） | 判据 |
+>   |---|---|---|---|---|
+>   | A4 match 370×80 全帧 | 24.47ms | **25.37ms** | 887.60ms | <40ms ✅ |
+>   | A4 match 48×48 全帧 | 948.5ms† | 855.6ms† | 861.5ms | <40ms ❌（同判） |
+>   | A4-region 48×48 @300×150 | 16.88ms | 16.53ms | 16.62ms | <40ms ✅ |
+>   | A4-region 370×80 @540×190 | 9.77ms | 10.64ms | 25.37ms | <40ms ✅ |
+>   | A2 decode+match×2 | 94.61ms | **95.43ms** | 1869.75ms | <700ms ✅ |
+>   | A3 findColor ROI | 0.854ms | 0.905ms | 0.899ms | <10ms ✅ |
+>
+>   - **归因干净**：四次 B = 887.60 / 861.5 / 1869.75ms 与三次 B（888.97 / 857.4 /
+>     1877.3）同量级 run 噪声 → A 的提速全部来自相位门路径，无基线漂移；真机探针
+>     conf=1.0000 同位（A4 / A4-small 均验）。
+>   - **相位门真机诊断（host 同 `scr.raw` 模板，floor=0.800）**：370×80
+>     `phase=0.846` 过门 → 保 24.47ms 形态（25.37 含探针成本与 run 噪声）；
+>     48×48 `phase=0.794` 拦 + std 6.29<12 双门 → 恒精确（†与三次同判，出路
+>     region 不变）。覆盖诊断 9 尺寸 ×60 随机裁片：新门整体严于静态 0.8。
+>   - **精度面**：拦漏检的机制从「静态门与 thr 脱钩」换成「相位最差分 < 带宽地板」——
+>     子像素相位错位正是静态对齐自检（缩小→放大同位互打）测不到的塌陷源；门恒
+>     保守方向（拦错只损失速度）。差分锁新增 **case6 高阈值 0.99 差分**：静态 0.8
+>     门下 thr−带宽=0.84>0.8 会放行假漏，新门 floor 绑带宽闭洞。host 全量 377
+>     检查绿、NDK 双过。
+>
+> **2026-10-01 第五次实测（FastPath 12a + 场景端粗筛缓存，commit `a22fbfd`/`8d20500`，PR #13；
+> `feat/fastpath-16x` 叠在相位门基线 `0f17af9` 之上；云手机同机同 `scr.raw`，×100 中位）**：
+> 两处改动各自治一段：**FastPath(12a)** = NMS 后提名唯一（`cands.size()==1`）且主峰
+> ≥ `thr+0.05` 时 `pad` 由常态 `ceil(1/sc)·3+2`（0.25× 档 = 14）收窄到 `ceil(1/sc)·1+2`
+> （= 6）；**场景端缓存** = `g_scene_prep`（ref → {sc, hs}）把全帧 `cvtColor(BGRA2GRAY)`
+> + `resize(0.25×)` 按 (帧, 缩放档) 缓存，与 needle 缓存同锁同钩子，只缓存全帧
+> （region 是浅视图，其灰度/缩小与「先全帧再裁」在小尺度边界有舍入差，键得带 region
+> 才等价 —— region 本来就是低延迟出路，不缓存）。
+>
+> **24ms 的账（分段估算，先于两处改动）**：region 扫掠线性拟合（0.04/0.10/
+> 0.32/1.08 Mpx，斜率 7.4ms/Mpx、截距 ≈0）把 100 次稳定值 23.73ms 拆成 ——
+>
+> | 段 | 全帧成本 | 占比 | 怎么量的 |
+> |---|---|---|---|
+> | 场景 `cvtColor(BGRA2GRAY)` | **≈5.9ms**（上界†） | 25% | `imgnative_gray` 10.97 − 全帧 `crop` 拷贝 5.12 |
+> | `resize 0.25×` | **≈1.6ms** | 7% | `imgnative_resize` 直测 1.63ms |
+> | 粗筛 `matchTemplate`（0.25×） | **≈11.4ms** | 48% | 18.9（拟合外推全帧）− 上两行 |
+> | 提名 + 精配（K 窗，pad=14） | **≈4.8ms** | 20% | `refine_probe` HIT−miss 同面积对消 |
+>
+> 前两项只由 (帧, 缩放档) 决定、与模板无关 —— 「帧入表后不可变」这条不变式
+> 与 needle 缓存逐字同源，正是场景缓存的依据。†**cvtColor 行是上界**：量的是
+> `imgnative_gray`（cvtColor + 4 通道 scatter 回填），生产粗筛路径只出 1 通道灰度、
+> 没有 scatter —— 下面同会话三方 A/B/C 给出该行 + resize 的直接联合实测。
+>
+> **同会话三方 A/B/C（决定性归因；同一 bench 二进制、交替顺序 main→12a→两者→两者→12a→main，
+> A4 每档两跑、×100 中位；so = 三个 commit 各自的 CI 产物，sha256 前缀 main `2b0578af` /
+> `a22fbfd` `c4013e90` / `8d20500` `d461aaad`）**：
+>
+>   | 项 | main（相位门） | `a22fbfd`（仅 12a） | `8d20500`（12a + 场景缓存） | 判据 |
+>   |---|---|---|---|---|
+>   | A4 match 370×80 全帧 | 25.74 / 25.78 → **25.76ms** | 23.73 / 24.18 → **23.96ms** | 20.17 / 20.30 → **20.23ms** | <40ms ✅ |
+>   | A4-region 370×80 @540×190 | 10.78ms | 8.68ms | 9.21ms‡ | <40ms ✅ |
+>   | A2 decode+match×2 | 96.74ms | 92.73ms | **89.26ms** | <700ms ✅ |
+>
+>   - **逐项归因**：**12a 单独**贡献 A4 −1.80ms / region −2.10ms / A2 −4.01ms（A2 两次
+>     match 都走金字塔，各吃一次收窄）；**场景缓存再叠**贡献 A4 −3.73ms / A2 −3.47ms
+>     （A2 只有第二次 match 吃得到缓存）。合计 A4 −5.53ms、A2 −7.48ms —— 与「五次 A
+>     vs 四次 A」的跨会话差值（−5.55 / −6.57）**方向与量级一致** —— 跨会话那次比较与本次
+>     同会话结论互证。
+>   - **场景缓存的实际账面 ≈3.7ms/次重复 match** = 生产 `cvtColor + resize` 的联合
+>     实测成本（低于估算表 5.9+1.6=7.5 —— 上界原因见上）。
+>   - ‡**region 行的 9.21 vs 8.68 是 run 噪声**（±0.5ms）：region 路径**不走**场景缓存
+>     （见上「只缓存全帧」），两 so 在这条路径上代码逐字相同 —— 这组差本身即反证。
+>   - **数字与跨会话「五次 A」表的关系**：下表（与上文四次块并列的那张）的 19.82ms 出自
+>     较早一次会话（同 so、同 bench），本三方表 20.23ms 是同会话值；两者差 0.4ms 属
+>     run 间噪声。判据行取哪张都不改结论。
+>
+>   | 项 | 四次 A（相位门 `0f17af9`） | **五次 A（12a + 场景缓存）** | Δ | 判据 |
+>   |---|---|---|---|---|
+>   | A4 match 370×80 全帧 | 25.37ms | **19.82ms** | −5.55（−22%） | <40ms ✅ |
+>   | A4-region 370×80 @540×190 | 10.64ms | **8.57ms** | −2.07（−19%） | <40ms ✅ |
+>   | A2 decode+match×2 | 95.43ms | **88.86ms** | −6.57（−6.9%） | <700ms ✅ |
+>   | A4 match 48×48 全帧 | 855.6ms† | 867.5ms† | run 噪声 | <40ms ❌（形态同判） |
+>   | A4-region 48×48 @300×150 | 16.53ms | 16.76ms | — | <40ms ✅ |
+>   | A3 findColor ROI | 0.905ms | 0.893ms | — | <10ms ✅ |
+>
+>   - **跨会话口径**：五次 A 与四次 A 是不同次会话（设备温度/后台不同），逐项归因
+>     以同会话三方表为准，本表只作形态与判据的对照。
+>   - **48×48 形态**：†与四次同判（真机模板 std 6.29<12 + `phase=0.794` 双拦 → 恒精确
+>     路径），两处改动都不进这条路径，867.5 vs 855.6 = run 噪声。判据行绿字口径不变。
+>   - **精度面（不变式一字未动）**：FastPath 只改「精配窗多大」不改「报什么」——
+>     坐标/置信度仍在原 4 通道窗内重算；场景缓存是纯 memoize（结果只由 (帧, sc) 决定，
+>     **缓存命中与否不改变任何出参**）。host 差分门扩到 **396 检查**（新增 case6d/6d2
+>     唯一高置信/重复副本破唯一、case9 缓存四检查：连跑两次逐字段一致、中间插不同
+>     sc 档再回来仍一致、region 路径与全帧同解），`FORCE_EXACT=1` 回退阀照旧。
+>   - **①（1/16× 粗筛）已用数据否掉（只追加，第四次块「出处②已落地」不动）**：
+>     host 端到端探针（`c16_full`，同 `scr.raw`，370×80）—— 1/16× 粗筛本身确实快
+>     （0.41 vs 6.43ms），但提名**爆量**：`ncand=8`（K 名额被假峰吃满，粗峰不再唯一），
+>     每个候选都要精配 → 端到端 **48.1ms**（pad18）/ **29.6ms**（pad6），**全部劣于**
+>     现行 0.25× 的 10.6ms；且 1/16 档对 370×80 根本不进守卫（`kMinCoarseSide=12`
+>     要求模板短边 ≥192px）。1/16 的「省粗筛」被「精配窗涨」加倍吃回 —— **不做**。
+>
+> **2026-10-01 第六次实测（大模板形态 + findColor 全帧早退 + findFeature 四修，commit
+> `a78515c`/`34fd80e`/`f6cb926`，`feat/fastpath-16x` 叠在 `8d20500` 之上；host x86_64
+> 直链同一份 OpenCV 4.14.0，`/tmp/imgbench/scr.png` 1080×2400 真机截图，thr=0.9）**：
+> 这一轮治的是**判据口径之外、但真机上真会发生**的三类形态 —— 大模板（粗筛恒被挡回
+> 精确路径）、薄/小模板（ORB 预筛恒清空关键点）、全帧大命中面找色。
+>
+>   | 项 | 改前 | 改后 | 判据 | 备注 |
+>   |---|---|---|---|---|
+>   | match 300×150 全帧 | 1467ms（回精确） | **13.33ms** | <40ms ✅ | 相位平均粗模板 |
+>   | match 200×150 全帧 | 1360ms（回精确） | **10.78ms** | <40ms ✅ | 同上 |
+>   | match 370×80 全帧 | 20.23ms | **11.72ms** | <40ms ✅ | 平均模板顺带再省 |
+>   | match 120×90 全帧 | 12.9ms | **12.27ms** | <40ms ✅ | 形态不变 |
+>   | findColor 全帧·**取首点段** | 22.12ms | **0.003ms** | （口径外） | 行主序早退；整调用 4.33ms（inRange 地板） |
+>   | findFeature 真机 UI | 恒 found=0 | **found=1 err 0.0px** | 见 §9.2 | 四修（下详） |
+>   | findFeature 可达率 | — | **14/33**（13 例 ≤3px） | （口径外） | 见下「命中率」条 |
+>
+>   - **大模板的病灶与直觉相反**：粗筛假 miss 不是粗模板"太好"，是它**只对住了一个
+>     相位**。真机实测同一模板各相位粗分 `1.0000 / 0.9007 / 0.6926 / 0.8943`，thr=0.9
+>     时带宽 0.75 —— 0.6926 够不着 → 提名层空手 → 回精确路径。修法 = 对 nuisance
+>     参数做**平均**（匹配滤波的标准解法）：16 个相位（0.25×）/ 4 个相位（0.5×）的
+>     粗图按内容原点对齐后取平均当粗模板，最差相位 0.6926 → **0.8086**（0.5× 档
+>     0.8269 → 0.9514）。相位探针同步改成量**平均模板**（门与实际跑的粗模板必须同源
+>     —— 本轮第一版就是漏了这一步：模板已换成平均版，门还在按相位 0 的老数挡人）。
+>   - **headroom 余量整个移除**：`floor = min(thr − 带宽, 0.97)`，`AUTOSCRIPT_MATCH_HEADROOM`
+>     调参口一并删除。带宽之上再留余量是重复上保险（提名 ≠ 命中，候选还要过精配），
+>     300×150 的相位 0.8086 对带宽 0.75 只差 0.0086 却被 floor=0.80 挡回，代价 473~1467ms、
+>     收益为 0。
+>   - **精度面**：粗筛仍只提名，坐标/置信度全部回原图 4 通道窗重算 —— 大模板四例
+>     全 found=1、Δpos=(0,0)、Δconf=0.0000（对照精确路径 498~767ms）。`FORCE_EXACT=1`
+>     回退阀照旧。**绝对 ms 与窗口/机器相关，判据看的是量级**：同形态换窗口复测
+>     （`/tmp/ffix/mrow`，同会话另一轮）300×150 @(60,600) 11.7~11.9ms / @(400,600)
+>     11.7ms / @(60,1500) **30.9ms**，200×150 @(60,600) 9.3ms / @(60,1000) **21.3ms**
+>     （差在停止位与精配候选数）；跨会话再测 300×150 得 12.0~13.2ms、370×80 9.0~11.7ms。
+>     表里那一列取的是**同一轮的 A/B 对照值**（改前/改后同进程同窗口），单看一个绝对
+>     数字别当常量用。
+>   - **findColor 全帧**：改的是**取首点那一段**，不是整调用。`findNonZero` 先把整张
+>     命中点表物化（76.7% 命中面 1.99M 点 ≈16MB）再取 `points[0]` —— 该段 19.4~22.1ms，
+>     且**命中越多越贵**（89.6% 面 28.4~30.4ms、0.02% 面 1.5ms、未命中面 0）；改成行主序
+>     自己扫、第一个非零即返回 → **0.003~0.016ms**（复跑三次的上界；数值本身也随机器浮动）。**整调用另有地板**：全帧
+>     `cv::inRange` 本身 ≈4.3ms（三档命中面整调用实测 4.33 / 4.06 / 4.02ms），所以
+>     整算子全帧 ≈4.3ms —— **别把 0.003 读成整调用**（判据 <10ms 的口径是「单人独立
+>     子图」300×150 ROI，2026-09-30 真机 0.88ms ✅；全帧从来在口径外）。答案口径未变
+>     （`findNonZero` 就是行主序，这是同一个答案更早拿到，不是"取任意命中"）。
+>   - **findFeature 四修**（真机恒 found=0 的病灶链，详见 §9.2 与 `design-decisions.md`
+>     第 13 项）：① 场景侧 ORB 配额按短边分档（>640 抬到 nfeatures=8000/et=10）；
+>     ② 内点铺开度门（任一边跨度 <10% 判未匹配）；③ 命中位置改成**模板中心**
+>     （原「内点质心」真机偏 82.4px）；④ 薄条/小模板零关键点**垫边重试**。修后真机
+>     实测：300×150 err 0.00 conf 0.682 / 200×150 err 0.00 conf 0.750 / 540×600
+>     err 0.00 conf 0.583，370×80 与 48×48 仍 found=0（真·无特征，诚实未命中）。
+>   - **命中率/可达率与假阳的定量**（`/tmp/ffix/featwin`，1080×2400 真机截图：200×150
+>     网格 **24 窗** + 文档引用过的 9 窗 = 33）：**命中 14/33、其中 13 落在真值 3px 内**；
+>     唯一一个错位置（200×150 @(660,1900)，报 (760,1431)）经 `matchTemplate` 复查
+>     **真值处 ccoeff=1.0000 且是全图 argmax** —— 是该窗口的特征链没走到真值，不是
+>     "场景里有更像的地方"。**诚实边界**：ORB 链的**可达率**不是 100%（网格 200×150
+>     命中 10/24；26 个 200×150 窗口真值处 ccoeff 实测最小 **0.99993**，位置本身无歧义）；
+>     真值处 ccoeff ≈1.0 却 **零特征**的窗口
+>     （场景侧配额抬到 40000/et10 仍为 0）**恒 found=0**，这是特征匹配对无纹理区域的
+>     固有边界（此时该用 `matchTemplate` —— 它在这批窗口上**命中 33/33**，conf 全 1.0）。
+>     **但"命中"不等于"位置唯一"**：同一批窗口它只有 25/33 报在真值处，其余 8 例经
+>     `dupchk` 复查全是**像素级重复副本**（报出窗与真值窗逐像素最大差 0~1 —— 屏幕里
+>     真有两块一模一样的地方，argmax 挑了另一份，与 §7.7 三次实测里 48×48 报 (57,751)
+>     那条同源）。要"唯一位置"得脚本自己拿阈值/多候选择一，算子给的是 argmax 口径。
+>   - **诚实交代三条**：① 真机 UI 上仍有恒 found=0 的窗口 —— 19/33，逐窗交叉核对分
+>     三类（`scenekp` 场景侧数点 + `featwin2` 模板侧两档数点）：**A 真值处场景侧零
+>     关键点 6 例**（48×48 纯色图标 + 5 个 200×150 平坦窗；配额 8000→40000 后仍有
+>     5/4 例为 0）、**B 模板侧缺省 ORB 零点 5 例**（370×80 纯文字行、1080×60 工具行、
+>     三个 200×150；垫边后 6~57 点仍 found=0）、**C 两侧都有点仍配不上 8 例**
+>     （缺省 7~124 点、垫边后 61~486 点）。A 是特征匹配的固有边界、B/C 是 ORB 在低
+>     纹理 UI 上的可重复性极限，都不是缺陷；② 分档的 640 门槛是按**整屏截图**形态调的，
+>     中等裁剪（540×600、600×800）在缺省档下找 200×150 仍会漏 —— 真机消费方是整屏
+>     截图，暂不为中间形态再加一档；③ 垫边重试不是免费的：它让"内容 + 一圈复制缝"
+>     整体可比，重复区上的自匹配偶尔会凑出几何一致的错答案（重试路径因此挂像素复核，
+>     但复核只挡"报出位置根本没有模板像素"那一类）—— 需要"只认唯一位置"的脚本应改用
+>     `matchTemplate`。
 
 ### §9.2 截图与图像管线（自 `09-capabilities.md` 外迁）
 
