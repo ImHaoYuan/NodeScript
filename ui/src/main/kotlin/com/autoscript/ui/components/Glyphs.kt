@@ -100,6 +100,9 @@ enum class GlyphKind {
 
     /** 使用情况访问权限（批 48）：三根高低不同的柱子 —— 「哪个应用用了多久」就是这么读的。 */
     CHART,
+
+    /** 「更多」（文件/文件夹行尾的溢出钮）：三个竖排实心点（TG `ic_ab_other`）。 */
+    MORE_VERT,
 }
 
 /** 线宽 ÷ 图标边长。四个字形共用一条，粗细才不会一格一个样。 */
@@ -397,6 +400,15 @@ fun Glyph(
                 drawPath(path(0.17f to 0.84f, 0.17f to 0.52f), tint, style = stroke)
                 drawPath(path(0.50f to 0.84f, 0.50f to 0.24f), tint, style = stroke)
                 drawPath(path(0.83f to 0.84f, 0.83f to 0.42f), tint, style = stroke)
+            }
+
+            // 「更多」三点（TG `ic_ab_other` 的实测：三点竖排、半径 2.1/24≈0.088、
+            // 圆心 y = 4.5/12/19.5 ÷ 24 ≈ 0.19/0.50/0.81）。**实心**不是描边 ——
+            // 0.088 的小圆用 StrokeRatio 描边会糊成一圈灰环，看不出是三个点。
+            GlyphKind.MORE_VERT -> {
+                drawCircle(tint, radius = 0.088f * u, center = at(0.5f, 0.19f))
+                drawCircle(tint, radius = 0.088f * u, center = at(0.5f, 0.50f))
+                drawCircle(tint, radius = 0.088f * u, center = at(0.5f, 0.81f))
             }
         }
     }

@@ -15,6 +15,12 @@ import org.junit.jupiter.api.io.TempDir
  * - 非法名字（含 `/`、`..`、空）拒绝 —— 原文抛，呈现层不写第二套判据；
  * - **不覆盖已存在**（撞名抛 `FileAlreadyExistsException`）；
  * - 项目目录不存在拒绝（而不是静默建到别处）。
+ *
+ * 编辑面（[ScriptFileOps.read]/[ScriptFileOps.save]，项目页点文件进编辑）：
+ * - 读回原样、存后读得到新内容，且**不留临时文件**（原子替换的副产物必须清掉）；
+ * - 越界 relPath（`..`/绝对路径）在**读取侧也拒绝**；
+ * - 目录不是文件、保存**不新建**（新建归 createFile）；
+ * - 二进制（含 NUL）与超限文件读时拒绝 —— 当文本打开再存回去就是损坏用户文件。
  */
 class ScriptFileOpsTest {
 
@@ -62,5 +68,51 @@ class ScriptFileOpsTest {
         assertThrows(IllegalArgumentException::class.java) { ScriptFileOps.createFile(dir, "nope", "x.js") }
         // 没有替用户建出 nope 目录（静默建目录 = 错字也建出空项目）。
         assertTrue(!Files.isDirectory(dir.resolve("scripts/nope")))
+    }
+
+    @Test
+    fun `读回原样_保存覆盖且不留临时文件`() {
+        val project = dir.resolve("scripts/demo")
+        Files.createDirectories(project.resolve("lib"))
+        Files.write(project.resolve("lib/main.js"), "const a = 1;\n".toByteArray(Charsets.UTF_8))
+        // 子文件夹里的文件靠 relPath 定位（不是单段名字）。
+        assertEquals("const a = 1;\n", ScriptFileOps.read(dir, "demo", "lib/main.js"))
+        ScriptFileOps.save(dir, "demo", "lib/main.js", "const a = 2;\n")
+        assertEquals("const a = 2;\n", ScriptFileOps.read(dir, "demo", "lib/main.js"))
+        // 原子替换的临时文件必须清掉：项目目录里只剩用户那一个文件。
+        assertEquals(listOf("main.js"), Files.list(project.resolve("lib")).use { s -> s.map { it.name }.sorted().toList() })
+    }
+
+    @Test
+    fun `读写都拒绝越界路径`() {
+        val project = dir.resolve("scripts/demo")
+        Files.createDirectories(project)
+        Files.write(project.resolve("main.js"), "x".toByteArray())
+        for (bad in listOf("../escape.js", "/etc/passwd", "lib/../../escape.js", "")) {
+            assertThrows(IllegalArgumentException::class.java) { ScriptFileOps.read(dir, "demo", bad) }
+            assertThrows(IllegalArgumentException::class.java) { ScriptFileOps.save(dir, "demo", bad, "pwn") }
+        }
+        // 项目根之外什么都没被写出来。
+        assertTrue(!Files.exists(dir.resolve("scripts/escape.js")))
+    }
+
+    @Test
+    fun `目录不是文件_保存不新建`() {
+        val project = dir.resolve("scripts/demo")
+        Files.createDirectories(project.resolve("lib"))
+        assertThrows(IllegalArgumentException::class.java) { ScriptFileOps.read(dir, "demo", "lib") }
+        assertThrows(IllegalArgumentException::class.java) { ScriptFileOps.save(dir, "demo", "new.js", "x") }
+        // 保存**不新建**（新建走 createFile，撞名/命名裁决在那里）。
+        assertTrue(!Files.exists(project.resolve("new.js")))
+    }
+
+    @Test
+    fun `二进制与超限文件读时拒绝`() {
+        val project = dir.resolve("scripts/demo")
+        Files.createDirectories(project)
+        Files.write(project.resolve("bin.dat"), byteArrayOf(0x41, 0x00, 0x42))
+        assertThrows(IllegalArgumentException::class.java) { ScriptFileOps.read(dir, "demo", "bin.dat") }
+        Files.write(project.resolve("big.js"), ByteArray((ScriptFileOps.MAX_EDIT_BYTES + 1).toInt()))
+        assertThrows(IllegalArgumentException::class.java) { ScriptFileOps.read(dir, "demo", "big.js") }
     }
 }

@@ -127,6 +127,10 @@ fun ProjectScreen(
     themeSwitchLabel: String,
     /** 新建文件/文件夹（FAB 展开的两个子项；落盘在宿主，本屏只收结论）。 */
     onCreate: (projectId: String, name: String, isFolder: Boolean) -> Unit,
+    /** 读一个脚本文件的文本（**点文件**进编辑面时调；失败原文抛，本屏如实显示）。 */
+    onReadFile: suspend (projectId: String, relPath: String) -> String,
+    /** 覆盖写一个脚本文件的文本（编辑器「保存」；**正常返回即已落盘**）。 */
+    onSaveFile: suspend (projectId: String, relPath: String, content: String) -> Unit,
     /** 排序档/逆向变更（写入 state —— 重读不重置呈现偏好）。 */
     onSortChange: (FileSort, Boolean) -> Unit,
     modifier: Modifier = Modifier,
@@ -157,6 +161,24 @@ fun ProjectScreen(
     val longPressFeedback = rememberLongPressFeedback()
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+
+    // 正在编辑的文件（null = 不在编辑）。编辑面**换掉整页**而不是叠一层浮层
+    // （TG 打开文档就是整屏换页）：列表/FAB/搜索栏在编辑期间根本不组合，
+    // 返回键也整条让给编辑器 —— 少一层"底下那份还在不在"的悬念。
+    var editing by remember { mutableStateOf<ScriptFileRowUi?>(null) }
+    val editingNow = editing
+    if (editingNow != null) {
+        ScriptEditorScreen(
+            projectId = editingNow.projectId,
+            relPath = editingNow.relPath,
+            displayName = editingNow.name,
+            onRead = onReadFile,
+            onSave = onSaveFile,
+            onClose = { editing = null },
+            modifier = modifier,
+        )
+        return
+    }
 
     // 可见集 = 一层（[ProjectState.childrenOf]）→ 排序。**搜索时层裁剪让位**：
     // TG 文件选择器的搜索是**另一份数据集**（`searchAdapter` 搜整棵树、含"最近"分区，
@@ -274,10 +296,11 @@ fun ProjectScreen(
                         FileRow(
                             file = file,
                             selected = key in selected,
+                            showMore = !selectionMode,
                             onClick = {
                                 when {
                                     selectionMode -> selected = ProjectState.toggleSelection(selected, key)
-                                    // 目录 = 进一层（TG 文件页点文件夹下钻）；文件 = 开操作面板。
+                                    // 目录 = 进一层（TG 文件页点文件夹下钻）。
                                     // 从搜索结果进目录要**收起搜索**：不然进了层列表还是全库的
                                     // 搜索结果，等于"点了没反应"（TG 的 onSearchCollapse 同款）。
                                     file.isDirectory -> {
@@ -286,9 +309,13 @@ fun ProjectScreen(
                                         selected = emptySet()
                                         scope.launch { listState.scrollToItem(0) }
                                     }
-                                    else -> sheetTarget = file
+                                    // 文件 = **直接进编辑面**（TG 文件页点文档就是打开，不弹菜单）；
+                                    // 复制路径等其余动作走行尾的 ⋮ 与长按面板 —— 一行的主手势
+                                    // 只留给"最常做的那件事"，两件事抢同一下点击就是猜。
+                                    else -> editing = file
                                 }
                             },
+                            onMore = { sheetTarget = file },
                             onLongClick = {
                                 longPressFeedback()
                                 // 长按进选择模式并选中这一行（TG 的选择模式入口就是长按）；
@@ -496,9 +523,11 @@ private fun SearchField(
  * 文件夹行：头像 = 文件夹字形（accent 色底白线），次行 = "N 项 · 时刻"（TG 文件页
  * 文件夹行不显示字节数的同一口径）。
  *
- * **两个手势**（TG 列表的读法，与任务中心同构）：
- * - **点**：目录 = 进一层；文件 = 开操作面板；选择模式里 = 勾/去勾这一行；
- * - **长按**：进选择模式并勾上这一行（TG 的选择模式入口就是长按）。
+ * **三个手势**（TG 列表的读法，与任务中心同构）：
+ * - **点**：目录 = 进一层；文件 = 进编辑面；选择模式里 = 勾/去勾这一行；
+ * - **长按**：进选择模式并勾上这一行（TG 的选择模式入口就是长按）；
+ * - **行尾 ⋮**（[showMore]）：开这一行的操作面板（复制路径 / 进文件夹）——
+ *   与长按**不是**同一件事：长按是"选中"（TG 语义），操作面板要一个明确可点的入口。
  *
  * 选中态是**整行淡底 + 头像位换成勾**（TG 选择模式的读法：勾在最左那一格，
  * 头像让位）—— 只换行底色的话，勾选与"这行被按住了"看起来是一回事。
@@ -507,7 +536,11 @@ private fun SearchField(
 private fun FileRow(
     file: ScriptFileRowUi,
     selected: Boolean,
+    /** 是否画行尾的 ⋮（选择模式里不画 —— 那时行尾留给"已选 N 项"那套语义）。 */
+    showMore: Boolean,
     onClick: () -> Unit,
+    /** 行尾 ⋮ 的落点（开操作面板）。 */
+    onMore: () -> Unit,
     onLongClick: () -> Unit,
 ) {
     val palette = ThemeColors
@@ -548,9 +581,33 @@ private fun FileRow(
                 maxLines = 1,
             )
         }
-        Spacer(Modifier.width(16.dp))
+        if (showMore) {
+            // 行尾 ⋮（TG 的溢出钮 `ic_ab_other`）：48dp 触控目标、居行右端。
+            // 色取 `windowBackgroundWhiteBlackText`（[ThemeColors.text]：浅色下就是黑），
+            // 与顶栏那颗 `⋮` 同档 —— 列表行里唯一一处"文字色"的图标。
+            Box(
+                Modifier
+                    .size(FileRowMoreTouch)
+                    .pressable(
+                        role = Role.Button,
+                        overlay = palette.menuSelector,
+                        shape = CircleShape,
+                        onClick = onMore,
+                    )
+                    .semantics { contentDescription = "更多（${file.name}）" },
+                contentAlignment = Alignment.Center,
+            ) {
+                Glyph(kind = GlyphKind.MORE_VERT, tint = palette.text, size = 20.dp)
+            }
+            Spacer(Modifier.width(4.dp))
+        } else {
+            Spacer(Modifier.width(16.dp))
+        }
     }
 }
+
+/** 行尾 ⋮ 的触控目标（Material 最小可达性 48dp）。 */
+private val FileRowMoreTouch = 48.dp
 
 /** 选中遮罩的圆角（`DialogCell` 的 `cornersRadius = dp(8) * cornerProgress`）。 */
 private val FileRowSelectedRadius = 8.dp
@@ -727,8 +784,8 @@ private fun CreateFab(
     val subExit = fadeOut(tween(FabAnimDurationMillis, easing = EaseOutQuint)) +
         scaleOut(targetScale = FabSubInitialScale, animationSpec = tween(FabAnimDurationMillis, easing = EaseOutQuint)) +
         slideOutVertically(tween(FabAnimDurationMillis, easing = EaseOutQuint)) { subOffsetPx }
-    // 子项比主钮宽（文案 + 图标），列宽 = 最宽的那个子项：**右对齐**才能让主钮
-    // 仍贴住右下角（居中会让列宽把主钮往左推）。
+    // 子项与主钮同尺寸（48dp），列宽 = 主钮宽；**右对齐**是让"子钮与主钮同心"这条
+    // 在任何列宽下都成立（居中一旦遇上更宽的子项就会把主钮往左推）。
     Column(modifier, horizontalAlignment = Alignment.End) {
         // 子项自下而上展开（TG：子按钮浮在主按钮上方，逐颗滑出）。
         AnimatedVisibility(visible = expanded, enter = subEnter, exit = subExit) {
@@ -800,32 +857,33 @@ private const val FabSubInitialScale = 0.4f
 private val FabSubRise = 64.dp
 
 /**
- * FAB 展开的子项：**圆角长方形**（高与主钮同为 [FabSize]，宽随文案），文案在左、
- * 图标靠右 —— 这一条是本仓自己的版式：TG 的子按钮是 48dp 圆徽章且只有图标，
- * 而本仓这两档动作（新建文件 / 新建文件夹）只差一个字，光看图标认不出来。
+ * FAB 展开的子项：**与主钮同尺寸的圆徽章（[FabSize] = 48dp）、只有图标** ——
+ * TG 的 `FragmentFloatingButton` 子按钮就是这个形态（一颗同尺寸的圆钮 + 一枚字形）。
+ *
+ * **不带文案**：这两档动作（新建文件 / 新建文件夹）一度做成"圆角长方形 + 文案"，
+ * 但两颗子钮并排时文字把主钮上方那一列撑得很宽、也把 48dp 的节奏打散；
+ * 图标（文档 / 文件夹）+ 点完立刻出现的命名对话框标题已经足够分辨。
+ * 无文案的代价是读屏认不出，故 [label] 仍进 contentDescription。
  *
  * 背板沿用 TG 的 `iBlur3Background`（`BlurredBackgroundDrawable`）那一套：
- * - **圆角 16dp**（TG 的 `setRadius(dp(18))` 是落在 48dp 圆徽章上的取法，
- *   近乎正圆；这里拉成条状，16dp 才读作"圆角长方形"而不是胶囊）；
+ * - **圆角 18dp**（TG 的 `setRadius(dp(18))` 落在 48dp 上，近乎正圆）；
  * - **描边 0.4dp**（`setStrokeWidth(dpf2(0.4f), dpf2(0.4f))`），色随深浅：
  *   上边浅色 `0x20000000` / 深色 `0x11FFFFFF`（[FabSubStrokeTop]）；
  * - 底是**模糊背板**（把身后的内容模糊后上浮），本仓没有实时模糊，
  *   取 `key_windowBackgroundWhite` 的实色近似 —— 浅色下就是白，深色下是 `#181819`
- *   （[ThemeColors.surfaceMuted] 的浅色档不适用，故直接用 [ThemeColors.background]）。
- * - 文案与图标同取 `key_actionBarDefaultIcon`（[ThemeColors.barIcon]：浅色偏冷深灰
+ *   （[ThemeColors.background]）。
+ * - 图标取 `key_actionBarDefaultIcon`（[ThemeColors.barIcon]：浅色偏冷深灰
  *   `#FF404E56`，**不是**正文黑）；按下底 = `key_listSelector`
- *   （[ThemeColors.menuSelector] 同档，且按背板形状裁成圆角）。
- *
- * 文案同时也进 contentDescription：读屏把整条读成"新建文件夹，按钮"，
- * 不必它自己去拼"文字 + 图标"两段。
+ *   （[ThemeColors.menuSelector] 同档）。形状要一起给 [pressable]：按压遮罩按矩形画，
+ *   不给形状就会在圆的四个角上露出方块灰影（见 `FlatPressIndication`）。
  */
 @Composable
 private fun FabSubItem(label: String, glyph: GlyphKind, onClick: () -> Unit) {
     val palette = ThemeColors
     val shape = remember { RoundedCornerShape(FabSubCornerRadius) }
-    Row(
+    Box(
         Modifier
-            .height(FabSize)
+            .size(FabSize)
             .background(palette.background, shape)
             .border(0.4.dp, FabSubStrokeTop(), shape)
             .pressable(
@@ -834,33 +892,15 @@ private fun FabSubItem(label: String, glyph: GlyphKind, onClick: () -> Unit) {
                 shape = shape,
                 onClick = onClick,
             )
-            // 内边距在 pressable **之后**：整条（含留白）都是可点区。
-            .padding(start = FabSubTextPadding, end = FabSubIconPadding)
             .semantics { contentDescription = label },
-        verticalAlignment = Alignment.CenterVertically,
+        contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = label,
-            color = palette.barIcon,
-            style = MaterialTheme.typography.bodyLarge,
-            maxLines = 1,
-        )
-        Spacer(Modifier.width(FabSubLabelIconGap))
         Glyph(kind = glyph, tint = palette.barIcon, size = 24.dp)
     }
 }
 
-/** 子钮背板圆角（TG 的 `iBlur3Background.setRadius(dp(18))` 落到条状背板上的取法）。 */
-private val FabSubCornerRadius = 16.dp
-
-/** 子钮文案距左边的内边距。 */
-private val FabSubTextPadding = 16.dp
-
-/** 子钮图标距右边的内边距（图标靠右，故右侧比左侧紧一档）。 */
-private val FabSubIconPadding = 12.dp
-
-/** 子钮里「文案 → 图标」之间的间隙。 */
-private val FabSubLabelIconGap = 8.dp
+/** 子钮背板圆角（TG 的 `iBlur3Background.setRadius(dp(18))`，落在 48dp 上近乎正圆）。 */
+private val FabSubCornerRadius = 18.dp
 
 /**
  * 子钮那圈 0.4dp 描边（`BlurredBackgroundDrawable.getStrokeColorTop()`：

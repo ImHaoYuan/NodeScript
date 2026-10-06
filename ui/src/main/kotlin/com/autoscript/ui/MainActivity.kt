@@ -177,6 +177,12 @@ class MainActivity : ComponentActivity() {
                                     onCreate = { projectId, name, isFolder ->
                                         scope.launch { createEntryOp(projectId, name, isFolder) }
                                     },
+                                    // 点文件进编辑面：读/存都**不在这里落状态** —— 成败归编辑器自己
+                                    // 显示（清单没变），保存成功后才重读一次清单（大小/时刻变了）。
+                                    onReadFile = { projectId, relPath -> readScriptFileOp(projectId, relPath) },
+                                    onSaveFile = { projectId, relPath, content ->
+                                        saveScriptFileOp(projectId, relPath, content)
+                                    },
                                     onSortChange = { sort, reversed ->
                                         projectState = projectState.copy(sort = sort, reversed = reversed, opError = null, opNotice = null)
                                     },
@@ -316,6 +322,30 @@ class MainActivity : ComponentActivity() {
             creating = null,
             opNotice = "已新建$kind「$name」",
         )
+    }
+
+    /**
+     * 读一个脚本文件（项目页点文件进编辑面）。
+     *
+     * **不写 [projectState]**：读取的成败归编辑器自己显示（清单没有任何变化），
+     * 宿主未接线照抛 —— 编辑器把原因显示在正文上方，而不是让列表替它报错。
+     */
+    private suspend fun readScriptFileOp(projectId: String, relPath: String): String {
+        val host = hostSummary() ?: error("宿主摘要未接线（Application 未实现 HostSummary）")
+        return host.readScriptFile(projectId, relPath)
+    }
+
+    /**
+     * 保存一个脚本文件（编辑器「保存」）。
+     *
+     * 落盘成功后再重读一次清单：文件大小/修改时刻变了，列表上那两列要跟着变
+     * （不然"刚存的内容没生效"会从列表上读出来）。**失败不重读**（清单没变），
+     * 原文抛给编辑器显示。
+     */
+    private suspend fun saveScriptFileOp(projectId: String, relPath: String, content: String) {
+        val host = hostSummary() ?: error("宿主摘要未接线（Application 未实现 HostSummary）")
+        host.saveScriptFile(projectId, relPath, content)
+        reloadProjectFiles()
     }
 
     private suspend fun reloadCapabilities() {

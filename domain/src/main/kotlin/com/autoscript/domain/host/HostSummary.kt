@@ -139,6 +139,33 @@ interface HostSummary {
      * @param isFolder true = 建文件夹，false = 建空文件。
      */
     suspend fun createEntry(projectId: String, name: String, isFolder: Boolean)
+
+    /**
+     * 读一个脚本文件的文本内容（项目页**点文件进编辑**；TG 文件页点开文档的对应位）。
+     *
+     * 挂起：读盘（IO）。失败**抛**（与 [scriptFiles] 同一条纪律）—— 读不到就是读不到，
+     * 不返回空串：空串是"这个文件本来就是空的"，两者在编辑器里是两句话。
+     *
+     * 非 UTF-8 文本、超过实现方上限的文件**抛**（原文给 UI）：把二进制当文本打开再存回去
+     * 等于损坏用户文件，宁可如实拒绝。上限由实现方定，本契约只要求"拒绝时抛"。
+     *
+     * @param projectId 所属项目（`files/scripts/` 下第一级目录名）。
+     * @param relPath 项目内相对路径（[ScriptFileRow.relPath]，**不是**单段名字 ——
+     *   子文件夹里的文件靠它定位；实现方必须防越界）。
+     */
+    suspend fun readScriptFile(projectId: String, relPath: String): String
+
+    /**
+     * 覆盖写一个脚本文件的文本内容（编辑器「保存」）。
+     *
+     * 挂起：写盘（IO）。失败**抛**；实现方必须**原子替换**（先写临时文件再 rename）——
+     * 半截写入会把用户的脚本毁成语法错误，而用户看不到"写到一半"这件事。
+     *
+     * 只覆盖**已存在**的文件：不新建（新建走 [createEntry]，撞名语义在那里裁决）。
+     *
+     * @param relPath 同 [readScriptFile]。
+     */
+    suspend fun saveScriptFile(projectId: String, relPath: String, content: String)
 }
 
 /**
