@@ -24,7 +24,8 @@ import com.autoscript.domain.permission.CapabilityState
  *   `CapabilityLifecycle` 的判据）—— 呈现层不自己写 `state != GRANTED`，那是第二套判据；
  * - 降级中的定时任务**单列一段**（§8.6 承诺「可能偏差」要在 UI 上标注）：它们不是
  *   权限问题，塞进能力行里会让人找不到；
- * - 安装体积的字段与换算照旧（§15 E1 的记账口径不变，`text()` 仍由测试钉着，
+ * - 安装体积的字段与换算照旧（§15 E1 的记账口径不变 —— **2026-10-07 预算重定为 `≤ 150MB release`**，
+ *   `design-decisions.md` 第 41 项；重定只动预算数字，不动这里的量法与换算，`text()` 仍由测试钉着，
  *   没量到 = null 而不是 0）；批 47 起设置页**不再渲染**那句「安装体积 xxx」
  *   （用户口径「安装体积xxx那个文字去掉」）—— UI 披露面的撤下见
  *   `design-decisions.md` 的「已推翻 / 已改口径」表，预算记账不受影响。
