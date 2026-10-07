@@ -42,6 +42,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -71,10 +72,13 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
@@ -83,18 +87,24 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.autoscript.ui.components.ActionBar
 import com.autoscript.ui.components.ActionBarAction
+import com.autoscript.ui.components.LocalEditorHighlightHost
 import com.autoscript.ui.components.LocalTabBarHidden
 import com.autoscript.ui.components.LocalToast
 import com.autoscript.ui.components.TabBarBottomClearance
 import com.autoscript.ui.components.color
 import com.autoscript.ui.components.pressable
 import com.autoscript.ui.state.EditorAffordance
+import com.autoscript.ui.state.EditorHighlightSession
 import com.autoscript.ui.state.EditorJump
 import com.autoscript.ui.state.EditorScroll
 import com.autoscript.ui.state.StatusTone
+import com.autoscript.ui.state.SyntaxHighlightResult
 import com.autoscript.ui.theme.ThemeColors
+import com.autoscript.ui.theme.isDarkTheme
+import com.autoscript.ui.theme.syntaxColor
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
 /**
@@ -226,6 +236,7 @@ fun ScriptEditorScreen(
             // 手指方向都不跨文件继承 —— 不需要再给它们加 key。
             else -> EditorBody(
                 value = loaded,
+                relPath = relPath,
                 onValueChange = { next ->
                     // **只有正文真的变了才标脏**：点正文下方的空白只是把光标挪到文末
                     // （用户口径），正文一个字没动 —— 那时亮起"保存"、退出还要问
@@ -344,6 +355,7 @@ internal data class ScriptLoad(val text: String?, val error: String?)
 private fun EditorBody(
     value: TextFieldValue,
     onValueChange: (TextFieldValue) -> Unit,
+    relPath: String,
     modifier: Modifier = Modifier,
 ) {
     val palette = ThemeColors
@@ -369,6 +381,7 @@ private fun EditorBody(
     PendingScrollEffect(pendingScroll, vScroll, hScroll, zoom) { pendingScroll = null }
     // 正文与行号槽**共用同一套字体度量**（同一个 TextStyle，只换对齐与颜色）：换字号、
     // 换行高、换字距都只改一处，否则第 n 个数字会逐行偏离第 n 行。
+    val highlighted = rememberEditorHighlight(value.text, relPath)
     val codeStyle = remember(palette.text, zoom.committed) {
         editorCodeStyle(palette.text, zoom.committed)
     }
@@ -463,6 +476,7 @@ private fun EditorBody(
                 EditorTextArea(
                     value = value,
                     onValueChange = onValueChange,
+                    highlightedText = highlighted,
                     hScroll = hScroll,
                     focusRequester = focusRequester,
                     minWidth = metrics.textViewportWidth,
@@ -771,6 +785,7 @@ private fun EditorGutter(width: Dp, text: String, style: TextStyle) {
 private fun RowScope.EditorTextArea(
     value: TextFieldValue,
     onValueChange: (TextFieldValue) -> Unit,
+    highlightedText: AnnotatedString?,
     hScroll: ScrollState,
     focusRequester: FocusRequester,
     minWidth: Dp,
@@ -781,6 +796,13 @@ private fun RowScope.EditorTextArea(
         BasicTextField(
             value = value,
             onValueChange = onValueChange,
+            visualTransformation = { original ->
+                if (highlightedText != null) {
+                    TransformedText(highlightedText, OffsetMapping.Identity)
+                } else {
+                    TransformedText(original, OffsetMapping.Identity)
+                }
+            },
             modifier = Modifier
                 // **不折行**靠的是约束而不是参数：`BasicTextField` 没有 `softWrap`，但外层
                 // `horizontalScroll` 会给内容无限宽 —— 拿不到宽度上限，排版就不会折行，
@@ -1088,3 +1110,37 @@ private fun ColumnScope.EditorNotice(text: String) {
         )
     }
 }
+
+/**
+ * 编辑器语法高亮：为 [relPath] 持有一个后台高亮会话，把正文 [text] 的最新着色结果投成
+ * [AnnotatedString]。null = 按纯文本画（未供宿主口 / 非 JS / 原生库缺席 / 结果还没回来）。
+ *
+ * 会话随 [relPath] 换（换文件才重开），组合离开时关；正文每次变化只投给会话，防抖与
+ * 过期结果的丢弃都在会话内部（见 [EditorHighlightSession]）。
+ */
+@Composable
+private fun rememberEditorHighlight(text: String, relPath: String): AnnotatedString? {
+    // 语法高亮会话（组合期间持有，换文件时才换；正文变化时投进去）。factory 在会话的
+    // worker 线程上被调用 —— 开原生会话（含 dlopen）不在组合线程上做。
+    val host = LocalEditorHighlightHost.current
+    val dark = isDarkTheme()
+    val session = remember(relPath) {
+        host?.let { editorHost ->
+            EditorHighlightSession(relPath, factory = { path: String -> editorHost.open(path) }).also { it.start() }
+        }
+    }
+    DisposableEffect(session) {
+        onDispose { session?.close() }
+    }
+    LaunchedEffect(session, text) {
+        session?.submitSource(text)
+    }
+    // 会话缺席时也照常订阅（回 null 的那份常量流），不把 composable 调用放进条件分支。
+    val highlightResult by (session?.result ?: NoHighlightResult).collectAsState()
+    val spans = highlightResult?.spans.orEmpty()
+    // 贴色：一行都没贴上（纯文本、非 JS、原生缺席、区间全非法）时回 null，走原来的纯 String 路径。
+    return if (spans.isEmpty()) null else highlightedText(text, spans) { kind -> syntaxColor(kind, dark) }
+}
+
+/** 高亮会话缺席（未供宿主 / 非 JS / 原生库不可用）时代入的空流：值恒为 null = 纯文本。 */
+private val NoHighlightResult: MutableStateFlow<SyntaxHighlightResult?> = MutableStateFlow(null)

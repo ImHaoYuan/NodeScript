@@ -1,5 +1,6 @@
 package com.autoscript.domain.host
 
+import com.autoscript.domain.editor.SyntaxHighlighter
 import com.autoscript.domain.permission.Capability
 import com.autoscript.domain.permission.CapabilityLifecycle
 import com.autoscript.domain.permission.CapabilityState
@@ -177,6 +178,12 @@ interface HostSummary {
      * @param relPath 同 [readScriptFile]。
      */
     suspend fun saveScriptFile(projectId: String, relPath: String, content: String)
+
+    /**
+     * 为指定路径文件创建语法高亮会话（编辑器前端呼叫）。
+     * 默认 NONE：原生解析器缺席时，编辑器保留纯文本能力。
+     */
+    fun createSyntaxHighlighter(relPath: String): SyntaxHighlighter = SyntaxHighlighter.NONE
 }
 
 /**

@@ -23,6 +23,8 @@
 | libjpeg-turbo（OpenCV 的 JPEG 编解码） | 随 OpenCV 源码树 pin（`3rdparty/libjpeg-turbo`，commit `a99141acd7874bfe027d2bd945a4bd1d7192178b`） | IJG License **或** Modified (3-clause) BSD —— 双许可，取哪个由使用者自选 | 见 [原文](node-runtime-build/licenses/libjpeg-turbo/LICENSE.md) |
 | libpng（OpenCV 的 PNG 编解码） | 随 OpenCV 源码树 pin（`3rdparty/libpng`，commit `8472efd791dba6cd53ff5f73fe3ceb874856b454`） | PNG Reference Library License version 2 | 见 [原文](node-runtime-build/licenses/libpng-LICENSE) |
 | zlib（OpenCV 的压缩层） | 随 OpenCV 源码树 pin（`3rdparty/zlib`，commit `266a2989b234a84129c04219f06099164378c280`） | zlib License | 见 [原文](node-runtime-build/licenses/zlib-LICENSE) |
+| tree-sitter（解析器核心） | v0.20.8（commit `0c49d6745b3fc4822ab02e0018770cd6383a779c`） | MIT | 见 [原文](node-runtime-build/licenses/tree-sitter-LICENSE) |
+| tree-sitter-javascript（JavaScript 语法） | v0.20.1（commit `f1e5a09b8d02f8209a68249c93f0ad647b228e6e`） | MIT | 见 [原文](node-runtime-build/licenses/tree-sitter-javascript-LICENSE) |
 
 ## 2. 各组件的随包位置（随包 = 进了 APK 或落进 filesDir）
 
@@ -55,6 +57,15 @@
 ### zlib（OpenCV 的压缩层） — 随 OpenCV 源码树 pin（`3rdparty/zlib`，commit `266a2989b234a84129c04219f06099164378c280`）
 
 - 同 `libopencv.so`（`BUILD_ZLIB=ON` 强制走树内源码）
+
+### tree-sitter（解析器核心） — v0.20.8（commit `0c49d6745b3fc4822ab02e0018770cd6383a779c`）
+
+- `lib/arm64-v8a/libtree-sitter.so`（`:bridge:treesitter`，编辑器语法高亮；版本钉在 `bridge/treesitter/scripts/build-treesitter.sh`）
+- 同模块的 JNI 绑定 `lib/arm64-v8a/libtreesitter.so` 是本仓 GPL-2.0-only 代码，动态链接本件，不列为第三方
+
+### tree-sitter-javascript（JavaScript 语法） — v0.20.1（commit `f1e5a09b8d02f8209a68249c93f0ad647b228e6e`）
+
+- `lib/arm64-v8a/libtree-sitter-javascript.so`（`:bridge:treesitter`，编辑器语法高亮；版本钉在 `bridge/treesitter/scripts/build-treesitter.sh`）
 
 ## 3. 本仓自有代码
 

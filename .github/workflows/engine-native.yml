@@ -9,10 +9,15 @@ name: engine-native
 # 放行。那份 APK 的用途是「装配链通不通」，不是「设备上跑不跑得起来」。
 #
 # B5 的真堵点**不是**「产物取不到」，而是**没有任何 workflow 产出 `noden` /
-# `bridge_native.node`**：node-slice（libnode + npm 素材）与 image-native（libopencv）
-# 的 artifact 都在且可取，只有这两个引擎件从来没有生产者。所以本 workflow 自己跑
-# `build-native.sh`，再跨 workflow 取那两条 artifact 喂 `LIBNODE`/`NPM_CLI_ROOT`/`LIBOPENCV`，
-# 起 `assembleDebug`，最后逐件断言。
+# `bridge_native.node`**：node-slice（libnode + npm 素材）、image-native（libopencv）与
+# treesitter-native（tree-sitter 三件）的 artifact 都在且可取，只有这两个引擎件从来没有
+# 生产者。所以本 workflow 自己跑 `build-native.sh`，再跨 workflow 取那三条 artifact 喂
+# `LIBNODE`/`NPM_CLI_ROOT`/`LIBOPENCV`/`TREESITTER_OUT`，起 `assembleDebug`，最后逐件断言。
+#
+# 第五件（tree-sitter 三件，2026-10-07 补）为什么必须在这条门里断言：装配侧
+# `autoscript.engine-natives` 对它是**选填件**（缺位只 warn），所以「没随进包」是绿门下的
+# 静默降级 —— 症状表现为编辑器语法高亮无声失效，而所有门都是绿的。真形态 APK 是唯一
+# 能把它钉死的地方。
 #
 # 为什么**不**并进 `ci.yml`（2026-10-06 拍板）：分钟预算。NDK zip 722MB 下载 + Node 头文件包
 # + C++ 交叉编译是分钟级，塞进 PR 门会把「秒级红绿」变成「十分钟才知道」。PR 门仍由
@@ -26,6 +31,7 @@ on:
     paths:
       - 'engine/node-process/**'
       - 'bridge/native/**'
+      - 'bridge/treesitter/**'
       - 'app/**'
       - 'build-logic/**'
       - 'gradle/libs.versions.toml'
@@ -35,6 +41,7 @@ on:
     paths:
       - 'engine/node-process/**'
       - 'bridge/native/**'
+      - 'bridge/treesitter/**'
       - 'app/**'
       - 'build-logic/**'
       - 'gradle/libs.versions.toml'
@@ -54,7 +61,7 @@ concurrency:
 
 jobs:
   true-form-apk:
-    name: 真形态 APK（noden + libnode + libc++_shared + libopencv + npm 素材）
+    name: 真形态 APK（noden + libnode + libc++_shared + libopencv + tree-sitter + npm 素材）
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
@@ -159,14 +166,27 @@ jobs:
           }
           fetch node-slice.yml node-slice "$RUNNER_TEMP/ns"
           fetch image-native.yml libopencv "$RUNNER_TEMP/ocv"
+          fetch treesitter-native.yml treesitter-natives-arm64-v8a "$RUNNER_TEMP/ts"
 
           [ -f "$RUNNER_TEMP/ns/libnode.so" ] \
             || { echo "::error::node-slice artifact 里没有 libnode.so"; ls -l "$RUNNER_TEMP/ns"; exit 1; }
           [ -f "$RUNNER_TEMP/ocv/libopencv.so" ] \
             || { echo "::error::libopencv artifact 里没有 libopencv.so"; ls -l "$RUNNER_TEMP/ocv"; exit 1; }
+          # tree-sitter 三件：**全拷或全不拷**（与装配侧 autoscript.engine-natives 同一条纪律）。
+          # 这里一旦半套放行，装配期只会 warn 然后整组跳过 —— 症状就是「APK 里没有高亮 so、
+          # 编辑器静默降级纯文本」，正是这条 artifact 要堵的洞，所以缺件在本步即红。
+          for f in libtree-sitter.so libtree-sitter-javascript.so libtreesitter.so; do
+            find "$RUNNER_TEMP/ts" -name "$f" -type f | grep -q . \
+              || { echo "::error::treesitter artifact 里没有 $f"; ls -lR "$RUNNER_TEMP/ts"; exit 1; }
+          done
+          # gh run download 对 `path: <dir>/*.so` 的落位是平的，但别赌它 —— 递归找。
+          mkdir -p "$RUNNER_TEMP/ts-out/arm64-v8a"
+          find "$RUNNER_TEMP/ts" -name '*.so' -type f \
+            -exec cp -t "$RUNNER_TEMP/ts-out/arm64-v8a" {} +
           echo "LIBNODE=$RUNNER_TEMP/ns/libnode.so"           >> "$GITHUB_ENV"
           echo "NPM_CLI_ROOT=$RUNNER_TEMP/ns/npm"             >> "$GITHUB_ENV"
           echo "LIBOPENCV=$RUNNER_TEMP/ocv/libopencv.so"      >> "$GITHUB_ENV"
+          echo "TREESITTER_OUT=$RUNNER_TEMP/ts-out"           >> "$GITHUB_ENV"
           echo "--- node-slice 出库自审 ---"; cat "$RUNNER_TEMP/ns/SHASUMS256"
           echo "--- libopencv 出库自审 ---"; cat "$RUNNER_TEMP/ocv/SHASUMS256"
 
@@ -214,7 +234,7 @@ jobs:
       - name: 构建真形态 Debug APK
         run: ./gradlew :app:assembleDebug --stacktrace
 
-      - name: 断言 APK 真形态（四件齐 + npm 素材 + ABI 只 arm64）
+      - name: 断言 APK 真形态（四件齐 + tree-sitter 三件 + npm 素材 + ABI 只 arm64）
         run: |
           set -euo pipefail
           APK="$(ls app/build/outputs/apk/debug/*.apk)"
@@ -227,7 +247,7 @@ jobs:
 
           echo "--- lib/arm64-v8a/ ---"
           grep -E '^lib/arm64-v8a/' "$RUNNER_TEMP/apk-entries.txt" || true
-          for f in libnoden.so libnode.so libc++_shared.so libopencv.so; do
+          for f in libnoden.so libnode.so libc++_shared.so libopencv.so libtree-sitter.so libtree-sitter-javascript.so libtreesitter.so; do
             grep -qx "lib/arm64-v8a/$f" "$RUNNER_TEMP/apk-entries.txt" \
               || { echo "::error::APK 缺 lib/arm64-v8a/$f"; exit 1; }
           done

@@ -61,6 +61,26 @@ const ANDROID_API = need('ANDROID_API')
 const TARGET_ARCH = need('TARGET_ARCH')
 
 /**
+ * tree-sitter 两件的版本**不在** VERSIONS.env：事实来源是 `:bridge:treesitter` 的构建脚本
+ * `build-treesitter.sh` 里的 `TS_VERSION/TS_COMMIT/GRAMMAR_VERSION/GRAMMAR_COMMIT` 四行
+ * （脚本据此 clone + 校验 pinned commit，host 测试也读同两行）。与 VERSIONS.env 同解析法：
+ * 只认行首 `KEY=VALUE` 字面量，缺即抛 —— 不在本生成器里写死第二份版本。
+ */
+const TREESITTER_SCRIPT = 'bridge/treesitter/scripts/build-treesitter.sh'
+function readShellPins(rel, keys) {
+  const out = {}
+  for (const line of fs.readFileSync(path.join(ROOT, rel), 'utf8').split('\n')) {
+    const m = /^([A-Z_][A-Z0-9_]*)=(.*)$/.exec(line.trim())
+    if (m && keys.includes(m[1])) out[m[1]] = m[2]
+  }
+  for (const k of keys) {
+    if (!out[k]) throw new Error(`${rel} 缺 ${k}（THIRD_PARTY_NOTICES 的版本事实来源少了一根钉）`)
+  }
+  return out
+}
+const TS = readShellPins(TREESITTER_SCRIPT, ['TS_VERSION', 'TS_COMMIT', 'GRAMMAR_VERSION', 'GRAMMAR_COMMIT'])
+
+/**
  * 组件表。`file` 字段是 `licenses/` 下的原文路径 —— 生成器**不校验文件存在**
  * （`--check` 也不），因为本门管的是「清单 ↔ VERSIONS.env」这一条联动；
  * 原文在不在由**文档链接门**（`check-doc-links.sh`，会顺着清单里的链接查）与
@@ -124,6 +144,23 @@ const COMPONENTS = [
     license: 'zlib License',
     file: 'zlib-LICENSE',
     shipsAs: ['同 `libopencv.so`（`BUILD_ZLIB=ON` 强制走树内源码）'],
+  },
+  {
+    name: 'tree-sitter（解析器核心）',
+    version: `${TS.TS_VERSION}（commit \`${TS.TS_COMMIT}\`）`,
+    license: 'MIT',
+    file: 'tree-sitter-LICENSE',
+    shipsAs: [
+      '`lib/arm64-v8a/libtree-sitter.so`（`:bridge:treesitter`，编辑器语法高亮；版本钉在 `' + TREESITTER_SCRIPT + '`）',
+      '同模块的 JNI 绑定 `lib/arm64-v8a/libtreesitter.so` 是本仓 GPL-2.0-only 代码，动态链接本件，不列为第三方',
+    ],
+  },
+  {
+    name: 'tree-sitter-javascript（JavaScript 语法）',
+    version: `${TS.GRAMMAR_VERSION}（commit \`${TS.GRAMMAR_COMMIT}\`）`,
+    license: 'MIT',
+    file: 'tree-sitter-javascript-LICENSE',
+    shipsAs: ['`lib/arm64-v8a/libtree-sitter-javascript.so`（`:bridge:treesitter`，编辑器语法高亮；版本钉在 `' + TREESITTER_SCRIPT + '`）'],
   },
 ]
 

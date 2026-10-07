@@ -14,6 +14,7 @@ import com.autoscript.domain.host.TaskRegistration
 import com.autoscript.domain.permission.Capability
 import com.autoscript.domain.host.ScriptFilesSnapshot
 import com.autoscript.domain.scripts.ScriptPaths
+import com.autoscript.domain.editor.SyntaxHighlighter
 import com.autoscript.engine.nodeprocess.NodeEngineConfig
 import com.autoscript.engine.nodeprocess.NodeProcessEngine
 import com.autoscript.shell.AlarmDispatch
@@ -591,6 +592,14 @@ class AppShellApplication : Application(), HostSummary {
     override suspend fun saveScriptFile(projectId: String, relPath: String, content: String) {
         ScriptFileOps.save(filesDir.toPath(), projectId, relPath, content)
     }
+
+    /**
+     * 语法高亮会话工厂（[HostSummary] 的生产实现，编辑器前端调用）。
+     * 经 [PlatformWiring.syntaxHighlighter] 薄转接 `:platform:editor` 的 EditorHighlighters
+     * —— 根包不 import 任何 `com.autoscript.platform..`（ArchitectureTest 看住）。
+     */
+    override fun createSyntaxHighlighter(relPath: String): SyntaxHighlighter =
+        PlatformWiring.syntaxHighlighter(relPath)
 
     /** 漏投账本（能力中心呈现「闹钟已响但调度未就绪」）。 */
     fun missedAlarms(): Map<String, Long> = alarmDispatch.missed()
