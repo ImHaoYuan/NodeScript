@@ -31,6 +31,18 @@ interface EnginePool {                                // 实现在 :app-service:
   选 `WATCHDOG` 而不给 `scriptTimeoutMillis` 构造即 `require` 失败——判据是**发起方等不等**，不是「有没有声明超时」，声明了却没人执行等于没声明（§8.6）。
 - 实现：`:engine:node-process`（NodeFactory），经 **Provider/SPI** 注入（`QuickJSFactory` 随沙箱裁掉，§18 第 1 项；缝留在原处，将来真要第二个引擎不必改接口）。
 
+**执行身份 lease（`:domain` SPI，A5）**：在线引擎依赖 `RunIdentityIssuer.issue(engineId, engineRunId)`，
+在 spawn 前登记一次性凭据，spawn 返回后立即 `confirmSpawn(pid, isAlive)` 并返回 receipt，
+不等待桥 ready，更不等待 controller 激活。`RuntimeController.start` 的 guard 覆盖 acquire/execute/active 写入，
+早到 heartbeat 等同一锁，不另建启动互等协议。PID 可空；receipt 的 PID 是启动快照，活性 getter 的契约不变。
+启动异常、取消（含 IO 域返回时的取消）必须撤销本次 lease 并回收本次已取得的 process，不按当前槽位猜执行体。
+未配置 HOST_SOCKET 保持离线；配置在线 socket 却缺 issuer/token 是接线错误，不静默降级。
+
+自然退出通知 `lease.naturalExit()`，已绑定连接保留身份作 §7.5 有界排空；后续 pool.release 的 stop 若进程已死，
+不把自然排空升级成硬撤销。活进程 stop/kill 则先 revoke 并关闭连接；同槽重用的旧尾帧与新 run 独立。
+自停请求可能被自身撤销取消，controller 必须在不可取消收尾区域完成已有的有界停止/强杀及回池，
+不承诺被关闭的连接还能收到 stop 成功 ACK。
+
 ### 8.2 引擎实例模型决议（批判决议）
 - **不做**「单 Node 实例多 engine/多 Job」——共享 context 的 `process.exit()`、全局变量、模块副作用全部泄漏（批判 2 反面教材）；「模块作用域隔离」被明确定为**假隔离**。
 - **不做**「v1 用 worker_threads 做并发引擎」——手机端行为未验证（nodejs-mobile #130），且一个 worker 群共享进程=共享隔离边界。列为 P3 **实验性**特性，入口显式标「实验」。
@@ -76,6 +88,9 @@ interface EnginePool {                                // 实现在 :app-service:
 - **内存**：RSS 超阈值（分级配置，池缩容信号）→ 降载警告，连续超阈 → kill + archive。
 **实现注记已外迁**：`WatchdogPolicy` 三路纯判定、`ProcessMonitor` 采样口径、`EngineWatchdog` 调度循环、`HeartbeatLedger` 打点链与生产接线，逐字见 [`design-status.md` §8.4 实现注记](../design-status.md#实现注记自各分卷外迁逐字保留)。
 - 看门狗**不作为业务**：只输出「恢复建议」（重启/重试/降级），不自动无人值守自愈（§1 诚实原则）。
+
+- **心跳归属**：`engines.heartbeat` 的 payload.runId 必须等于连接绑定的 engineRunId；
+  缺身份或替其他 run 打点回 `ERR_PERMISSION_DENIED` 且不刷新账本。合法身份对已不在途的 run 仍回 false。
 
 ### 8.5 崩溃恢复与幂等（checkpoint 意图日志）
 - `:main` 的 scheduler 持久化 **意图日志（intent log）**：`RUN_START(projectId, entry, runNonce, scheduledAt) → …execute… → COMMIT(result)` append-only（SQLite，启动即回放）。

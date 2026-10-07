@@ -35,6 +35,7 @@ test(
     const sockPath = path.join(os.tmpdir(), `autoscript-native-${process.pid}-${Date.now()}.sock`)
     const seen = []                          // 宿主侧收到的请求帧
     const server = net.createServer((sock) => {
+      sock.on('error', () => {})
       let buf = Buffer.alloc(0)
       sock.on('data', (chunk) => {
         buf = buf.length === 0 ? chunk : Buffer.concat([buf, chunk])
@@ -44,6 +45,11 @@ test(
           buf = buf.subarray(nl + 1)
           if (!line) continue
           const req = JSON.parse(line)
+          if (req.t === 'hello') {
+            assert.equal(req.token, 'a'.repeat(64))
+            sock.write('{"t":"helloAck","v":1}\n')
+            continue
+          }
           seen.push(req)
           // 信封合同：payload 必须是 JSON 字符串或 null（裸嵌对象 = 宿主整帧拒收）
           assert.ok(req.payload === null || typeof req.payload === 'string', `payload 形状: ${typeof req.payload}`)
@@ -58,7 +64,20 @@ test(
       client.once('connect', resolve)
       client.once('error', reject)
     })
-    // 不挂 data 监听：socket 保持 paused，内核缓冲只由 addon 读线程消费
+    // 握手阶段唯一读者是 JS；ACK 收到后暂停并移除读者，再交 fd 给 addon。
+    await new Promise((resolve, reject) => {
+      let ack = ''
+      const onData = (chunk) => {
+        ack += chunk.toString('utf8')
+        if (!ack.endsWith('\n')) return
+        client.pause()
+        client.removeListener('data', onData)
+        try { assert.deepEqual(JSON.parse(ack), { t: 'helloAck', v: 1 }); resolve() }
+        catch (e) { reject(e) }
+      }
+      client.on('data', onData)
+      client.write(JSON.stringify({ t: 'hello', v: 1, token: 'a'.repeat(64) }) + '\n')
+    })
 
     const addon = require(REAL_ADDON)
     try {

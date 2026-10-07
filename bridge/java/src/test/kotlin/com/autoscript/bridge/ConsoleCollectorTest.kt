@@ -1,5 +1,7 @@
 package com.autoscript.bridge
 
+import com.autoscript.domain.bridge.AuthenticatedRunContext
+import com.autoscript.domain.engine.EngineId
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.core.ErrorCode
@@ -23,20 +25,21 @@ class ConsoleCollectorTest {
         """{"level":${DomainJson.encode(level)},"text":${DomainJson.encode(text)}}"""
 
     @Test
-    fun `log 方法追加并回 Ok`() = runBlocking {
+    fun `log 方法追加并回 Ok`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1)) {
         val c = ConsoleCollector()
         val resp = c.handle(BridgeRequest(1, "console", "log", okPayload(), 5_000))
         assertInstanceOf(BridgeResponse.Ok::class.java, resp)
         val (last, lines) = c.drain(0)
         assertEquals(1L, last)
         assertEquals(1, lines.size)
+        assertEquals(42L, lines.single().runId)
         assertEquals("hi", lines.single().text)
         assertEquals("log", lines.single().level)
         assertEquals(1L, lines.single().seq)
     }
 
     @Test
-    fun `未知方法返回 ERR_NOT_IMPLEMENTED`() = runBlocking {
+    fun `未知方法返回 ERR_NOT_IMPLEMENTED`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1)) {
         val c = ConsoleCollector()
         val resp = c.handle(BridgeRequest(2, "console", "flush", null, 5_000))
         val err = assertInstanceOf(BridgeResponse.Err::class.java, resp)
@@ -44,7 +47,7 @@ class ConsoleCollectorTest {
     }
 
     @Test
-    fun `无效载荷返回 ERR_INVALID_PARAM 且不追加`() = runBlocking {
+    fun `无效载荷返回 ERR_INVALID_PARAM 且不追加`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1)) {
         val c = ConsoleCollector()
         val cases = listOf(
             null, // 缺 payload
@@ -61,7 +64,7 @@ class ConsoleCollectorTest {
     }
 
     @Test
-    fun `有界容量丢最老并计数`() = runBlocking {
+    fun `有界容量丢最老并计数`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1)) {
         val c = ConsoleCollector(capacity = 3)
         repeat(5) { c.append(runId = 0, level = "log", text = "l$it") }
         assertEquals(3, c.size())
@@ -71,7 +74,7 @@ class ConsoleCollectorTest {
     }
 
     @Test
-    fun `drain 游标拉取按序分页`() = runBlocking {
+    fun `drain 游标拉取按序分页`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1)) {
         val c = ConsoleCollector()
         repeat(5) { c.append(runId = 7, level = "info", text = "t$it") }
         val (last1, page1) = c.drain(0, max = 2)
@@ -88,7 +91,7 @@ class ConsoleCollectorTest {
     }
 
     @Test
-    fun `并发追加不丢行`() = runBlocking {
+    fun `并发追加不丢行`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1)) {
         val c = ConsoleCollector(capacity = 10_000)
         (1..200).map { i ->
             async(Dispatchers.Default) { c.append(runId = 0, level = "debug", text = "c$i") }
@@ -102,7 +105,7 @@ class ConsoleCollectorTest {
     }
 
     @Test
-    fun `经 Router 注册后可被 dispatch`() = runBlocking {
+    fun `经 Router 注册后可被 dispatch`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1)) {
         val registry = RequestRegistry()
         val router = BridgeRouter(registry)
         val collector = ConsoleCollector()
@@ -133,7 +136,7 @@ class ConsoleCollectorTest {
     }
 
     @Test
-    fun `并发写满时容量与丢弃数精确`() = runBlocking {
+    fun `并发写满时容量与丢弃数精确`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1)) {
         val c = ConsoleCollector(capacity = 19)
         (1..8).map { writer ->
             async(Dispatchers.Default) {

@@ -5,6 +5,8 @@ import com.autoscript.domain.engine.EngineStatus
 import com.autoscript.domain.engine.KillCause
 import com.autoscript.domain.engine.RunSummary
 import com.autoscript.domain.engine.StopResult
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
@@ -90,9 +92,12 @@ class RuntimeController(
             active.remove(runId)
         } ?: return StopOutcome.AlreadyGone
         heartbeats.forget(runId)
-        return when (val result = pool.release(handle)) {
-            StopResult.Clean -> StopOutcome.StoppedClean
-            is StopResult.TimedOut -> StopOutcome.StoppedTimeout(result.partial)
+        // 自停会撤销当前桥连接并取消调用协程；已摘走的 handle 必须完成回池。
+        return withContext(NonCancellable) {
+            when (val result = pool.release(handle)) {
+                StopResult.Clean -> StopOutcome.StoppedClean
+                is StopResult.TimedOut -> StopOutcome.StoppedTimeout(result.partial)
+            }
         }
     }
 
@@ -117,11 +122,13 @@ class RuntimeController(
             active.remove(runId)
         } ?: return null
         heartbeats.forget(runId)
-        val killed = handle.slot.engine.kill()
-        // 强杀即终结：槽位 + 许可证必须成对归还（§8.2 记账）；
-        // cause 透传给状态机归类（§8.3：REQUESTED→STOPPED，watchdog/OOM→CRASHED）
-        pool.recycle(handle.slot, cause)
-        return killed
+        return withContext(NonCancellable) {
+            val killed = handle.slot.engine.kill()
+            // 强杀即终结：槽位 + 许可证必须成对归还（§8.2 记账）；
+            // cause 透传给状态机归类（§8.3：REQUESTED→STOPPED，watchdog/OOM→CRASHED）
+            pool.recycle(handle.slot, cause)
+            killed
+        }
     }
 
     /** 全部强杀（killAll 与 start/stop 串行，防许可证超发）。 */
@@ -130,7 +137,7 @@ class RuntimeController(
         active.clear()
         startedAt.clear()
         gone.forEach { heartbeats.forget(it) }
-        pool.killAll(reason)
+        withContext(NonCancellable) { pool.killAll(reason) }
     }
 
     /**
@@ -147,7 +154,7 @@ class RuntimeController(
         active.clear()
         startedAt.clear()
         gone.forEach { heartbeats.forget(it) }
-        pool.killAll(cause)
+        withContext(NonCancellable) { pool.killAll(cause) }
     }
 
     /** 看门狗裁决（纯判断，不执行；执行走 [killRun]/[killAll]）。 */
@@ -381,10 +388,12 @@ class RuntimeController(
             active.remove(runId)
         } ?: return Completed.UnknownRun(null)
         heartbeats.forget(runId)
-        val summary = handle.slot.engine.lastRunSummary()
-        return when (pool.release(handle)) {
-            StopResult.Clean -> Completed.StoppedClean
-            is StopResult.TimedOut -> Completed.StopTimeout(summary)
+        return withContext(NonCancellable) {
+            val summary = handle.slot.engine.lastRunSummary()
+            when (pool.release(handle)) {
+                StopResult.Clean -> Completed.StoppedClean
+                is StopResult.TimedOut -> Completed.StopTimeout(summary)
+            }
         }
     }
 
@@ -398,9 +407,11 @@ class RuntimeController(
             active.remove(runId)
         } ?: return Completed.UnknownRun(null)
         heartbeats.forget(runId)
-        val summary = handle.slot.engine.lastRunSummary()
-        pool.release(handle)
-        return Completed.Killed(summary)
+        return withContext(NonCancellable) {
+            val summary = handle.slot.engine.lastRunSummary()
+            pool.release(handle)
+            Completed.Killed(summary)
+        }
     }
 
     /** 仅 RUNNING 判活的看门狗喂样口径（SUSPENDED 不存在于本状态机，见 EngineStatus）。 */

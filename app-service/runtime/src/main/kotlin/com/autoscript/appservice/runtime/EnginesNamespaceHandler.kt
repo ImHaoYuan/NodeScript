@@ -1,6 +1,8 @@
 package com.autoscript.appservice.runtime
 import com.autoscript.domain.bridge.generated.WireMethods
 
+import com.autoscript.domain.bridge.AuthenticatedRunContext
+import kotlin.coroutines.coroutineContext
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.bridge.RpcNamespaceHandler
@@ -38,7 +40,8 @@ import com.autoscript.domain.json.DomainJson
  *   诚实口径：结算后无状态可读，不得伪造一个 `"STOPPED"`（那会把"查不到"伪装成
  *   "正常结束"，`onExit` 的终态判断会因此错过 CRASHED）。JS `onExit` 的轮询地基；
  * - `heartbeat`：payload `{runId,seq}` → [RuntimeController.heartbeat]（§8.4 缺口②的
- *   宿主侧收单方；JS 侧定时打点）。同/旧 seq 不刷时间戳 → Ok `false`（如实告知未被采纳，
+ *   宿主侧收单方；JS 侧定时打点）。先验认证连接的 engineRunId，缺身份/冒用别的 run →
+ *   ERR_PERMISSION_DENIED；合法身份同/旧 seq 不刷时间戳 → Ok `false`（如实告知未被采纳，
  *   不是错误）；未知 runId（不在途/已结算/从未存在）→ 仍 Ok `false` **且不记账** ——
  *   "不知道这个 run"本身不是调用方错误，但也不得把它伪装成一次有效心跳，更不得让无主
  *   条目堆积顶出活 run 的账（[RuntimeController.heartbeat] 先验在途再落账本）；
@@ -136,6 +139,10 @@ class EnginesNamespaceHandler(
         val o = decodePayload(request.payload)
         val runId = requiredLong(o, "runId")
         val seq = requiredLong(o, "seq")
+        val caller = coroutineContext[AuthenticatedRunContext]
+        if (caller == null || caller.engineRunId != runId) {
+            return err(request, ErrorCode.ERR_PERMISSION_DENIED, "心跳只能来自对应执行的连接")
+        }
         val accepted = controller.heartbeat(runId, seq)
         return ok(request, DomainJson.encode(accepted))
     }

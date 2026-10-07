@@ -11,172 +11,175 @@ import { runtimeBridge } from './runtime'
  *
  * 两个接入面：
  * 1. 嵌入式宿主（Node 内置 Android 进程）：[attachNative] / [NativeBootstrap] ——
- *    fd 由宿主 kBootstrap 注入（§7.5 addon 不自连，本面**不碰** `setSocketFd`），
+ *    fd 由宿主完成 hello/ACK 后经 kBootstrap 注入（addon 不自连，本面**不碰** `setSocketFd`），
  *    `setup(onFrame)` 按 id 结算回包、`addon.invoke` 直接作 [InvokeHandler] 注入
  *    （addon 侧导出即为 InvokeHandler 形），经 JNI→Kotlin Router 走全异步。
  * 2. 开发/回退面（桌面/CI 无 addon）：[SocketBootstrap] unix socket + newline-delimited
- *    JSON frame 直连。request 走 socket 出，response 走 socket 入 → 仍是全异步、requestId 关联。
+ *    JSON frame 直连。先 hello 认证，再传业务 request/response；requestId 仅在本连接内关联。
  *
  * 背压：队列 + drain 续写（§7.5 背压可控）；不阻塞脚本事件循环。
  */
 
 export interface SocketBootstrapOptions {
-  /** socket 路径；默认 `AUTOSCRIPT_HOST_SOCKET` 环境变量。 */
+  /** socket 路径；默认 AUTOSCRIPT_HOST_SOCKET。 */
   socketPath?: string
-  /** 单帧上限（防恶意/损坏的巨型 frame 吞内存）。 */
+  /** 宿主签发的一次性凭据；默认 AUTOSCRIPT_BRIDGE_TOKEN。不用 runNonce 代替。 */
+  token?: string
   maxFrameBytes?: number
-  /** 连接超时（毫秒）。 */
+  /** 建连与身份握手共享的总期限。 */
   connectTimeout?: number
 }
 
-// 单帧上限：§7.5 口径是控制面结构化小对象（大二进制走 side-channel，不过 JSON），
-// 8MB 覆盖最肥的合法帧并留余量。Kotlin 侧同值（NewlineFrameServer.DEFAULT_MAX_FRAME_BYTES），
-// 两侧必须一起改 —— 一侧 8MB 一侧 64MB 会让超限帧在两端表现不一致。
 const DEFAULT_MAX_FRAME = 8 * 1024 * 1024
 const FALLBACK_CONNECT_TIMEOUT = 10_000
+const MAX_HELLO_BYTES = 1024
 
+/** 只有 helloAck 才代表 READY；TCP/unix connect 本身不是认证成功。 */
 export class SocketBootstrap {
   readonly socketPath: string
   readonly maxFrameBytes: number
   readonly connectTimeout: number
-
+  private token: string | undefined
   private socket: net.Socket | null = null
+  private state: 'NEW' | 'CONNECTING' | 'AUTHENTICATING' | 'READY' | 'CLOSED' = 'NEW'
+  private connectPromise: Promise<void> | null = null
+  private resolveConnect: (() => void) | null = null
+  private rejectConnect: ((e: Error) => void) | null = null
+  private timer: ReturnType<typeof setTimeout> | null = null
   private buffer: Buffer = Buffer.alloc(0)
   private queue: BridgeRequest[] = []
   private draining = false
-  private closed = false
 
   constructor(opts: SocketBootstrapOptions = {}) {
     const p = opts.socketPath ?? process.env.AUTOSCRIPT_HOST_SOCKET
     if (!p) throw new Error('SocketBootstrap 需要 socketPath 或 AUTOSCRIPT_HOST_SOCKET')
     this.socketPath = p
+    this.token = opts.token ?? process.env.AUTOSCRIPT_BRIDGE_TOKEN
     this.maxFrameBytes = opts.maxFrameBytes ?? DEFAULT_MAX_FRAME
     this.connectTimeout = opts.connectTimeout ?? FALLBACK_CONNECT_TIMEOUT
+    if (this.maxFrameBytes <= 0 || this.connectTimeout <= 0) throw new Error('桥帧上限/连接期限必须 > 0')
   }
 
   onSocketError: ((e: Error) => void) | null = null
+  get connected(): boolean { return this.state === 'READY' }
 
-  private emitSocketError(e: Error): void {
-    // 桥断链：宿主依赖方（看门狗/连接熔断）监听；默认无监听不抛。
-    if (this.onSocketError) this.onSocketError(e)
-  }
-
-  get connected(): boolean {
-    return this.socket !== null && !this.closed
-  }
-
-  /** 建立连接（幂等；后续重连由宿主层决定，不自动重试 —— 对齐桥连接熔断）。 */
   connect(): Promise<void> {
-    if (this.closed) return Promise.reject(new Error('SocketBootstrap 已关闭'))
-    if (this.socket) return Promise.resolve()
-    return new Promise((resolve, reject) => {
+    if (this.state === 'CLOSED') return Promise.reject(this.stopped('桥 socket 已关闭'))
+    if (this.connectPromise) return this.connectPromise
+    if (!this.token || !/^[0-9a-f]{64}$/.test(this.token)) {
+      this.state = 'CLOSED'
+      return Promise.reject(new AutojsError({ code: 'ERR_PERMISSION_DENIED', detail: '缺有效桥身份凭据' }))
+    }
+    this.state = 'CONNECTING'
+    this.connectPromise = new Promise((resolve, reject) => {
+      this.resolveConnect = resolve
+      this.rejectConnect = reject
+    })
+    this.timer = setTimeout(() => this.fail(this.stopped('桥连接/身份握手超时')), this.connectTimeout)
+    try {
       const sock = net.connect(this.socketPath)
-      const timer = setTimeout(() => {
-        reject(new AutojsError({ code: 'ERR_ENGINE_STOPPED', detail: `socket 连接超时: ${this.socketPath}` }))
-        sock.destroy()
-      }, this.connectTimeout)
-
+      this.socket = sock
       sock.on('connect', () => {
-        clearTimeout(timer)
-        this.socket = sock
-        resolve()
+        if (this.state !== 'CONNECTING') return
+        this.state = 'AUTHENTICATING'
+        sock.write(JSON.stringify({ t: 'hello', v: 1, token: this.token }) + '\n')
+        if (process.env.AUTOSCRIPT_BRIDGE_TOKEN === this.token) delete process.env.AUTOSCRIPT_BRIDGE_TOKEN
+        this.token = undefined
       })
       sock.on('data', (chunk: Buffer) => this.onData(chunk))
-      sock.on('error', (e) => {
-        clearTimeout(timer)
-        this.close()
-        this.emitSocketError(e)
-      })
-      sock.on('close', () => {
-        clearTimeout(timer)
-        this.close()
-      })
-    })
+      sock.on('error', (e) => this.fail(e))
+      sock.on('close', () => this.fail(this.stopped('桥 socket 已断开')))
+    } catch (e) { this.fail(e instanceof Error ? e : this.stopped('桥建连失败')) }
+    return this.connectPromise
   }
 
-  /**
-   * [InvokeHandler]：把请求编码成信封入队。返回 undefined = 已投递、等 [handleResponse]。
-   * 未连接时同步抛错（对齐 invoke 的 ERR_ENGINE_STOPPED 快速拒绝）。
-   */
   readonly handler: InvokeHandler = (ns, method, payload, reqId, ttl) => {
     this.checkConnected()
-    this.enqueue(BridgeEnvelope.encodeRequest({ id: reqId, ns, m: method, payload, ttl, side: null }))
+    this.queue.push(BridgeEnvelope.encodeRequest({ id: reqId, ns, m: method, payload, ttl, side: null }))
+    this.drain()
     return undefined
   }
 
   private checkConnected(): void {
-    if (!this.socket || this.closed) {
-      throw new AutojsError({ code: 'ERR_ENGINE_STOPPED', detail: '桥 socket 未连接' })
-    }
+    if (!this.connected) throw this.stopped('桥尚未通过身份认证')
   }
 
-  /** 安装到单例桥（重复 install 由 RuntimeBridge 拒绝）。 */
-  install(): void {
-    runtimeBridge.install(this.handler)
-  }
+  install(): void { this.checkConnected(); runtimeBridge.install(this.handler) }
 
-  private enqueue(req: BridgeRequest): void {
-    this.queue.push(req)
-    if (!this.draining) this.drain()
-  }
-
-  /** 队列续写：只在一个 drain 循环里动队列，socket 写满即等 drain 再回。 */
   private drain(): void {
-    if (this.draining) return
+    if (this.draining || !this.connected || !this.socket) return
     const sock = this.socket
-    if (!sock || this.closed) return
     this.draining = true
-    const frame = Buffer.concat([Buffer.from(JSON.stringify(this.queue[0]), 'utf8'), Buffer.from([0x0a])])
-    if (!sock.write(frame)) {
-      sock.once('drain', () => {
-        this.draining = false
-        this.drain()
-      })
-      return
+    while (this.queue.length > 0 && this.connected) {
+      // write(false) 也已接收这帧，必须先出队，等 drain 只能续写下一帧。
+      const req = this.queue.shift()!
+      if (!sock.write(JSON.stringify(req) + '\n')) {
+        sock.once('drain', () => { this.draining = false; this.drain() })
+        return
+      }
     }
-    this.queue.shift()
-    if (this.queue.length > 0) {
-      process.nextTick(() => this.drain())
-    } else {
-      this.draining = false
-    }
+    this.draining = false
   }
 
   private onData(chunk: Buffer): void {
-    this.buffer = this.buffer.length === 0 ? chunk : Buffer.concat([this.buffer, chunk])
-    if (this.buffer.length > this.maxFrameBytes) {
-      this.close()
-      this.emitSocketError(new Error(`桥帧超过上限 ${this.maxFrameBytes} 字节`))
-      return
-    }
-    let nl: number
-    while ((nl = this.buffer.indexOf(0x0a)) !== -1) {
+    if (this.state === 'CLOSED') return
+    this.buffer = Buffer.concat([this.buffer, chunk])
+    for (;;) {
+      const limit = this.state === 'READY' ? this.maxFrameBytes : MAX_HELLO_BYTES
+      const nl = this.buffer.indexOf(0x0a)
+      if ((nl < 0 && this.buffer.length > limit) || nl > limit) {
+        this.fail(new Error(`桥帧超过上限 ${limit} 字节`))
+        return
+      }
+      if (nl < 0) return
       const line = this.buffer.subarray(0, nl)
       this.buffer = this.buffer.subarray(nl + 1)
-      if (line.length === 0) continue
-      let frame: BridgeResponse
-      try {
-        frame = JSON.parse(line.toString('utf8')) as BridgeResponse
-      } catch {
-        this.emitSocketError(new Error('桥响应帧非法 JSON'))
-        continue
+      let frame: Record<string, unknown>
+      try { frame = JSON.parse(line.toString('utf8')) as Record<string, unknown> }
+      catch { this.fail(new Error('桥响应帧非法 JSON')); return }
+      if (this.state === 'AUTHENTICATING') {
+        if (!frame || frame.t !== 'helloAck' || frame.v !== 1 || Object.keys(frame).some(k => k !== 't' && k !== 'v')) {
+          this.fail(new AutojsError({ code: 'ERR_PERMISSION_DENIED', detail: '桥身份认证被拒绝或握手版本不符' }))
+          return
+        }
+        this.state = 'READY'
+        if (this.timer) clearTimeout(this.timer)
+        this.timer = null
+        this.resolveConnect?.()
+        this.resolveConnect = null
+        this.rejectConnect = null
+      } else if (this.state === 'READY' && frame && (frame.t === 'ok' || frame.t === 'err')) {
+        runtimeBridge.handleResponse(frame as unknown as BridgeResponse)
+      } else if (this.state !== 'READY') {
+        this.fail(this.stopped('桥握手顺序错误'))
+        return
       }
-      if (frame && (frame.t === 'ok' || frame.t === 'err')) {
-        runtimeBridge.handleResponse(frame)
-      }
-      // 其他 t 值（事件帧）由事件订阅层处理（P1）；本层忽略。
     }
   }
 
-  close(): void {
-    if (this.closed) return
-    this.closed = true
-    if (this.socket) {
-      const s = this.socket
-      this.socket = null
-      s.end(() => s.destroy())
-    }
+  private stopped(detail: string): AutojsError { return new AutojsError({ code: 'ERR_ENGINE_STOPPED', detail }) }
+
+  private fail(e: Error): void {
+    if (this.state === 'CLOSED') return
+    this.terminate(e)
+    this.onSocketError?.(e)
   }
+
+  private terminate(e: Error): void {
+    this.state = 'CLOSED'
+    if (this.timer) clearTimeout(this.timer)
+    this.timer = null
+    this.rejectConnect?.(e)
+    this.rejectConnect = null
+    this.resolveConnect = null
+    this.token = undefined
+    this.queue = []
+    this.buffer = Buffer.alloc(0)
+    this.socket?.destroy()
+    this.socket = null
+  }
+
+  close(): void { if (this.state !== 'CLOSED') this.terminate(this.stopped('桥 socket 已关闭')) }
 }
 
 /** 便捷入口：按 opts 创建 + 连接 + 安装。 */

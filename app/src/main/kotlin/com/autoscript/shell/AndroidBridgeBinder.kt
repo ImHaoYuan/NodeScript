@@ -31,6 +31,9 @@ object AndroidBridgeBinder : BridgeSocketBinder {
                     override val peerUid: Int
                         get() = socket.peerCredentials.uid
 
+                    override val peerPid: Int?
+                        get() = socket.peerCredentials.pid.takeIf { it > 0 }
+
                     override val input: InputStream = input
                     override val output: OutputStream = output
 

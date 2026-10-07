@@ -14,6 +14,8 @@ import com.autoscript.domain.engine.EngineStatus
 import com.autoscript.domain.engine.KillCause
 import com.autoscript.domain.engine.ScriptEngine
 import com.autoscript.domain.engine.StopResult
+import com.autoscript.domain.bridge.AuthenticatedRunContext
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
@@ -51,7 +53,7 @@ class AppShellCapabilityMountTest {
     ): AppShell {
         val map = handlers.toMap()
         return AppShell.assemble(
-            engineFactory = { id -> MountFakeEngine(id) },
+            engineFactory = { id, _ -> MountFakeEngine(id) },
             schedulerProvider = object : SchedulerProvider {
                 override suspend fun registerTrigger(targetFireAtMillis: Long, taskId: String): TriggerHandle =
                     TriggerHandle { }
@@ -168,7 +170,7 @@ class AppShellCapabilityMountTest {
     }
 
     @Test
-    fun `注入能力缝后 a11y screen 可达`() = runBlocking {
+    fun `注入能力缝后 a11y screen 可达`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1)) {
         val s = shell(
             "a11y" to fakeA11y, "screen" to fakeScreen, "npm" to fakeNpm,
             "datastore" to fakeDatastore, "zip" to fakeZip, "settings" to fakeSettings,
@@ -244,7 +246,7 @@ class AppShellCapabilityMountTest {
     }
 
     @Test
-    fun `未注入能力缝时如实回 ERR_NOT_IMPLEMENTED`() = runBlocking {
+    fun `未注入能力缝时如实回 ERR_NOT_IMPLEMENTED`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1)) {
         val s = shell()
         s.use {
             val a11yResp = s.router.dispatch(
@@ -294,7 +296,7 @@ class AppShellCapabilityMountTest {
     }
 
     @Test
-    fun `只注入一个缝，另一个仍如实未实现`() = runBlocking {
+    fun `只注入一个缝，另一个仍如实未实现`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1)) {
         val s = shell("a11y" to fakeA11y)
         s.use {
             assertInstanceOf(
@@ -329,7 +331,7 @@ class AppShellCapabilityMountTest {
     }
 
     @Test
-    fun `喂 keeper 后 power_manager 全链路可达`() = runBlocking {
+    fun `喂 keeper 后 power_manager 全链路可达`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1)) {
         val fg = object : ForegroundOps {
             override var foregroundRunning: Boolean = true
             override fun startService(token: String, timeoutMillis: Long?): Boolean = true

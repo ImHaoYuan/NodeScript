@@ -272,7 +272,7 @@ class PlatformWiringTest {
     }
 
     private fun shell(wiring: PlatformWiring.Injection): AppShell = AppShell.assemble(
-        engineFactory = { id -> FakeEngine(id) },
+        engineFactory = { id, _ -> FakeEngine(id) },
         schedulerProvider = object : SchedulerProvider {
             override suspend fun registerTrigger(targetFireAtMillis: Long, taskId: String): TriggerHandle =
                 TriggerHandle { }

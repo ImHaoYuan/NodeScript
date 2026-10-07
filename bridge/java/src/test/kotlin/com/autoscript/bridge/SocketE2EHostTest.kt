@@ -73,14 +73,20 @@ class SocketE2EHostTest {
         const pending = new Map();
         let nextId = 1;
         let buf = Buffer.alloc(0);
-        const ready = new Promise((res) => sock.on('connect', res));
+        let readyResolve, readyReject;
+        const ready = new Promise((res, rej) => { readyResolve = res; readyReject = rej; });
+        sock.on('error', readyReject);
+        sock.on('connect', () => sock.write(enc({ t: 'hello', v: 1, token: process.env.AUTOSCRIPT_BRIDGE_TOKEN })));
+        setTimeout(() => { console.error('HANDSHAKE_TIMEOUT'); process.exit(2); }, 10000).unref();
         sock.on('data', (chunk) => {
           buf = Buffer.concat([buf, chunk]);
           let nl;
           while ((nl = buf.indexOf(0x0a)) !== -1) {
             const frame = JSON.parse(buf.subarray(0, nl).toString('utf8'));
             buf = buf.subarray(nl + 1);
-            if (frame.t === 'ok' || frame.t === 'err') runtimeBridge.handleResponse(frame);
+            if (frame.t === 'helloAck') readyResolve();
+            else if (frame.t === 'helloErr') readyReject(new Error('auth denied'));
+            else if (frame.t === 'ok' || frame.t === 'err') runtimeBridge.handleResponse(frame);
           }
         });
         runtimeBridge.install((ns, method, payload, reqId, ttl) => {
@@ -109,7 +115,10 @@ class SocketE2EHostTest {
             "bridge/js 未 build（先 npm run build），跳过真机 E2E",
         )
         val collector = ConsoleCollector()
-        val server = NewlineFrameServer(routerWithConsole(collector))
+        val identities = RunIdentityRegistry()
+        val lease = identities.issue(com.autoscript.domain.engine.EngineId(0), 73)
+        lease.confirmSpawn(null) { true }
+        val server = NewlineFrameServer(routerWithConsole(collector), identities)
         val serverSocket = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
         val port = serverSocket.localPort
         val acceptJob = server.acceptLoop(serverSocket)
@@ -125,7 +134,7 @@ class SocketE2EHostTest {
         Files.write(scriptFile, script.toByteArray(StandardCharsets.UTF_8))
 
         val proc = withContext(Dispatchers.IO) {
-            ProcessBuilder("node", scriptFile.toString()).redirectErrorStream(true).start()
+            ProcessBuilder("node", scriptFile.toString()).apply { environment()["AUTOSCRIPT_BRIDGE_TOKEN"] = lease.token }.redirectErrorStream(true).start()
         }
         val out = withContext(Dispatchers.IO) {
             BufferedReader(InputStreamReader(proc.inputStream)).readText()
@@ -140,6 +149,7 @@ class SocketE2EHostTest {
         assertEquals(0, exit, "node 脚本非零退出：$out")
         assertTrue(out.contains("SCRIPT_DONE"), "脚本未报 SCRIPT_DONE：$out")
         assertEquals(1, lines.size)
+        assertEquals(73L, lines[0].runId)
         assertEquals("log", lines[0].level)
         assertTrue(lines[0].text.contains("hello from node"), lines[0].text)
 

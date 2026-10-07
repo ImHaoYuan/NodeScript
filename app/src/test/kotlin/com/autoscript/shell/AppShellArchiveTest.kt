@@ -80,7 +80,7 @@ class AppShellArchiveTest {
         val log = InMemoryIntentLog()
         val archive = InMemoryRunArchive()
         val shell = AppShell.assemble(
-            engineFactory = { id -> ArchiveFakeEngine(id).also { engines += it } },
+            engineFactory = { id, _ -> ArchiveFakeEngine(id).also { engines += it } },
             schedulerProvider = ArchiveFakeProvider(),
             intentLog = log,
             runArchive = archive,
@@ -112,7 +112,7 @@ class AppShellArchiveTest {
     fun `外壳暴露同一归档器：装配层可注入自定义实现`() = runBlocking {
         val custom = InMemoryRunArchive()
         val shell = AppShell.assemble(
-            engineFactory = { ArchiveFakeEngine(it) },
+            engineFactory = { id, _ -> ArchiveFakeEngine(id) },
             schedulerProvider = ArchiveFakeProvider(),
             intentLog = InMemoryIntentLog(),
             runArchive = custom,

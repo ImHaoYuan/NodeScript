@@ -1,16 +1,20 @@
 package com.autoscript.shell
 
+import com.autoscript.bridge.BridgeHandshake
+import com.autoscript.domain.engine.EngineId
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -31,6 +35,7 @@ class BridgeSocketListenerTest {
     private class FakeConn(
         override val peerUid: Int,
         frame: String = "",
+        override val peerPid: Int? = null,
     ) : AcceptedBridgeConnection {
         val closed = AtomicBoolean(false)
         override val input: InputStream = ByteArrayInputStream(frame.toByteArray())
@@ -41,6 +46,25 @@ class BridgeSocketListenerTest {
 
         /** 读响应：与 NewlineFrameServer 写回的 `synchronized(output)` 同锁（可见性保证）。 */
         fun response(): String = synchronized(output) { output.toString(StandardCharsets.UTF_8) }
+    }
+
+    /** 用 latch 真阻塞读取；关闭必须唤醒它，不能靠协程取消碰巧结束。 */
+    private class BlockingConn(prefix: ByteArray) : AcceptedBridgeConnection {
+        override val peerUid = 1_000
+        val waiting = CountDownLatch(1)
+        val closed = CountDownLatch(1)
+        private val initial = ByteArrayInputStream(prefix)
+        override val input = object : InputStream() {
+            override fun read(bytes: ByteArray, off: Int, len: Int): Int {
+                if (initial.available() > 0) return initial.read(bytes, off, len)
+                waiting.countDown()
+                check(closed.await(5, TimeUnit.SECONDS)) { "换壳没有关闭阻塞连接" }
+                return -1
+            }
+            override fun read(): Int = ByteArray(1).let { if (read(it, 0, 1) < 0) -1 else it[0].toInt() and 255 }
+        }
+        override val output = ByteArrayOutputStream()
+        override fun close() { closed.countDown() }
     }
 
     /** 假监听面：accept 从队列取（带短轮询，close 后回 null 唤醒循环）。 */
@@ -144,7 +168,8 @@ class BridgeSocketListenerTest {
             // engines.heartbeat 对不在途 runId 如实回 Ok false（§8.4：不是调用方错误，不 4xx）
             val frame =
                 """{"t":"req","id":7,"ns":"engines","m":"heartbeat","ttl":2000,"payload":"{\"runId\":42,\"seq\":1}","side":null}""" + "\n"
-            val me = FakeConn(peerUid = 1_000, frame = frame)
+            val token = s.shell.identities.issue(EngineId(0), 42).also { it.confirmSpawn(null) { true } }.token
+            val me = FakeConn(peerUid = 1_000, frame = BridgeHandshake.hello(token).toString(Charsets.UTF_8) + frame)
             bound.enqueue(me)
             await("响应回写") { me.response().contains("\"t\":\"ok\"") }
             val resp = me.response()
@@ -175,6 +200,84 @@ class BridgeSocketListenerTest {
     }
 
     @Test
+    fun `同uid未知票据和PID不符拒绝，UID凭据读取失败不碰业务流`() {
+        val bound = FakeBound()
+        BridgeSocketListener.bind("identity", { bound }, myUid = 1_000)!!.use { listener ->
+            kit().use { s ->
+                listener.start(s.shell)
+                val unknown = FakeConn(1_000, BridgeHandshake.hello("0".repeat(64)).toString(Charsets.UTF_8))
+                val lease = s.shell.identities.issue(EngineId(0), 42).also { it.confirmSpawn(123) { true } }
+                val mismatch = FakeConn(1_000, BridgeHandshake.hello(lease.token).toString(Charsets.UTF_8), peerPid = 456)
+                for (conn in listOf(unknown, mismatch)) {
+                    bound.enqueue(conn)
+                    await("身份不符连接关闭") { conn.closed.get() }
+                    assertFalse(conn.response().contains("helloAck"))
+                }
+                val closed = CountDownLatch(1)
+                bound.enqueue(object : AcceptedBridgeConnection {
+                    override val peerUid: Int get() = error("凭据不可读")
+                    override val input: InputStream get() = error("UID拒收不应打开输入流")
+                    override val output: OutputStream get() = error("UID拒收不应打开输出流")
+                    override fun close() { closed.countDown() }
+                })
+                assertTrue(closed.await(5, TimeUnit.SECONDS))
+                assertEquals(1, listener.rejectedCount())
+                assertEquals(0, s.shell.identities.size())
+                assertTrue(s.shell.console.drain(0).second.isEmpty())
+            }
+        }
+    }
+
+    @Test
+    fun `同壳重复start不拆连接，换壳关闭preauth和已认证阻塞IO`() {
+        val bound = FakeBound()
+        BridgeSocketListener.bind("blocking-swap", { bound }, myUid = 1_000)!!.use { listener ->
+            kit().use { first ->
+                kit().use { second ->
+                    listener.start(first.shell)
+                    val lease = first.shell.identities.issue(EngineId(0), 42).also { it.confirmSpawn(null) { true } }
+                    val preauth = BlockingConn(byteArrayOf())
+                    val active = BlockingConn(BridgeHandshake.hello(lease.token))
+                    bound.enqueue(preauth)
+                    bound.enqueue(active)
+                    assertTrue(preauth.waiting.await(5, TimeUnit.SECONDS))
+                    assertTrue(active.waiting.await(5, TimeUnit.SECONDS))
+                    listener.start(first.shell)
+                    assertEquals(1L, active.closed.count)
+                    listener.start(second.shell)
+                    assertTrue(preauth.closed.await(5, TimeUnit.SECONDS))
+                    assertTrue(active.closed.await(5, TimeUnit.SECONDS))
+                    assertThrows(IllegalStateException::class.java) { first.shell.identities.issue(EngineId(0), 43) }
+                    val fresh = second.shell.identities.issue(EngineId(0), 44).also { it.confirmSpawn(null) { true } }
+                    val next = BlockingConn(BridgeHandshake.hello(fresh.token))
+                    bound.enqueue(next)
+                    assertTrue(next.waiting.await(5, TimeUnit.SECONDS))
+                    first.shell.close()
+                    assertEquals(1L, next.closed.count, "旧壳延迟关闭不影响新连接")
+                    listener.close()
+                    assertTrue(next.closed.await(5, TimeUnit.SECONDS))
+                    assertThrows(IllegalStateException::class.java) { listener.start(second.shell) }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `引擎工厂装配失败关闭本次身份入口`() {
+        var issuer: com.autoscript.domain.engine.RunIdentityIssuer? = null
+        assertThrows(IllegalStateException::class.java) {
+            AppShellKit.assemble(
+                filesDir = dir.resolve("failed-files"),
+                cacheDir = dir.resolve("failed-cache"),
+                schedulerProvider = RecordingProvider(),
+                engineFactory = { _, identities -> issuer = identities; error("工厂失败") },
+            )
+        }
+        val captured = requireNotNull(issuer)
+        assertThrows(IllegalStateException::class.java) { captured.issue(EngineId(0), 45) }
+    }
+
+    @Test
     fun `二次 start 换 router 面——accept 线程不重启 仍可 serve`() {
         val bound = FakeBound()
         val listener = BridgeSocketListener.bind("swap", { bound }, myUid = 1_000)!!
@@ -185,7 +288,8 @@ class BridgeSocketListenerTest {
             listener.start(s2.shell)            // 换代：旧 frameServer 收掉，循环复用
             val frame =
                 """{"t":"req","id":9,"ns":"engines","m":"heartbeat","ttl":2000,"payload":"{\"runId\":42,\"seq\":1}","side":null}""" + "\n"
-            val me = FakeConn(peerUid = 1_000, frame = frame)
+            val token = s2.shell.identities.issue(EngineId(0), 42).also { it.confirmSpawn(null) { true } }.token
+            val me = FakeConn(peerUid = 1_000, frame = BridgeHandshake.hello(token).toString(Charsets.UTF_8) + frame)
             bound.enqueue(me)
             await("换代后仍 serve") { me.response().contains("\"t\":\"ok\"") }
             assertTrue(me.response().contains("\"id\":9"))

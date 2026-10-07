@@ -18,6 +18,8 @@ import com.autoscript.domain.engine.KillCause
 import com.autoscript.domain.engine.ScriptEngine
 import com.autoscript.domain.engine.StopResult
 import java.util.concurrent.atomic.AtomicLong
+import com.autoscript.domain.bridge.AuthenticatedRunContext
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -79,7 +81,7 @@ class AppShellTest {
         val engines = mutableListOf<ShellFakeEngine>()
         val provider = ShellFakeProvider()
         val s = AppShell.assemble(
-            engineFactory = { id -> ShellFakeEngine(id, pid = 4242).also { engines += it } },
+            engineFactory = { id, _ -> ShellFakeEngine(id, pid = 4242).also { engines += it } },
             schedulerProvider = provider,
             intentLog = log,
             heartbeatMillis = heartbeatMillis,
@@ -89,7 +91,7 @@ class AppShellTest {
     }
 
     @Test
-    fun `装配挂载 console 与 engines 命名空间`() = runBlocking {
+    fun `装配挂载 console 与 engines 命名空间`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1)) {
         val (s, _, _) = shell()
         s.use {
             val logResp = s.router.dispatch(
@@ -109,7 +111,7 @@ class AppShellTest {
     }
 
     @Test
-    fun `调度经 dispatcher 落到 controller 并 COMMIT`() = runBlocking {
+    fun `调度经 dispatcher 落到 controller 并 COMMIT`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1)) {
         val log = InMemoryIntentLog()
         val (s, engines, provider) = shell(log)
         s.use {
@@ -134,7 +136,7 @@ class AppShellTest {
     }
 
     @Test
-    fun `装配交出看门狗实例但不自行轮转`() = runBlocking {
+    fun `装配交出看门狗实例但不自行轮转`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1)) {
         val (s, _, _) = shell()
         s.use {
             // 生命周期归调用方（Application 的 SupervisorJob 域）：assemble 只交出实例
@@ -147,7 +149,7 @@ class AppShellTest {
     }
 
     @Test
-    fun `心跳经桥打点后看门狗问得到，run 终结即遗忘`() = runBlocking {
+    fun `心跳经桥打点后看门狗问得到，run 终结即遗忘`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1)) {
         // 不显式指定 → 装配接上生产心跳账本（controller 持有的 HeartbeatLedger）
         val (s, _, _) = shell(heartbeatMillis = null)
         s.use {
@@ -161,9 +163,9 @@ class AppShellTest {
             assertTrue(s.watchdog.tick().noHeartbeat.contains(runId), "未打点：心跳一路不判死")
 
             // 打点（JS engines.heartbeat 的 Kotlin 落点）后同一轮就量得到
-            val beat = s.router.dispatch(
+            val beat = withContext(AuthenticatedRunContext(EngineId(0), runId, 2)) { s.router.dispatch(
                 BridgeRequest(2, "engines", "heartbeat", """{"runId":$runId,"seq":1}""", 5_000),
-            )
+            ) }
             assertEquals("true", (assertInstanceOf(BridgeResponse.Ok::class.java, beat)).payload)
             val tick = s.watchdog.tick()
             assertTrue(tick.noHeartbeat.isEmpty(), "打点后心跳一路已接线")
@@ -177,7 +179,7 @@ class AppShellTest {
     }
 
     @Test
-    fun `看门狗监督经桥启动的在途 run`() = runBlocking {
+    fun `看门狗监督经桥启动的在途 run`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1)) {
         // 显式替身心跳来源（§8.4 的生产缺省是 controller 的 HeartbeatLedger）
         val (s, _, _) = shell(heartbeatMillis = { 100L })
         s.use {
@@ -195,7 +197,7 @@ class AppShellTest {
     }
 
     @Test
-    fun `shutdown 先停调度再急停执行：投递停了，槽位还了`() = runBlocking {
+    fun `shutdown 先停调度再急停执行：投递停了，槽位还了`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1)) {
         val log = InMemoryIntentLog()
         val (shell, engines, _) = shell(log)
         shell.use {
@@ -224,7 +226,7 @@ class AppShellTest {
     }
 
     @Test
-    fun `shutdown 无投递时如实空收口但仍清池`() = runBlocking {
+    fun `shutdown 无投递时如实空收口但仍清池`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1)) {
         val (shell, _, _) = shell()
         shell.use {
             val stopped = shell.shutdown(KillCause.REQUESTED)
@@ -238,7 +240,7 @@ class AppShellTest {
     }
 
     @Test
-    fun `mount 薄转接自定义命名空间`() = runBlocking {
+    fun `mount 薄转接自定义命名空间`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1)) {
         val (s, _, _) = shell()
         s.use {
             assertTrue(s.mount("echo", com.autoscript.bridge.RequestHandler { r -> BridgeResponse.Ok(r.id, r.payload) }))

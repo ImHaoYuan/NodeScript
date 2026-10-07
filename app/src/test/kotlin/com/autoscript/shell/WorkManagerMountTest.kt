@@ -29,7 +29,7 @@ class WorkManagerMountTest {
     @Test
     fun `装配壳恒挂 workManager：无需注入即可建任务`() = runBlocking {
         val shell = AppShell.assemble(
-            engineFactory = { id -> FakeEngineForDispatcher(id) },
+            engineFactory = { id, _ -> FakeEngineForDispatcher(id) },
             schedulerProvider = NoopProvider(),
             intentLog = InMemoryIntentLog(),
         )

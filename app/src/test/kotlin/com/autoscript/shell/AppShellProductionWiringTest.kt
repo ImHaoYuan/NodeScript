@@ -47,7 +47,7 @@ class AppShellProductionWiringTest {
         archiveDir: Path,
     ): AppShell =
         AppShell.assemble(
-            engineFactory = { id -> FakeEngineForDispatcher(id, pid = 4242) },
+            engineFactory = { id, _ -> FakeEngineForDispatcher(id, pid = 4242) },
             schedulerProvider = provider,
             intentLog = log,
             // 归档同样走持久形态：重启后任务中心仍可按 IntentRun 追溯（§8.5 双寄存器都落盘）

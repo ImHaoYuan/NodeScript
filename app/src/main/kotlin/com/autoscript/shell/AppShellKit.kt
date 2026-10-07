@@ -20,6 +20,7 @@ import com.autoscript.appservice.scheduler.recovery.ScriptDeployRecovery
 import com.autoscript.appservice.scriptrepo.core.BridgeAddonDeploy
 import com.autoscript.appservice.scriptrepo.core.BridgeDistDeploy
 import com.autoscript.domain.bridge.NamespaceHandler
+import com.autoscript.domain.engine.RunIdentityIssuer
 import com.autoscript.domain.engine.EngineId
 import com.autoscript.domain.engine.ScriptEngine
 import com.autoscript.domain.host.TaskCenterSnapshot
@@ -123,7 +124,7 @@ object AppShellKit {
         cacheDir: Path,
         schedulerProvider: SchedulerProvider,
         screenGate: ScreenGate = ScreenGate.AllowAll,
-        engineFactory: (EngineId) -> ScriptEngine = { id -> UnavailableEngine(id) },
+        engineFactory: (EngineId, RunIdentityIssuer) -> ScriptEngine = { id, _ -> UnavailableEngine(id) },
         a11yHandler: NamespaceHandler? = null,
         screenHandler: NamespaceHandler? = null,
         npmHandler: NamespaceHandler? = null,

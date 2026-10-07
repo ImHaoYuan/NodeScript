@@ -17,7 +17,7 @@ RuntimeBridge (单例)                        ← requestId 生成/关联、TTL�
    ▼
 [Kotlin Router]                             ← 在 :main 进程
    ModuleRegistry (name → handler)
-   RequestRegistry (requestId → PendingRequest{ttl, cancel})
+   RequestRegistry ((connectionId, requestId) → PendingRequest{ttl, cancel})
    HandleRegistry (generation + tombstone)
    → CapabilityManager / AccessibilityService / …（业务模块注册 handler）
 ```
@@ -59,6 +59,45 @@ RuntimeBridge (单例)                        ← requestId 生成/关联、TTL�
 
 ### 7.5 进程间传输
 P0 起用 **unix domain socket**（同应用可持久连接、双向流、背压可控），JSON-RPC over newline-delimited frames；抽象为一个 `Transport` 接口，可替换成 binder（只改 `:bridge:java` 内的 Transport impl，不影响上层）。**不引入自制 RPC 编解码 excess**——送 pubsub/流用独立 channel。
+
+**连接身份与控制帧（A5 / A10①）**：
+
+- `NodeProcessEngine` 在 spawn 前经 `:domain` `RunIdentityIssuer` 签发本次执行独占的 lease；
+  `RunIdentityRegistry` 以 `SecureRandom` 生成 256-bit 随机凭据（64 位小写 hex），仅驻内存，
+  经 `AUTOSCRIPT_BRIDGE_TOKEN` 传给子进程，不落盘、不写日志、不复用 `runNonce`。
+- 双侧 UID 门禁保持 fail-closed；首帧必须为 `{"t":"hello","v":1,"token":"<凭据>"}\n`，
+  成功回固定金样 `{"t":"helloAck","v":1}\n`，拒绝可回 `{"t":"helloErr","v":1,"code":"ERR_PERMISSION_DENIED"}\n` 后关闭。
+  超限、超时、已撤销等路径可以直接关闭，不承诺一定能送达错误帧。控制帧不占 requestId，不入业务请求表。
+- 一票一连接，原子消费；hello 先于 spawn 返回时等待 `confirmSpawn(pid, isAlive)`。
+  确认进程存活，且双方 PID 都可得时必须匹配；PID 为 null 保留 noPid 路径，以凭据建立归属。
+  未知、重放、过期、已结束或撤销的凭据拒收。首帧最多 1 KiB、默认握手期限 10 秒，
+  未消费/未确认票据也有 10 秒建连期限；期限不延续到已认证长连接。
+- `main.cpp` 在进入 Node、发布 fd、启动 addon reader **之前**独自完成 hello/ACK；成功后清 token env，
+  addon 只接已认证 fd。`SocketBootstrap` 使用同一读者完成握手和业务收包，只有 READY 可以 install/invoke，
+  并发 connect 共享 Promise；错误、关闭、认证拒绝、超时和主动 close 都结算等待者。
+  旧在线客户端没有 hello 明确拒绝，不提供匿名归零回退，不自动重连；重跑签发新票。
+
+**业务作用域与生命周期**：
+
+- 认证结果建立不可变 `AuthenticatedRunContext(engineId, engineRunId, connectionId)`；它由宿主建立，
+  不从 payload/side 解码。`BridgeRequest` 业务信封不加可自报的可信 runId，方法表也不变。
+- handler 表共享；请求键为 `(connectionId, clientRequestId)`，回复仍带客户端原 id（含负数心跳）。
+  双连接同 id 合法，同连接同时重复 id 拒绝；完成、TTL、取消和关闭按独占 ticket 核销，旧结果不能删新请求。
+  每连接独立协程域与 `InputChannelSession`；TTL/撤销取消 handler，全局在途配额保持 256。
+- 自然退出不立即抹掉已绑定归属：连接进入 DRAINING；首次自然退出通知或 EOF 建立一次 5 秒排空窗口（响应写失败也启动同一窗口），
+  重复 status 不续期。读尾帧至 EOF，再等已接收请求结束；对端不再接收 ACK 也不直接丢弃其尾帧。
+  窗口到期或硬 stop/kill/撤销时显式关闭底层 IO 并取消在途，不靠协程取消唤醒阻塞 read/write。
+  同槽重跑不改变旧连接的 runId，旧 lease/ticket 清理不影响新执行。
+- 壳关闭或 listener 换壳同时关闭 pre-auth 与已认证连接；同壳重复 start 幂等。
+  `AppShell.close` 不等于停全部执行；进程级停机仍先停调度，再停执行。
+
+**日志归属与边界**：`ConsoleCollector.handle` 必须从认证上下文取 `engineRunId`，缺身份回
+`ERR_PERMISSION_DENIED`，绝不回退 0；宿主 `HostLog` 直写仍用 0。系统日志仅显示宿主行，
+脚本行在控制台按 `[#runId]` 显示；日志归属是 `EngineRunReceipt.runId`，不是 intentRunId/池槽/runNonce。
+队列仍有界、TSF 仍可丢包、强制退出仍可损失尾行，不新增持久化或完整 logcat。
+`consoleSink` 捕获桥错误后会通过 `onQueueError` 报告并正常兑现 Promise，故 **await 完成不证明送达**；
+验收须核对原始 RPC 成功 ACK 与宿主实际入队行，入队亦不代表永久保存。
+身份认证不等于 CapabilityMask/跨脚本授权，更不是恶意同 UID 代码隔离，边界见 §11。
 
 ### 7.6 错误模型
 ```ts
@@ -360,8 +399,10 @@ spawn/打包），JS 目录独缺，脚本 `ERROR_CODES.includes('ERR_IO')` 为 
    unix API，`:main` 监听用 `LocalServerSocket(String)`）；双侧 `SO_PEERCRED` 校 uid
    （abstract 名没有文件权限 → 防抢绑/冒名顶替，uid 不符即拒）。两种形态都缺 env =
    离线模式（桥调用如实 `ERR_ENGINE_STOPPED`），env 给了连不上即硬失败 exit 3，不静默降级；
-   **宿主建连、经 `AUTOSCRIPT_SOCK_FD` 注入 addon**——addon 契约是「宿主注入已连 fd、
-   建连/重试/熔断归宿主」，不自连（§7.5 对接条 + addon 注释）；
+   **宿主建连并完成 §7.5 hello/ACK 后，才经 `AUTOSCRIPT_SOCK_FD` 注入 addon**。
+   建连、短读写、EINTR、EOF 与 ACK 校验共享 10 秒截止时间；在线缺 token/认证拒绝同样 exit 3，
+   不继续执行在线脚本。成功后清 token env，但不把它当同 UID 隔离保证。
+   addon 不自连、不读取控制 ACK，一次性凭据不自动重连；
 2. `dlopen libnode.so`（RTLD_NOW|RTLD_GLOBAL；宿主自身 **DT_NEEDED `libc++_shared.so`
    + RUNPATH `$ORIGIN`**，用来满足 libnode 自己的传递依赖 —— bionic 的 RUNPATH 不作用于
    被依赖库的传递依赖，2026-09-29 真机实证；16KB 门禁已过，PRODUCT 哈希 `3cadbcdf…`

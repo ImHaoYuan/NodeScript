@@ -1,6 +1,8 @@
 package com.autoscript.bridge
 import com.autoscript.domain.bridge.generated.WireMethods
 
+import com.autoscript.domain.bridge.AuthenticatedRunContext
+import kotlin.coroutines.coroutineContext
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.core.ErrorCode
@@ -27,7 +29,7 @@ data class ConsoleLine(
  * console 数据面收集器：Kotlin Router 侧注册 `console` namespace 的 [NamespaceHandler]。
  *
  * - `log` 方法：payload JSON `{"level":"log|info|warn|error|debug","text":"..."}`，
- *   请求帧尚无执行归属，当前恒记 `runId = 0`（A10① 待接）→ 有界追加 → `Ok(id, null)`；
+ *   连接认证上下文提供 engineRunId（缺身份拒绝，不信任 payload）→ 有界追加 → `Ok(id, null)`；
  * - 未知方法 → ERR_NOT_IMPLEMENTED（桥的诚实上报，不伪造成功）；
  * - 无效载荷（非法 JSON / 缺 text）→ ERR_INVALID_PARAM。
  * 事件式消费走 [drain]（seq 游标拉取，对齐 EventBus 节流拉取语义，不做回调推送）。
@@ -57,7 +59,9 @@ class ConsoleCollector(
         } catch (e: IllegalArgumentException) {
             return BridgeResponse.Err(request.id, ErrorCode.ERR_INVALID_PARAM.code, e.message)
         }
-        append(runId = 0L, level = params.level, text = params.text)
+        val caller = coroutineContext[AuthenticatedRunContext]
+            ?: return BridgeResponse.Err(request.id, ErrorCode.ERR_PERMISSION_DENIED.code, "console 缺执行身份")
+        append(runId = caller.engineRunId, level = params.level, text = params.text)
         return BridgeResponse.Ok(request.id, null)
     }
 

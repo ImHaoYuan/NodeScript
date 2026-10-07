@@ -24,13 +24,13 @@ class RequestRegistryTest {
         val clock = FakeClock()
         val r = RequestRegistry(clock)
         var got: BridgeResponse? = null
-        assertTrue(r.register(reg(1_000)) { got = it })
-        assertTrue(r.isRegistered(1))
+        val ticket = requireNotNull(r.register(1, reg(1_000)) { got = it })
+        assertTrue(r.isRegistered(1, 1))
 
         val resp = BridgeResponse.Ok(1, "{}")
-        assertTrue(r.complete(1, resp))
+        assertTrue(r.complete(ticket, resp))
         assertEquals(resp, got)
-        assertFalse(r.isRegistered(1))
+        assertFalse(r.isRegistered(1, 1))
     }
 
     @Test
@@ -38,7 +38,7 @@ class RequestRegistryTest {
         val clock = FakeClock(now = 10_000)
         val r = RequestRegistry(clock)
         var got: BridgeResponse? = null
-        assertTrue(r.register(reg(1_000)) { got = it })
+        val ticket = requireNotNull(r.register(1, reg(1_000)) { got = it })
 
         clock.now = 10_999   // 未到期
         assertEquals(0, r.expireDue())
@@ -47,14 +47,14 @@ class RequestRegistryTest {
         assertEquals(1, r.expireDue())
         val err = got as BridgeResponse.Err
         assertEquals(ErrorCode.ERR_TIMEOUT.code, err.errorCode)
-        assertFalse(r.isRegistered(1))
+        assertFalse(r.isRegistered(1, 1))
     }
 
     @Test
     fun `duplicate requestId rejected`() {
         val r = RequestRegistry(FakeClock())
-        assertTrue(r.register(reg(5_000)) {})
-        assertFalse(r.register(reg(5_000)) {})
+        assertNotNull(r.register(1, reg(5_000)) {})
+        assertEquals(null, r.register(1, reg(5_000)) {})
         assertEquals(1, r.size())
     }
 
@@ -62,8 +62,8 @@ class RequestRegistryTest {
     fun `finishAll completes everything on shutdown`() {
         val r = RequestRegistry(FakeClock())
         val done = mutableListOf<BridgeResponse>()
-        r.register(reg(9_000)) { done.add(it) }
-        r.register(reg(9_000).copy(id = 2)) { done.add(it) }
+        r.register(1, reg(9_000)) { done.add(it) }
+        r.register(1, reg(9_000).copy(id = 2)) { done.add(it) }
 
         assertEquals(2, r.finishAll(ErrorCode.ERR_ENGINE_STOPPED))
         assertEquals(2, done.size)
@@ -75,6 +75,8 @@ class RequestRegistryTest {
     fun `complete of missing id is noop`() {
         val r = RequestRegistry(FakeClock())
         assertNotNull(r)
-        assertFalse(r.complete(99, BridgeResponse.Ok(99, null)))
+        val ticket = requireNotNull(r.register(1, reg(9_000)) {})
+        r.cancel(ticket)
+        assertFalse(r.complete(ticket, BridgeResponse.Ok(1, null)))
     }
 }

@@ -36,6 +36,11 @@ async function startMockHost(socketPath) {
         buf = buf.subarray(nl + 1)
         if (line.length === 0) continue
         const req = JSON.parse(line)
+        if (req.t === 'hello') {
+          assert.equal(req.token, 'a'.repeat(64))
+          sock.write('{"t":"helloAck","v":1}\n')
+          continue
+        }
         const out = req.m === 'fail'
           ? { t: 'err', id: req.id, code: 'ERR_NOT_IMPLEMENTED', detail: 'mock 拒绝' }
           : { t: 'ok', id: req.id, payload: JSON.stringify({ echoed: req.m, arg: req.payload ? JSON.parse(req.payload) : null }) }
@@ -51,7 +56,7 @@ test('SocketBootstrap：unix socket 请求/响应闭环（ok/err/空参）', asy
   const server = await startMockHost(sockPath)
   let b = null
   try {
-    b = new SocketBootstrap({ socketPath: sockPath })
+    b = new SocketBootstrap({ token: 'a'.repeat(64), socketPath: sockPath })
     assert.strictEqual(b.connected, false)
     await b.connect()
     b.install()
@@ -75,7 +80,7 @@ test('SocketBootstrap：unix socket 请求/响应闭环（ok/err/空参）', asy
 })
 
 test('SocketBootstrap：未连接投递 → 快速 ERR_ENGINE_STOPPED（不悬挂）', () => {
-  const b = new SocketBootstrap({ socketPath: '/nonexistent-bridge.sock' })
+  const b = new SocketBootstrap({ token: 'a'.repeat(64), socketPath: '/nonexistent-bridge.sock' })
   assert.throws(
     () => b.handler('mock', 'echo', null, 1, 5_000),
     (e) => e.code === 'ERR_ENGINE_STOPPED',
@@ -89,7 +94,7 @@ const { SocketBootstrap } = require(%s)
 const { runtimeBridge } = require(%s)
 const assert = require('node:assert/strict')
 const [sock, scenario] = [process.argv[1], process.argv[2]]
-const b = new SocketBootstrap({ socketPath: sock, maxFrameBytes: 64 * 1024 })
+const b = new SocketBootstrap({ token: 'a'.repeat(64), socketPath: sock, maxFrameBytes: 64 * 1024 })
 let sockErr = null
 b.onSocketError = (e) => { sockErr = e }
 b.connect().then(async () => {
@@ -142,6 +147,11 @@ async function startChaosHost(socketPath) {
         buf = buf.subarray(nl + 1)
         if (line.length === 0) continue
         const req = JSON.parse(line)
+        if (req.t === 'hello') {
+          assert.equal(req.token, 'a'.repeat(64))
+          sock.write('{"t":"helloAck","v":1}\n')
+          continue
+        }
         if (req.m === 'slow') {
           setTimeout(() => send({ t: 'ok', id: req.id, payload: JSON.stringify({ slow: true }) }), 300)
         } else if (req.m === 'fast') {
