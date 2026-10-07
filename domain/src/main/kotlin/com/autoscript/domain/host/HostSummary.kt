@@ -204,7 +204,8 @@ data class CapabilityCenterSnapshot(
 )
 
 /**
- * 安装体积的实测值（§15：预算 ≤40MB release 已被实测推翻，2026-10-02 拍板选「接受 + 明示」）。
+ * 安装体积的实测值（§15：预算 `≤ 40MB release` 已被实测推翻，**2026-10-07 用户裁定重定为 `≤ 150MB release`**
+ * —— 见 `design-decisions.md` 第 41 项；本类与 `InstallSizeRead` 的实测链出自第 20 项，不受重定影响）。
  *
  * **为什么是实测而不是文档里的 92MB**：92MB 是 node-slice 产物的**未压缩**三件套合计，
  * 而用户装的是**压缩后**的 APK，两者不是同一个数。把预算数字抄进 UI 就是"呈现层说谎"——

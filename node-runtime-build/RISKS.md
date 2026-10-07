@@ -27,7 +27,9 @@ nodejs-mobile 停更于 2021（真实验证：仓库最后推送 2021-10-27，�
   **默认面**的估法，`zh,en` 实测还略高一点 —— ICU 数据不是按 locale 线性摊的，
   估数只能当量级用。
 - **已回填 §15**：jniLibs 三件套从 ≈81MB 改按 **≈92MB** 读（增量全在 `libnode.so`）；
-  40MB release 预算本就超支，这条让它更超，但那是 §18 第 4 项拍板**已知的买单**——
+  40MB release 预算本就超支，这条让它更超，但那是 §18 第 4 项拍板**已知的买单**
+  （**2026-10-07 追记**：该预算已由用户裁定重定为 `≤ 150MB release`，见 `docs/design-decisions.md`
+  第 41 项；上面这条 ICU 实测账不受影响，仍按原样读）——
   不要这条就只剩 `intl=none`（`zh-CN` 的 `Intl.*` 全残缺）。
 - **剩余欠账 = 运行期**：`Intl.DateTimeFormat` / `Intl.Collator` 在 zh/en 上的真机
   实测（`out/node` 是 arm64-android，本机跑不了），归 §18-4 与真机那批账；
