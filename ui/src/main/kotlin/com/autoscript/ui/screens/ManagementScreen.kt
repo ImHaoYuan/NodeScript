@@ -28,11 +28,15 @@ import com.autoscript.ui.theme.ThemeColors
  * **组内不画横线**（批 47）：TG `SettingCell` 的 `Factory.bindView` 不传分隔线，
  * 用户口径「分组那不需要横线分隔」同向。
  *
- * 本批只做入口：四项管理页尚未实现，点击直接弹未开放提示；控制台进入已有页面，
- * 面板不持有宿主读口，也不把未实现的功能画成空数据或保存成功。
+ * 入口现状：**日志管理**与**控制台**进入已有页面；依赖管理/环境变量/镜像源管理尚未实现，
+ * 点击直接弹未开放提示。面板不持有宿主读口，也不把未实现的功能画成空数据或保存成功。
  */
 @Composable
-fun ManagementScreen(onOpenConsole: () -> Unit, modifier: Modifier = Modifier) {
+fun ManagementScreen(
+    onOpenConsole: () -> Unit,
+    onOpenLogManagement: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val toast = LocalToast.current
     Column(modifier.fillMaxSize().background(ThemeColors.surfaceMuted)) {
         ActionBar(title = "管理面板", background = ThemeColors.surfaceMuted)
@@ -59,7 +63,7 @@ fun ManagementScreen(onOpenConsole: () -> Unit, modifier: Modifier = Modifier) {
                         title = "日志管理",
                         colors = LogColors,
                         glyph = GlyphKind.FILE_DOC,
-                        onClick = { toast?.show("日志管理尚未开放") },
+                        onClick = onOpenLogManagement,
                     )
                     SettingsCellRow(
                         title = "镜像源管理",

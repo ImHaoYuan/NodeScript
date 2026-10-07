@@ -27,6 +27,19 @@ class InMemoryRunArchiveTest {
     }
 
     @Test
+    fun `records 回全部项目全部状态，按 engineRunId 升序`() = runBlocking {
+        val archive = InMemoryRunArchive()
+        archive.put(run(30, RunState.SUCCEEDED).copy(projectId = "other"))
+        archive.put(run(10, RunState.RUNNING))
+        archive.put(run(20, RunState.FAILED))
+
+        assertEquals(listOf(10L, 20L, 30L), archive.records().map { it.id })
+        assertEquals(setOf("p1", "other"), archive.records().map { it.projectId }.toSet())
+        assertTrue(InMemoryRunArchive().records().isEmpty(), "空档案回空列表")
+        Unit
+    }
+
+    @Test
     fun `终态不可改写、不可复活`() = runBlocking {
         val archive = InMemoryRunArchive()
         archive.put(run(1, RunState.SUCCEEDED), EngineRunLink(1, 1))

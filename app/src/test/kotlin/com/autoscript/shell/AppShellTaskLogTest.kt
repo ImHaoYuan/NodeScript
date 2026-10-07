@@ -25,7 +25,7 @@ import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicLong
 
 /** 与 Application 同一路径，读取壳的持久档案，再次装配仍能回读诊断字段。 */
-class AppShellProjectHistoryTest {
+class AppShellTaskLogTest {
     @TempDir
     lateinit var dir: Path
 
@@ -45,12 +45,12 @@ class AppShellProjectHistoryTest {
         kit().use { assembled ->
             assembled.shell.runArchive.put(failed, EngineRunLink(11, 41))
             assembled.shell.runArchive.put(RunRecord(42, "demo", "other.js", "nonce42", RunState.RUNNING))
-            assembled.shell.runArchive.put(RunRecord(43, "other", "main.js", "nonce43", RunState.SUCCEEDED))
-            assertEquals(listOf(41L), assembled.projectHistory("demo").runs.map { it.engineRunId })
-            assertTrue(assembled.projectHistory("empty").runs.isEmpty())
+            assembled.shell.runArchive.put(RunRecord(43, "other", "main.js", "nonce43", RunState.SUCCEEDED, 300, 400))
+            // 跨项目：demo 的 41 与 other 的 43 都在，未结算的 42 不在；最近结算的在前（同刻按 id 倒序）。
+            assertEquals(listOf(43L, 41L), assembled.taskLog().runs.map { it.engineRunId })
         }
         kit().use { assembled ->
-            val row = assembled.projectHistory("demo").runs.single()
+            val row = assembled.taskLog().runs.single { it.engineRunId == 41L }
             assertEquals(41L, row.engineRunId)
             assertEquals(11L, row.intentRunId)
             assertEquals(failed.state, row.state)
@@ -79,7 +79,7 @@ class AppShellProjectHistoryTest {
                 assembled.shell.scheduler.schedule(ScheduledTask(taskId, taskId, "demo", path, TimedSchedule.Once(60)))
                 assembled.runTaskNow(taskId)
             }
-            val rows = assembled.projectHistory("demo").runs.associateBy { it.scriptPath }
+            val rows = assembled.taskLog().runs.associateBy { it.scriptPath }
             assertEquals(RunState.SUCCEEDED, rows.getValue("ok.js").state)
             val bad = rows.getValue("bad.js")
             assertEquals(RunState.CRASHED, bad.state)
@@ -88,7 +88,7 @@ class AppShellProjectHistoryTest {
             assertTrue(bad.intentRunId != null)
         }
         kit().use { reopened ->
-            val rows = reopened.projectHistory("demo").runs
+            val rows = reopened.taskLog().runs
             assertEquals(2, rows.size)
             assertEquals("脚本抛错\n诊断原文", rows.single { it.scriptPath == "bad.js" }.crashSummary)
         }

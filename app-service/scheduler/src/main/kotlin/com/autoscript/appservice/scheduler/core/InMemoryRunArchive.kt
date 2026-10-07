@@ -63,6 +63,10 @@ class InMemoryRunArchive : RunArchive {
         records.values.filter { it.projectId == projectId }.sortedBy { it.id }
     }
 
+    override suspend fun records(): List<RunRecord> = synchronized(lock) {
+        records.values.sortedBy { it.id }
+    }
+
     override suspend fun unfinished(): List<RunRecord> = synchronized(lock) {
         records.values.filter { !it.state.isTerminal }.sortedBy { it.id }
     }

@@ -70,7 +70,7 @@ import com.autoscript.ui.components.ToastAction
 import com.autoscript.ui.components.ToastHost
 import com.autoscript.ui.components.rememberToastAction
 import com.autoscript.ui.screens.ManagementScreen
-import com.autoscript.ui.screens.ProjectHistoryUi
+import com.autoscript.ui.screens.LogManagementScreen
 import com.autoscript.ui.screens.ProjectScreen
 import com.autoscript.ui.screens.SettingsScreen
 import com.autoscript.ui.screens.ConsoleScreen
@@ -80,7 +80,7 @@ import com.autoscript.ui.state.ActiveRunState
 import com.autoscript.ui.state.ConsoleState
 import com.autoscript.ui.state.HomeState
 import com.autoscript.ui.state.LoadState
-import com.autoscript.ui.state.ProjectHistoryState
+import com.autoscript.ui.state.TaskLogState
 import com.autoscript.ui.state.ProjectState
 import com.autoscript.ui.state.RegistrationForm
 import com.autoscript.ui.state.TaskCenterState
@@ -105,13 +105,13 @@ import kotlin.coroutines.resume
  * 实现），未实现即 `HomeState.UNWIRED` / `CapabilityCenterState.NOT_LOADED` 如实显示。
  *
  * 四个页签：首屏（壳/保活/漏投）、任务中心（§8.6 排期 + §8.5 档案/恢复账）、
- * 管理面板（控制台为子页，§7.3 游标拉取 + 在途执行）、设置（§9.5 三态权限账，TG 设置页版式）。刷新时机分两种，**不能混**：
+ * 管理面板（控制台与日志管理为子页，§7.3 游标拉取 + 在途执行；日志管理 = 系统日志 + 任务日志）、设置（§9.5 三态权限账，TG 设置页版式）。刷新时机分两种，**不能混**：
  * - 首屏状态是**同步**读（`shellSummary()`）：`onCreate` 首读 + 每次 `onResume` 重读 +
  *   冷启后一条**有界**的重问（见 [HomeRetryEffect]）；
  * - 能力态/任务态/控制台都是**挂起**的（`capabilityCenter()` 每次现问系统，含 root 探测的
  *   IO 切换；`taskCenter()` 要读两个持久寄存器；`console(seq, max)` 是游标增量拉取）：
  *   由 [TabReloadEffect] 驱动 —— 回前台、或切到该页签时重取一次；管理面板本身不读日志，
- *   打开控制台才读，返回面板保留已读行。控制台行是**累积**的，游标只进不退（见 `ConsoleState`）。
+ *   打开控制台/日志管理才读，返回面板保留已读行。控制台行是**累积**的，游标只进不退（见 `ConsoleState`）。
  *   这样用户从系统设置页授完权回来，看到的是**刚问过**的结论，而不是离开时那份缓存
  *   （后者正是"授权了但界面还说没授权"的来源）。
  *
@@ -132,10 +132,6 @@ class MainActivity : ComponentActivity() {
     /** 项目页（文件列表）状态（同上；挂起读口，由页签切换/回前台驱动）。 */
     private var projectState: ProjectState by mutableStateOf(ProjectState.NOT_LOADED)
 
-    /** 项目历史与文件清单分别记读取状态；不同项目的并发回包不能相互覆盖。 */
-    private var projectHistoryState by mutableStateOf(ProjectHistoryState.notLoaded(""))
-    private var historyReadVersion = 0L
-
     /** 设置页的状态（同上；数据面仍是能力快照）。 */
     private var capabilityState: CapabilityCenterState by mutableStateOf(CapabilityCenterState.NOT_LOADED)
 
@@ -144,6 +140,9 @@ class MainActivity : ComponentActivity() {
 
     /** 控制台状态（同上；行与游标随失败保留 —— 见 `ConsoleState.failed`）。 */
     private var consoleState: ConsoleState by mutableStateOf(ConsoleState.NOT_LOADED)
+
+    /** 任务日志（日志管理页第二个列表：全部项目的终态历史；读失败保留已读到的行）。 */
+    private var taskLogState: TaskLogState by mutableStateOf(TaskLogState.NOT_LOADED)
 
     // 「当前页签」不再是一个字段：它由 pager 的滚动位置派生（见 setContent 里的 pagerState）。
     // 存两份必然漂移 —— 手指划过去时字段说 A、pager 说 B。
@@ -173,6 +172,8 @@ class MainActivity : ComponentActivity() {
             // 日志与游标仍属于 consoleState，返回面板只关闭子页，不清读取结果。
             var consoleOpen by rememberSaveable { mutableStateOf(false) }
             val closeConsole = { consoleOpen = false }
+            var logManagementOpen by rememberSaveable { mutableStateOf(false) }
+            val closeLogManagement = { logManagementOpen = false }
             // 浮层口（批 44）：**一处**建、一处挂（[MainShell] 里那个 ToastHost），
             // 四屏的复制回执与操作/停止回执都经 `LocalToast` 落到它上面 ——
             // 此前那些回执是各屏列表里的一行，弹一条就把内容往下推一次。
@@ -228,12 +229,7 @@ class MainActivity : ComponentActivity() {
                                 Tab.HOME -> CompositionLocalProvider(LocalEditorHighlightHost provides highlightHost) {
                                     ProjectScreen(
                                         state = projectState,
-                                        history = ProjectHistoryUi(
-                                            state = projectHistoryState,
-                                            onRead = { reloadProjectHistory(it) },
-                                            active = pagerState.currentPage == Tab.HOME.ordinal,
-                                            resumeTick = resumeTick,
-                                        ),
+                                        active = pagerState.currentPage == Tab.HOME.ordinal,
                                         onSwitchTheme = themeSwitch.onSwitch,
                                         // 菜单项写**目标模式**（TG 的日夜项同款）：
                                         // 冷启缺省跟随系统，此时按"当下是不是深色"定文案。
@@ -262,17 +258,25 @@ class MainActivity : ComponentActivity() {
                                     onStopRun = { run -> scope.launch { stopRunOp(run) } },
                                     modifier = Modifier,
                                 )
-                                Tab.MANAGEMENT -> if (consoleOpen) {
-                                    ConsoleScreen(
+                                Tab.MANAGEMENT -> when {
+                                    consoleOpen -> ConsoleScreen(
                                         state = consoleState,
                                         onRefresh = { reloadConsole() },
                                         onStopRun = { run -> scope.launch { stopRunOp(run) } },
                                         onBack = closeConsole,
                                         modifier = Modifier,
                                     )
-                                } else {
-                                    ManagementScreen(
+                                    logManagementOpen -> LogManagementScreen(
+                                        consoleState = consoleState,
+                                        taskLogState = taskLogState,
+                                        onRefreshConsole = { reloadConsole() },
+                                        onRefreshTaskLog = { reloadTaskLog() },
+                                        onBack = closeLogManagement,
+                                        modifier = Modifier,
+                                    )
+                                    else -> ManagementScreen(
                                         onOpenConsole = { consoleOpen = true },
+                                        onOpenLogManagement = { logManagementOpen = true },
                                         modifier = Modifier,
                                     )
                                 }
@@ -289,7 +293,7 @@ class MainActivity : ComponentActivity() {
                     }
                         }
                 }
-            ManagementBackHandler(pagerState, consoleOpen, closeConsole)
+            ManagementBackHandler(pagerState, consoleOpen || logManagementOpen) { if (consoleOpen) closeConsole() else closeLogManagement() }
             // 键里带页签和管理子页：进入控制台即现取，而不是显示上次离开时的快照。
             // 用 **settledPage** 而不是 currentPage：横划跨多页时 currentPage 会途经
             // 中间每一页，那样划一次会连读三遍；settledPage 只在停稳后变一次。
@@ -297,13 +301,17 @@ class MainActivity : ComponentActivity() {
             // 反过来改 resumeTick 形成自激（见 reloadCapabilities）。
             // 冷启那几秒：装配在 IO 域异步完成，onCreate 的首读大概率赶在它前面。
             HomeRetryEffect(state = { homeState }) { homeState = HomeState.read(hostSummary()) }
-            TabReloadEffect(resumeTick, pagerState, consoleOpen) { tab ->
+            TabReloadEffect(resumeTick, pagerState, consoleOpen, logManagementOpen) { tab ->
                 when (tab) {
                     Tab.HOME -> reloadProjectFiles()
                     // 任务屏现在也画在途执行（控制台的运行列表）：切到本页签两侧都现取，
                     // 否则运行中那组会停在离开时的快照上（与"切页签即现取"同一条纪律）。
                     Tab.TASKS -> { reloadTasks(); reloadConsole() }
-                    Tab.MANAGEMENT -> if (consoleOpen) reloadConsole()
+                    // 日志管理两个列表都要现取：系统日志是控制台游标增量，任务日志读档案。
+                    Tab.MANAGEMENT -> {
+                        if (consoleOpen || logManagementOpen) reloadConsole()
+                        if (logManagementOpen) reloadTaskLog()
+                    }
                     Tab.SETTINGS -> reloadCapabilities()
                 }
                 }
@@ -412,27 +420,26 @@ class MainActivity : ComponentActivity() {
         val host = hostSummary() ?: error("宿主摘要未接线（Application 未实现 HostSummary）")
         host.saveScriptFile(projectId, relPath, content)
         reloadProjectFiles()
-        if (projectHistoryState.projectId == projectId) reloadProjectHistory(projectId)
     }
 
-    private suspend fun reloadProjectHistory(projectId: String) {
-        val version = ++historyReadVersion
-        if (projectHistoryState.projectId != projectId) {
-            projectHistoryState = ProjectHistoryState.notLoaded(projectId)
-        }
+    /**
+     * 现取任务日志（挂起；只写 [taskLogState]）。三落点不撒谎：未接线 → 失败态带原因
+     * （**不冒充**「暂无记录」）；抛错 → 失败态**保留已读到的行**；成功 → 全量覆盖（档案是权威，不累积）。
+     */
+    private suspend fun reloadTaskLog() {
         val host = hostSummary()
-        val result = try {
+        val previous = taskLogState
+        taskLogState = try {
             if (host == null) {
-                ProjectHistoryState.failed(projectId, IllegalStateException("宿主摘要未接线"))
+                TaskLogState.failed(IllegalStateException("宿主摘要未接线"), previous)
             } else {
-                ProjectHistoryState.of(host.projectHistory(projectId))
+                TaskLogState.of(host.taskLog())
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (t: Exception) {
-            ProjectHistoryState.failed(projectId, t)
+            TaskLogState.failed(t, previous)
         }
-        if (version == historyReadVersion) projectHistoryState = result
     }
 
     private suspend fun reloadCapabilities() {
@@ -548,7 +555,6 @@ class MainActivity : ComponentActivity() {
                     "已触发「${task.name}」（执行成败见控制台）"
                 }
             }
-            if (projectHistoryState.projectId.isNotBlank()) reloadProjectHistory(projectHistoryState.projectId)
         } finally {
             taskState = taskState.copy(opTargetTaskId = null)
         }
@@ -1048,16 +1054,16 @@ private fun HomeRetryEffect(state: () -> HomeState, onReload: () -> Unit) {
 }
 
 /**
- * 管理子页的系统返回，和控制台顶栏共用同一个关闭动作。
+ * 管理子页（控制台 / 日志管理）的系统返回，和各自顶栏共用同一个关闭动作。
  *
- * pager 会预组合邻页：只看 consoleOpen 会在其他页签吞返回。可见且停稳在管理页才启用，
+ * pager 会预组合邻页：只看子页是否打开会在其他页签吞返回。可见且停稳在管理页才启用，
  * 切页动画期间也退让。单开 Composable 读 pager，避免每次滚动把整个外壳重组。
  */
 @Composable
-private fun ManagementBackHandler(pagerState: PagerState, consoleOpen: Boolean, onBack: () -> Unit) {
+private fun ManagementBackHandler(pagerState: PagerState, subPageOpen: Boolean, onBack: () -> Unit) {
     val managementPage = MainActivity.Tab.MANAGEMENT.ordinal
     BackHandler(
-        enabled = consoleOpen && !pagerState.isScrollInProgress &&
+        enabled = subPageOpen && !pagerState.isScrollInProgress &&
             pagerState.currentPage == managementPage && pagerState.settledPage == managementPage,
         onBack = onBack,
     )
@@ -1075,12 +1081,14 @@ private fun TabReloadEffect(
     resumeTick: Int,
     pagerState: PagerState,
     consoleOpen: Boolean,
+    logManagementOpen: Boolean,
     onSettled: suspend (MainActivity.Tab) -> Unit,
 ) {
     // 仅管理页消费子页键：切到别页时改层级，不应取消那一页正在进行的读取。
     val tab = MainActivity.Tab.entries[pagerState.settledPage]
     val consoleVisible = tab == MainActivity.Tab.MANAGEMENT && consoleOpen
-    LaunchedEffect(resumeTick, tab, consoleVisible) {
+    val logsVisible = tab == MainActivity.Tab.MANAGEMENT && logManagementOpen
+    LaunchedEffect(resumeTick, tab, consoleVisible, logsVisible) {
         onSettled(tab)
     }
 }

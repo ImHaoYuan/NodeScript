@@ -145,7 +145,11 @@ fun ProjectScreen(
     onSaveFile: suspend (projectId: String, relPath: String, content: String) -> Unit,
     /** 排序档/逆向变更（写入 state —— 重读不重置呈现偏好）。 */
     onSortChange: (FileSort, Boolean) -> Unit,
-    history: ProjectHistoryUi,
+    /**
+     * 本页是否是 pager 当前停稳的那一页。pager 预组合邻页（`beyondViewportPageCount = 1`），
+     * 本屏的返回键拦截若不看它，用户在任务页按返回会被邻页的项目屏吞掉（去退一层目录）。
+     */
+    active: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     // 搜索词/当前目录/多选集合都是本屏私有的现值：过滤、下钻、选中都是**呈现**
@@ -179,22 +183,6 @@ fun ProjectScreen(
     // （TG 打开文档就是整屏换页）：列表/FAB/搜索栏在编辑期间根本不组合，
     // 返回键也整条让给编辑器 —— 少一层"底下那份还在不在"的悬念。
     var editing by remember { mutableStateOf<ScriptFileRowUi?>(null) }
-    var historyProject by rememberSaveable { mutableStateOf<String?>(null) }
-    val shownHistoryProject = historyProject
-    LaunchedEffect(shownHistoryProject, history.active, history.resumeTick) {
-        if (history.active && shownHistoryProject != null) history.onRead(shownHistoryProject)
-    }
-    if (shownHistoryProject != null) {
-        ProjectHistoryScreen(
-            state = history.state.takeIf { it.projectId == shownHistoryProject }
-                ?: com.autoscript.ui.state.ProjectHistoryState.notLoaded(shownHistoryProject),
-            active = history.active,
-            onRefresh = { history.onRead(shownHistoryProject) },
-            onBack = { historyProject = null },
-            modifier = modifier,
-        )
-        return
-    }
     val editingNow = editing
     if (editingNow != null) {
         ScriptEditorScreen(
@@ -237,7 +225,7 @@ fun ProjectScreen(
     // 返回键的退让次序照 TG：先收面板 → 再退选择模式 → 再清搜索 → 最后才退一层目录。
     // 每一档都只做一件事，且「还有下一档」才拦下返回 —— 于是根层没搜索时返回键
     // 照常退出应用（不吞），而每按一次都恰好撤回用户看到的上一步。
-    BackHandler(enabled = history.active && (sheetTarget != null || selectionMode || query.isNotBlank() || currentFolder != null)) {
+    BackHandler(enabled = active && (sheetTarget != null || selectionMode || query.isNotBlank() || currentFolder != null)) {
         when {
             sheetTarget != null -> sheetTarget = null
             selectionMode -> selected = emptySet()
@@ -304,9 +292,6 @@ fun ProjectScreen(
                 // 进了目录才给 ‹（TG 文件页同款：根层没有"上一层"可退）。
                 onBack = if (currentFolder != null) ::goUp else null,
                 actions = {
-                    currentFolder?.substringBefore('/')?.let { projectId ->
-                        ActionBarAction("历史", onClick = { historyProject = projectId })
-                    }
                     ProjectMenu(
                         currentSort = state.sort,
                         reversed = state.reversed,
@@ -399,13 +384,6 @@ fun ProjectScreen(
                 label = "复制路径",
                 onClick = {
                     copy.copy("已复制路径", target.relPath)
-                    sheetTarget = null
-                },
-            )
-            ActionBottomSheetItem(
-                label = "项目执行历史",
-                onClick = {
-                    historyProject = target.projectId
                     sheetTarget = null
                 },
             )

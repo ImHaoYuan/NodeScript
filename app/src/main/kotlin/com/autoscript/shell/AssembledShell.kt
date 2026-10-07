@@ -12,7 +12,7 @@ import com.autoscript.appservice.scheduler.recovery.ScriptDeployRecovery
 import com.autoscript.appservice.scriptrepo.core.BridgeAddonDeploy
 import com.autoscript.appservice.scriptrepo.core.BridgeDistDeploy
 import com.autoscript.domain.bridge.NamespaceHandler
-import com.autoscript.domain.host.ProjectHistorySnapshot
+import com.autoscript.domain.host.TaskLogSnapshot
 import com.autoscript.domain.host.TaskCenterSnapshot
 import com.autoscript.domain.host.ConsoleSnapshot
 import com.autoscript.domain.host.TaskRegistration
@@ -116,9 +116,9 @@ class AssembledShell internal constructor(
     /** 某项目的执行历史（任务中心读口；`recordsOfProject` 的对偶）。 */
     suspend fun runsOf(projectId: String): List<RunRecord> = archive.recordsOfProject(projectId)
 
-    /** 某项目的终态历史（HostSummary 读口；使用壳自己的档案和双 id 关联）。 */
-    suspend fun projectHistory(projectId: String): ProjectHistorySnapshot =
-        ProjectHistoryRead.snapshot(projectId, runsOf(projectId), archive::link)
+    /** 任务日志：全部项目的终态历史（HostSummary 读口；使用壳自己的档案和双 id 关联）。 */
+    suspend fun taskLog(): TaskLogSnapshot =
+        TaskLogRead.snapshot(archive.records(), archive::link)
 
     /** 某次执行的终态（null = 无此记录；UI 按 runId 读"为何没跑"的落点）。 */
     suspend fun runRecord(engineRunId: Long): RunRecord? = archive.record(engineRunId)

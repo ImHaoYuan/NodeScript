@@ -1,19 +1,17 @@
 package com.autoscript.shell
 
-import com.autoscript.domain.host.ProjectHistorySnapshot
+import com.autoscript.domain.host.TaskLogSnapshot
 import com.autoscript.domain.scripts.EngineRunLink
 import com.autoscript.domain.scripts.RunRecord
 import com.autoscript.domain.scripts.isTerminal
 
-/** 项目历史的装配侧投影：复用档案，不把未结算记录或别的项目混进来。 */
-object ProjectHistoryRead {
+/** 任务日志的装配侧投影：复用档案，只取终态（未结算记录归任务中心，不混进来）。 */
+object TaskLogRead {
     suspend fun snapshot(
-        projectId: String,
         records: List<RunRecord>,
         linkOf: suspend (Long) -> EngineRunLink?,
-    ): ProjectHistorySnapshot = ProjectHistorySnapshot(
-        projectId = projectId,
-        runs = records.filter { it.projectId == projectId && it.state.isTerminal }
+    ): TaskLogSnapshot = TaskLogSnapshot(
+        runs = records.filter { it.state.isTerminal }
             .sortedWith(
                 compareByDescending<RunRecord> { it.finishedAtMillis ?: it.startedAtMillis ?: Long.MIN_VALUE }
                     .thenByDescending { it.id },
