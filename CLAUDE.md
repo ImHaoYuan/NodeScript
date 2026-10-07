@@ -16,7 +16,7 @@
 | `docs/backlog.md` | **待办池**：未排期项 + 外审建议（逐条带证据位置、核实状态、成本、建议批次）——是收件箱不是承诺，排期/做完/裁定不做了都从这里移走 | — |
 | `.claude/skills/skill-designer/` | 项目级 skill：设计/创建技能 + 外科手术式改代码 + git 提交 | — |
 
-## Gradle 模块（模块表由 `settings.gradle.kts` 冻结，15 个 —— `:engine:sandbox` 空壳 2026-09-30 已注释摘除、`:app-service:npm` 同日审查步骤 5 自 packager 拆出；复活 sandbox = 重建模块目录 + include 行加回 + ModuleGraphTest 允许集登记）
+## Gradle 模块（模块表由 `settings.gradle.kts` 冻结，17 个 —— `:engine:sandbox` 空壳 2026-09-30 已注释摘除、`:app-service:npm` 同日审查步骤 5 自 packager 拆出；复活 sandbox = 重建模块目录 + include 行加回 + ModuleGraphTest 允许集登记）
 
 - `:app` — AppShellApplication 启动装配（§4.1 Composition Root）；Compose UI 已拆去 `:ui`（2026-09-23 落地：launcher 随库 manifest 合并，`:app` 源码零 compose / 零 import ui）
 - `:app-service:runtime` — RuntimeController / EnginePool / Watchdog 仲裁（§8）
@@ -54,7 +54,7 @@
 
   | job | 干什么 | 不变式（改它之前先读这条） |
   |---|---|---|
-  | `jvm-tests` | 13 个测试任务的 JVM 单测 + archUnit + detekt + jacoco 报告 | 「15 个模块」「13 个测试任务」两个数**从 `settings.gradle.kts` 的 include 与 `ci.yml` 的 `./gradlew` 行派生**，`:domain` 的 `ModuleGraphTest` 守着 —— 文档里写了数字就必须等于派生值。前置 `npm --prefix bridge/js ci && run build`：`:app` 的随包任务硬依赖 tsc 产物（`bridge/js/dist` **不入 git**） |
+  | `jvm-tests` | 14 个测试任务的 JVM 单测 + archUnit + detekt + jacoco 报告 | 「17 个模块」「14 个测试任务」两个数**从 `settings.gradle.kts` 的 include 与 `ci.yml` 的 `./gradlew` 行派生**，`:domain` 的 `ModuleGraphTest` 守着 —— 文档里写了数字就必须等于派生值。前置 `npm --prefix bridge/js ci && run build`：`:app` 的随包任务硬依赖 tsc 产物（`bridge/js/dist` **不入 git**） |
   | `js-tests` | `bridge/js` 的 npm test + `gen:wire && git diff --exit-code` | wire 生成物两份必须与 `bridge/schema/wire.schema.json` 同步，漂移即红 |
   | `docs-check` | `bash .github/scripts/check-doc-links.sh` | 全部 `*.md` 的相对链接必须指向存在的文件；**扫到 0 条也红**（门没跑起来 ≠ 门绿了） |
   | `android-build` | `./gradlew lintDebug` + `:app:assembleDebug`，两者上传 artifact | lint **不加模块前缀**：单跑 `:app` 看不见库模块的 NewApi（`checkDependencies` 缺省 false）。**该 APK 不含引擎二进制**（都不在 git，装配期「缺位只 warn」）—— 补齐路径记在 `docs/backlog.md` 的 B5 |

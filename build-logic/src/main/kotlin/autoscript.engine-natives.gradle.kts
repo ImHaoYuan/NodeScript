@@ -87,6 +87,14 @@ val prepareEngineNativeLibs = tasks.register("prepareEngineNativeLibs") {
         rootProject.layout.projectDirectory
             .file("node-runtime-build/out-opencv/libopencv.so").asFile,
     )
+    // tree-sitter 三件（§语法高亮）：选填件，与 opencv 同纪律（有就随包，无则不红 ——
+    // 装配侧据此不喂语法高亮器，编辑器降级纯文本）。候选位优先级：显式 env → 构建出口。
+    // 三件必须全拷或全不拷（缺一件 → 警告 + 全跳过）：半套比没套更糟（装载第一个 so 成功、
+    // 第二个找不到 → 运行期 UnsatisfiedLinkError，比 JVM 侧加载失败的诚实降级更难查）。
+    val treesitterCandidates = listOfNotNull(
+        System.getenv("TREESITTER_OUT")?.let { File(it) },
+        rootProject.layout.projectDirectory.dir("bridge/treesitter/build/out-treesitter").asFile,
+    )
     outputs.dir(engineNativeLibsDir)
     outputs.dir(engineAddonAssetsDir)
     // 来源不在 git：每次装配现查现拷（outputs.upToDateWhen false —— 否则 build-native.sh
@@ -161,6 +169,50 @@ val prepareEngineNativeLibs = tasks.register("prepareEngineNativeLibs") {
                     "ERR_NOT_IMPLEMENTED —— 跑 node-runtime-build/scripts/build-opencv.sh " +
                     "或下载 image-native.yml 的 artifact。",
             )
+        }
+
+        // tree-sitter 三件（语法高亮）：选填件，与 opencv 同纪律（有就随包，无则不红）。
+        // 三件必须全拷或全不拷（缺一件 → 警告 + 全跳过 → 编辑器降级纯文本）。
+        val tsRoot = treesitterCandidates.firstOrNull { it.isDirectory }
+        val tsAbiDir = tsRoot?.resolve("arm64-v8a")
+        val tsFiles = listOf(
+            "libtree-sitter.so",
+            "libtree-sitter-javascript.so",
+            "libtreesitter.so",
+        )
+        val tsPresent = tsFiles.map { tsAbiDir?.resolve(it) }.filter { it?.isFile == true }
+        when {
+            tsPresent.size == tsFiles.size -> {
+                tsPresent.forEach { src ->
+                    if (src!!.length() == 0L) {
+                        throw GradleException(
+                            "tree-sitter so 源是 0 字节：${src.absolutePath}" +
+                                "（空 so 落包 = 运行期 UnsatisfiedLinkError，比缺件更难查）",
+                        )
+                    }
+                    src.copyTo(File(abiDir, src.name), overwrite = true)
+                }
+                logger.lifecycle(
+                    "[engine-natives] tree-sitter 三件 → lib/arm64-v8a/{libtree-sitter.so," +
+                        "libtree-sitter-javascript.so,libtreesitter.so}（source=$tsAbiDir）",
+                )
+            }
+            tsPresent.isNotEmpty() -> {
+                val missing = tsFiles.filter { tsAbiDir?.resolve(it)?.isFile != true }
+                logger.warn(
+                    "[engine-natives] tree-sitter 半套不随包（有 ${tsPresent.size} 缺 $missing）：" +
+                        "三件必须齐才拷（source=$tsAbiDir）—— 编辑器降级纯文本。" +
+                        "跑 bridge/treesitter/scripts/build-treesitter.sh 或 " +
+                        "export TREESITTER_OUT=/path/to/out-treesitter 全量给。",
+                )
+            }
+            else -> {
+                logger.warn(
+                    "[engine-natives] tree-sitter 未交付（候选位 = bridge/treesitter/build/" +
+                        "out-treesitter 或 export TREESITTER_OUT=…）：编辑器降级纯文本 " +
+                        "—— 跑 bridge/treesitter/scripts/build-treesitter.sh。",
+                )
+            }
         }
 
         // addon（独立选填件）：有就随包成 assets/bridge-addon/bridge_native.node。

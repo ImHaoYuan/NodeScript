@@ -18,7 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -308,7 +308,7 @@ fun ProjectScreen(
                     state = listState,
                     contentPadding = PaddingValues(top = 4.dp, bottom = TabBarBottomClearance()),
                 ) {
-                    itemsIndexed(visible, key = { _, item -> ProjectState.keyOf(item) }) { index, file ->
+                    items(visible, key = { item -> ProjectState.keyOf(item) }) { file ->
                         val key = ProjectState.keyOf(file)
                         FileRow(
                             file = file,
@@ -340,19 +340,7 @@ fun ProjectScreen(
                                 selected = ProjectState.toggleSelection(selected, key)
                             },
                         )
-                        // 行间那条淡灰分割线（用户口径：`test.txt` 与 `main.js` 之间那条）。
-                        // **最后一行不画**：列表末尾挂一条悬空的线，读起来像"下面还有内容"。
-                        // 左内缩对齐**文字左缘**（12 外边距 + 52 头像 + 12 间距）—— 线从头像
-                        // 底下穿过去，"头像属于哪一行"就糊了。
-                        if (index < visible.lastIndex) {
-                            Box(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .padding(start = FileRowDividerInset)
-                                    .height(1.dp)
-                                    .background(ThemeColors.divider),
-                            )
-                        }
+                        // 行间不画分割线（2026-10-07 用户口径：取消文件列表之间的横线）。
                     }
                     if (state.load.isLoaded && visible.isEmpty()) {
                         item { EmptyFilesHint(filtered = query.isNotBlank(), inFolder = currentFolder != null) }
@@ -658,14 +646,6 @@ private fun FileRow(
 
 /** 行尾 ⋮ 的触控目标（Material 最小可达性 48dp）。 */
 private val FileRowMoreTouch = 48.dp
-
-/**
- * 行间分割线的左内缩：与**文字左缘**对齐。
- *
- * 12dp 行外边距 + 52dp 头像格 + 12dp 间距 —— 三个数分别写死在 `FileRow` 的布局里，
- * 这里把和写成常量：改头像尺寸时至少这一处会**显式**跟着改（写 76.dp 就没有这个提醒）。
- */
-private val FileRowDividerInset = 12.dp + 52.dp + 12.dp
 
 /** 选中遮罩的圆角（`DialogCell` 的 `cornersRadius = dp(8) * cornerProgress`）。 */
 private val FileRowSelectedRadius = 8.dp

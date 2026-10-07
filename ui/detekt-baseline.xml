@@ -54,14 +54,14 @@
     <ID>FunctionNaming:Scaffolds.kt$@Composable fun ToneText( text: String, tone: StatusTone, modifier: Modifier = Modifier, style: androidx.compose.ui.text.TextStyle = MaterialTheme.typography.bodyMedium, maxLines: Int = Int.MAX_VALUE, overflow: TextOverflow = TextOverflow.Ellipsis, )</ID>
     <ID>FunctionNaming:ScriptEditorScreen.kt$@Composable fun ScriptEditorScreen( projectId: String, relPath: String, displayName: String, onRead: suspend (projectId: String, relPath: String) -&gt; String, onSave: suspend (projectId: String, relPath: String, content: String) -&gt; Unit, onClose: () -&gt; Unit, modifier: Modifier = Modifier, )</ID>
     <ID>FunctionNaming:ScriptEditorScreen.kt$@Composable private fun ColumnScope.EditorNotice(text: String)</ID>
-    <ID>FunctionNaming:ScriptEditorScreen.kt$@Composable private fun EditorBody( value: TextFieldValue, onValueChange: (TextFieldValue) -&gt; Unit, modifier: Modifier = Modifier, )</ID>
+    <ID>FunctionNaming:ScriptEditorScreen.kt$@Composable private fun EditorBody( value: TextFieldValue, onValueChange: (TextFieldValue) -&gt; Unit, relPath: String, modifier: Modifier = Modifier, )</ID>
     <ID>FunctionNaming:ScriptEditorScreen.kt$@Composable private fun EditorGutter(width: Dp, text: String, style: TextStyle)</ID>
     <ID>FunctionNaming:ScriptEditorScreen.kt$@Composable private fun EditorJumpChip( affordance: EditorAffordance, showBadge: Boolean, onJump: () -&gt; Unit, modifier: Modifier = Modifier, )</ID>
     <ID>FunctionNaming:ScriptEditorScreen.kt$@Composable private fun JumpChevron(towardTop: Boolean)</ID>
     <ID>FunctionNaming:ScriptEditorScreen.kt$@Composable private fun LineCountBadge(count: Int)</ID>
     <ID>FunctionNaming:ScriptEditorScreen.kt$@Composable private fun PendingScrollEffect( pending: IntOffset?, vScroll: ScrollState, hScroll: ScrollState, zoom: EditorZoom, onApplied: () -&gt; Unit, )</ID>
     <ID>FunctionNaming:ScriptEditorScreen.kt$@Composable private fun RollingDigit(digit: Char, index: Int)</ID>
-    <ID>FunctionNaming:ScriptEditorScreen.kt$@Composable private fun RowScope.EditorTextArea( value: TextFieldValue, onValueChange: (TextFieldValue) -&gt; Unit, hScroll: ScrollState, focusRequester: FocusRequester, minWidth: Dp, textStyle: TextStyle, onHeight: (Float) -&gt; Unit, )</ID>
+    <ID>FunctionNaming:ScriptEditorScreen.kt$@Composable private fun RowScope.EditorTextArea( value: TextFieldValue, onValueChange: (TextFieldValue) -&gt; Unit, highlightedText: AnnotatedString?, hScroll: ScrollState, focusRequester: FocusRequester, minWidth: Dp, textStyle: TextStyle, onHeight: (Float) -&gt; Unit, )</ID>
     <ID>FunctionNaming:ScriptEditorScreen.kt$@Composable private fun ScrollDirectionEffect(scroll: ScrollState, onDirection: (Boolean) -&gt; Unit)</ID>
     <ID>FunctionNaming:SettingsCells.kt$@Composable internal fun SettingIconBlock(colors: SettingIconColors, glyph: GlyphKind)</ID>
     <ID>FunctionNaming:SettingsCells.kt$@Composable internal fun SettingsCard(content: @Composable () -&gt; Unit)</ID>

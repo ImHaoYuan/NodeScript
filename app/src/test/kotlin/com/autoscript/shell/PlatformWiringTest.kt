@@ -46,6 +46,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -56,6 +57,7 @@ import com.autoscript.platform.capabilities.a11y.SystemA11yBridge
 import com.autoscript.platform.capabilities.screen.AndroidFrameProducer
 import com.autoscript.platform.capabilities.screen.ProducedFrame
 import com.autoscript.platform.capabilities.screen.ScreenshotSource
+import com.autoscript.domain.editor.SyntaxHighlighter
 
 /**
  * 生产能力装配验证（§12.2 接线现状 + §6 包级例外二）。
@@ -476,6 +478,29 @@ class PlatformWiringTest {
                 "screen 同底（ScreenshotSource+AndroidFrameProducer 经 SystemA11yBridge）",
             )
         }
+        Unit
+    }
+
+    @Test
+    fun `语法高亮转接非 JS 扩展与 JVM 无 so 两路都降级 NONE`() {
+        // 非 JS 扩展：扩展名筛选在 EditorHighlighters 里，连 so 都不问。
+        assertSame(
+            SyntaxHighlighter.NONE,
+            PlatformWiring.syntaxHighlighter("demo/main.txt"),
+            "非 JS 扩展必须返回 NONE（不做任何原生加载尝试）",
+        )
+        assertSame(SyntaxHighlighter.NONE, PlatformWiring.syntaxHighlighter("demo/readme.md"))
+        assertSame(SyntaxHighlighter.NONE, PlatformWiring.syntaxHighlighter("demo/main.ts"))
+        // JVM 下 JS 扩展：三个 so 都不在（System.loadLibrary 抛 UnsatisfiedLinkError，
+        // 是 LinkageError 子类）→ 同样降级 NONE，编辑器保留纯文本能力。
+        // 这条同时钉住「加载失败降级」而不是抛给调用方。
+        assertSame(
+            SyntaxHighlighter.NONE,
+            PlatformWiring.syntaxHighlighter("demo/main.js"),
+            "JVM 无 so：JS 扩展也必须降级 NONE（不抛 UnsatisfiedLinkError 给编辑器）",
+        )
+        assertSame(SyntaxHighlighter.NONE, PlatformWiring.syntaxHighlighter("sub/dir/app.mjs"))
+        assertSame(SyntaxHighlighter.NONE, PlatformWiring.syntaxHighlighter("win\\path\\app.cjs"))
         Unit
     }
 
