@@ -17,6 +17,9 @@ import com.autoscript.bridge.BridgeRouter
 import com.autoscript.bridge.ConsoleCollector
 import com.autoscript.bridge.EventBus
 import com.autoscript.bridge.RequestHandler
+import com.autoscript.bridge.NewlineFrameServer
+import com.autoscript.bridge.RunIdentityRegistry
+import com.autoscript.domain.engine.RunIdentityIssuer
 import com.autoscript.bridge.RequestRegistry
 import com.autoscript.domain.engine.EngineId
 import com.autoscript.domain.bridge.NamespaceHandler
@@ -43,7 +46,7 @@ import com.autoscript.platform.capabilities.CapabilityNamespaces
  * Application/Activity 在此注入；JVM 单测走 [assemble] 传 fake。
  */
 class AppShell(
-    val router: BridgeRouter,
+    val frameServer: NewlineFrameServer,
     val console: ConsoleCollector,
     val events: EventBus,
     val controller: RuntimeController,
@@ -66,6 +69,9 @@ class AppShell(
      */
     val watchdog: EngineWatchdog,
 ) : AutoCloseable {
+
+    val router: BridgeRouter get() = frameServer.router
+    val identities: RunIdentityRegistry get() = frameServer.identities
 
     /** 按 namespace 薄转接 handler 到 [BridgeRouter]（本层无逻辑，只做形状适配）。 */
     fun mount(namespace: String, handler: RequestHandler): Boolean =
@@ -135,12 +141,14 @@ class AppShell(
     override fun close() {
         hostLogConnection?.close()
         hostLogConnection = null
+        frameServer.close()
+        identities.close()
         router.close()
     }
 
     companion object {
         fun assemble(
-            engineFactory: (EngineId) -> ScriptEngine,
+            engineFactory: (EngineId, RunIdentityIssuer) -> ScriptEngine,
             schedulerProvider: SchedulerProvider,
             intentLog: IntentLog,
             runArchive: RunArchive = InMemoryRunArchive(),
@@ -262,63 +270,74 @@ class AppShell(
              */
             systemHandlers: SystemHandlers? = null,
         ): AppShell {
+            val identities = RunIdentityRegistry()
             val events = EventBus()
             val registry = RequestRegistry()
             val router = BridgeRouter(registry)
-            val console = ConsoleCollector()
-            router.register("console", console)
+            val frameServer = NewlineFrameServer(router, identities)
+            var assembled = false
+            try {
+                val console = ConsoleCollector()
+                router.register("console", console)
 
-            val controller = RuntimeController(FixedEnginePool(engineFactory, poolCapacity))
-            val enginesHandler = EnginesNamespaceHandler(controller)
-            router.register("engines", enginesHandler)
+                val controller = RuntimeController(FixedEnginePool({ id -> engineFactory(id, identities) }, poolCapacity))
+                val enginesHandler = EnginesNamespaceHandler(controller)
+                router.register("engines", enginesHandler)
 
-            // 能力命名空间按挂载缝注入（§4.1/§6）：本层只负责把 handler 挂上 Router，
-            // 不 new 具体实现（那需要直连 :platform，被 archUnit 禁止）。缺省不挂 =
-            // 未知 namespace → ERR_NOT_IMPLEMENTED（§7.5 Router 契约，诚实上报）。
-            if (a11yHandler != null) router.register("a11y", a11yHandler)
-            if (screenHandler != null) router.register("screen", screenHandler)
-            if (npmHandler != null) router.register("npm", npmHandler)
-            if (datastoreHandler != null) router.register("datastore", datastoreHandler)
-            if (zipHandler != null) router.register("zip", zipHandler)
-            if (settingsHandler != null) router.register("settings", settingsHandler)
-            if (notificationHandler != null) router.register("notification", notificationHandler)
-            if (clipboardHandler != null) router.register("clipboard", clipboardHandler)
-            if (imagesHandler != null) router.register("images", imagesHandler)
-            if (sensorsHandler != null) router.register("sensors", sensorsHandler)
-            if (powerManagerHandler != null) router.register("power_manager", powerManagerHandler)
-            systemHandlers?.registerAll(router::register)
+                // 能力命名空间按挂载缝注入（§4.1/§6）：本层只负责把 handler 挂上 Router，
+                // 不 new 具体实现（那需要直连 :platform，被 archUnit 禁止）。缺省不挂 =
+                // 未知 namespace → ERR_NOT_IMPLEMENTED（§7.5 Router 契约，诚实上报）。
+                if (a11yHandler != null) router.register("a11y", a11yHandler)
+                if (screenHandler != null) router.register("screen", screenHandler)
+                if (npmHandler != null) router.register("npm", npmHandler)
+                if (datastoreHandler != null) router.register("datastore", datastoreHandler)
+                if (zipHandler != null) router.register("zip", zipHandler)
+                if (settingsHandler != null) router.register("settings", settingsHandler)
+                if (notificationHandler != null) router.register("notification", notificationHandler)
+                if (clipboardHandler != null) router.register("clipboard", clipboardHandler)
+                if (imagesHandler != null) router.register("images", imagesHandler)
+                if (sensorsHandler != null) router.register("sensors", sensorsHandler)
+                if (powerManagerHandler != null) router.register("power_manager", powerManagerHandler)
+                systemHandlers?.registerAll(router::register)
 
-            val dispatcher = ControllerRunDispatcher(controller, screenGate)
-            // §8.6 同源接线：deadline（恢复判过期）与排队上限（dispatcher 在途等多久）
-            // 是同一张表（`DEFAULT_QUEUE_TIMEOUTS === DefaultDeadlines`），这里显式喂给两边 ——
-            // 缺省参数恰好相同是巧合，写出来才是契约。
-            val scheduler = Scheduler(
-                schedulerProvider, intentLog, dispatcher, runArchive,
-                deadlineFor = ControllerRunDispatcher.DEFAULT_QUEUE_TIMEOUTS,
-                taskStore = taskStore,
-            )
-            // 脚本建任务面（`auto.workManager.*`）：调度器是本壳自建的（与 a11y/screen
-            // 注入缝不同 —— 真实现不在 `:platform`），故恒挂载，无注入缝。
-            router.register("workManager", WorkManagerNamespaceHandler(scheduler))
+                val dispatcher = ControllerRunDispatcher(controller, screenGate)
+                // §8.6 同源接线：deadline（恢复判过期）与排队上限（dispatcher 在途等多久）
+                // 是同一张表（`DEFAULT_QUEUE_TIMEOUTS === DefaultDeadlines`），这里显式喂给两边 ——
+                // 缺省参数恰好相同是巧合，写出来才是契约。
+                val scheduler = Scheduler(
+                    schedulerProvider, intentLog, dispatcher, runArchive,
+                    deadlineFor = ControllerRunDispatcher.DEFAULT_QUEUE_TIMEOUTS,
+                    taskStore = taskStore,
+                )
+                // 脚本建任务面（`auto.workManager.*`）：调度器是本壳自建的（与 a11y/screen
+                // 注入缝不同 —— 真实现不在 `:platform`），故恒挂载，无注入缝。
+                router.register("workManager", WorkManagerNamespaceHandler(scheduler))
 
-            // 看门狗：采样器 + 心跳来源在此装配；policy 取 controller 自己那份（单一事实来源，
-            //  Threshold 改变只改一处）。缺省 new 一个套在真 controller 上的生产实例。
-            val dog = watchdog ?: EngineWatchdog(controller)
-            dog.withMonitor(monitor).withHeartbeat(heartbeatMillis ?: { runId -> controller.heartbeatMillis(runId) })
+                // 看门狗：采样器 + 心跳来源在此装配；policy 取 controller 自己那份（单一事实来源，
+                //  Threshold 改变只改一处）。缺省 new 一个套在真 controller 上的生产实例。
+                val dog = watchdog ?: EngineWatchdog(controller)
+                dog.withMonitor(monitor).withHeartbeat(heartbeatMillis ?: { runId -> controller.heartbeatMillis(runId) })
 
-            return AppShell(
-                schedulerProvider = schedulerProvider,
-                router = router,
-                console = console,
-                events = events,
-                controller = controller,
-                enginesHandler = enginesHandler,
-                dispatcher = dispatcher,
-                scheduler = scheduler,
-                intentLog = intentLog,
-                runArchive = runArchive,
-                watchdog = dog,
-            )
+                return AppShell(
+                    schedulerProvider = schedulerProvider,
+                    frameServer = frameServer,
+                    console = console,
+                    events = events,
+                    controller = controller,
+                    enginesHandler = enginesHandler,
+                    dispatcher = dispatcher,
+                    scheduler = scheduler,
+                    intentLog = intentLog,
+                    runArchive = runArchive,
+                    watchdog = dog,
+                ).also { assembled = true }
+            } finally {
+                if (!assembled) {
+                    frameServer.close()
+                    identities.close()
+                    router.close()
+                }
+            }
         }
     }
 }

@@ -18,7 +18,8 @@ import com.autoscript.shell.AppShellKit
 import com.autoscript.shell.ScreenGate
 import java.io.File
 import java.net.StandardProtocolFamily
-import java.nio.channels.Channels
+import java.nio.ByteBuffer
+import java.nio.channels.SocketChannel
 import java.nio.channels.ServerSocketChannel
 import java.nio.file.Files
 import java.nio.file.Path
@@ -64,6 +65,25 @@ private fun unixAddressOf(path: String): java.net.SocketAddress =
     Class.forName("java.net.UnixDomainSocketAddress")
         .getMethod("of", String::class.java)
         .invoke(null, path) as java.net.SocketAddress
+
+/** Channels.newInputStream/newOutputStream 共享 blockingLock，阻塞 read 会饿死 ACK write。
+ * SocketChannel 自身支持一读一写并发；适配层直接调它，不把双向协议降成半双工。 */
+private fun serveUnix(server: NewlineFrameServer, channel: SocketChannel) = server.serveConnection(
+    object : java.io.InputStream() {
+        override fun read(): Int = ByteArray(1).let { if (read(it, 0, 1) < 0) -1 else it[0].toInt() and 255 }
+        override fun read(bytes: ByteArray, off: Int, len: Int): Int = channel.read(ByteBuffer.wrap(bytes, off, len))
+        override fun close() = channel.close()
+    },
+    object : java.io.OutputStream() {
+        override fun write(value: Int) = write(byteArrayOf(value.toByte()))
+        override fun write(bytes: ByteArray, off: Int, len: Int) {
+            val buffer = ByteBuffer.wrap(bytes, off, len)
+            while (buffer.hasRemaining()) channel.write(buffer)
+        }
+        override fun close() = channel.close()
+    },
+    closeConnection = { channel.close() },
+)
 
 class NodeProcessSpawnE2ETest {
 
@@ -118,15 +138,20 @@ class NodeProcessSpawnE2ETest {
             const { connectBootstrap } = require('$dist/bootstrap.js');
             const { consoleSink } = require('$dist/console.js');
             const { startHeartbeat } = require('$dist/engines.js');
+            const { runtimeBridge } = require('$dist/runtime.js');
             (async () => {
               try {
                 await connectBootstrap();
+                let dropped = 0;
+                consoleSink.onQueueError(() => dropped++);
                 await consoleSink.log(
                   'hello from spawn e2e run=' + process.env.AUTOSCRIPT_RUN_ID +
                   ' nonce=' + (process.env.AUTOSCRIPT_RUN_NONCE || 'MISSING')
                 );
                 startHeartbeat(+process.env.AUTOSCRIPT_RUN_ID, { periodMillis: 100 });
                 await new Promise((r) => setTimeout(r, 600));
+                await runtimeBridge.invoke('console', 'log', {level: 'log', text: 'last-acked-row'}, {ttl: 5000});
+                if (dropped !== 0) throw new Error('console queueError=' + dropped);
                 process.exit(0);
               } catch (e) {
                 process.stderr.write('e2e script failed: ' + ((e && e.stack) || e) + '\n');
@@ -143,7 +168,7 @@ class NodeProcessSpawnE2ETest {
             cacheDir = cache,
             schedulerProvider = RecordingProvider(),
             screenGate = ScreenGate.AllowAll,
-            engineFactory = { engineId ->
+            engineFactory = { engineId, identities ->
                 NodeProcessEngine(
                     engineId,
                     NodeEngineConfig(
@@ -151,18 +176,19 @@ class NodeProcessSpawnE2ETest {
                         hostBinary = Path.of("node"),   // PATH 名：桌面跑系统 node（跳过 jniLibs 预检）
                         hostSocketName = sockPath,      // "/" 开头 = 文件系统 unix（main.cpp 判别式）
                     ),
+                    identityIssuer = identities,
                 )
             },
         )
 
-        val frameServer = NewlineFrameServer(assembled.shell.router)
+        val frameServer = assembled.shell.frameServer
         val running = AtomicBoolean(true)
         val acceptThread = Thread {
             try {
                 while (running.get()) {
                     val ch = serverChannel.accept()
                     // 流版 serveConnection：与 socket 版同一读写路径，介质换成 unix 由本线程 accept
-                    frameServer.serveConnection(Channels.newInputStream(ch), Channels.newOutputStream(ch))
+                    serveUnix(frameServer, ch)
                 }
             } catch (_: Exception) {
                 // 收口路径：关 serverChannel 让 accept 抛出 → 线程退（不吞业务错误——业务在断言面）
@@ -200,6 +226,8 @@ class NodeProcessSpawnE2ETest {
                 val lines = shell.console.drain(0).second
                 val hello = lines.firstOrNull { it.text.contains("hello from spawn e2e") }
                     ?: throw AssertionError("console 行未上送（实际=${lines.map { it.text }}）")
+                assertEquals(engineRunId, hello.runId, "归属取自认证连接，不只是文本里碰巧带 runId")
+                assertEquals(engineRunId, lines.single { it.text == "last-acked-row" }.runId)
                 assertTrue(hello.text.contains("run=$engineRunId"), "env RUN_ID 与锚点/档案同源：${hello.text}")
                 assertFalse(hello.text.contains("nonce=MISSING"), "RUN_NONCE 随 spawn env 下传：${hello.text}")
             }
@@ -210,6 +238,7 @@ class NodeProcessSpawnE2ETest {
             } catch (_: Exception) {
             }
             frameServer.close()
+            acceptThread.join(2_000)
             Files.deleteIfExists(Path.of(sockPath))
         }
 
@@ -218,7 +247,7 @@ class NodeProcessSpawnE2ETest {
         try {
             val rec = archive.recordsOfProject("p9").single()
             assertEquals(engineRunId, rec.id, "锚点 runId 与档案记录必须是同一次执行")
-            assertEquals(RunState.SUCCEEDED, rec.state, "脚本自退出 → SUCCEEDED")
+            assertEquals(RunState.SUCCEEDED, rec.state, "脚本自退出 → SUCCEEDED：${rec.exitCode} ${rec.crashSummary}")
             assertTrue(rec.state.isTerminal, "落地即终态")
             assertNotNull(archive.link(rec.id), "双 id 关联成对写入")
             assertTrue(archive.unfinished().isEmpty(), "不得留未终态记录")
@@ -236,4 +265,89 @@ class NodeProcessSpawnE2ETest {
 
         Unit   // 显式收尾：表达式体 @Test 返回非 Unit 会被 JUnit 静默跳过（假绿）
     }
+    @Test
+    fun `真实双脚本同reqId并发不串，同槽重跑和自停均回池`() = runBlocking {
+        val socketPath = "/tmp/as-identity-${System.nanoTime()}.sock"
+        val listener = openUnixServerChannel().also { it.bind(unixAddressOf(socketPath)) }
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val entered = java.util.concurrent.atomic.AtomicInteger()
+        val bothEntered = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val script = files.resolve("scripts/p1/id.js")
+        Files.createDirectories(script.parent)
+        Files.write(script, """
+            const { connectBootstrap } = require('$dist/bootstrap.js');
+            const { runtimeBridge } = require('$dist/runtime.js');
+            (async () => {
+              const boot = await connectBootstrap();
+              const rid = +process.env.AUTOSCRIPT_RUN_ID;
+              await runtimeBridge.invoke('console', 'log', {level:'log',text:'first:'+rid});
+              await runtimeBridge.invoke('probe', 'barrier', null, {ttl:15000});
+              if (process.argv[2] === 'self-stop') {
+                setInterval(() => {}, 1000);
+                try { await runtimeBridge.invoke('engines', 'stop', {runId:rid}); } catch (_) {}
+                return;
+              }
+              await runtimeBridge.invoke('console', 'log', {level:'log',text:'last:'+rid});
+              boot.close();
+              process.exit(0);
+            })().catch(e => { console.error(e); process.exit(1); });
+        """.trimIndent().toByteArray())
+        val assembled = AppShellKit.assemble(
+            files, cache, RecordingProvider(), poolCapacity = 2,
+            engineFactory = { id, issuer -> NodeProcessEngine(
+                id, NodeEngineConfig(files, Path.of("node"), hostSocketName = socketPath), identityIssuer = issuer,
+            ) },
+        )
+        val shell = assembled.shell
+        shell.mount("probe") { request ->
+            if (entered.incrementAndGet() == 2) bothEntered.complete(Unit)
+            gate.await()
+            com.autoscript.domain.bridge.BridgeResponse.Ok(request.id, null)
+        }
+        val serving = Thread {
+            try {
+                while (true) {
+                    val ch = listener.accept()
+                    serveUnix(shell.frameServer, ch)
+                }
+            } catch (_: java.io.IOException) { /* listener 关闭解除 accept */ }
+        }.apply { isDaemon = true; start() }
+        fun request(args: List<String> = emptyList()) = com.autoscript.appservice.runtime.PoolAcquireRequest(
+            projectId = "p1", scriptPath = "id.js", args = args, waitTimeoutMillis = 5_000,
+        )
+        suspend fun start(args: List<String> = emptyList()): Long {
+            val result = shell.controller.start(request(args))
+            return (result as com.autoscript.appservice.runtime.RuntimeController.StartOutcome.Started).runId
+        }
+        try {
+            val a = start()
+            val b = start()
+            kotlinx.coroutines.withTimeout(10_000) { bothEntered.await() }
+            gate.complete(Unit)
+            for (run in listOf(a, b)) {
+                kotlinx.coroutines.withTimeout(10_000) { shell.controller.awaitCompletion(run, 10_000) }
+            }
+            val c = start() // 复用已归还的槽位，JS requestId 再次从 1 开始。
+            kotlinx.coroutines.withTimeout(10_000) { shell.controller.awaitCompletion(c, 10_000) }
+            shell.console.append(0, "info", "host")
+            val lines = shell.console.drain(0, 100).second
+            for (run in listOf(a, b, c)) {
+                assertEquals(listOf("first:$run", "last:$run"), lines.filter { it.runId == run }.map { it.text })
+            }
+            assertEquals(listOf("host"), lines.filter { it.runId == 0L }.map { it.text })
+            assertEquals(3, setOf(a, b, c).size)
+            val self = start(listOf("self-stop"))
+            await("自停归还两个槽位") { shell.controller.stats().takeIf { it.free == 2 } }
+            assertTrue(shell.controller.watchAnchors().none { it.runId == self })
+        } finally {
+            gate.complete(Unit)
+            shell.shutdown(com.autoscript.domain.engine.KillCause.REQUESTED)
+            listener.close()
+            serving.join(2_000)
+            assembled.close()
+            Files.deleteIfExists(Path.of(socketPath))
+        }
+        Unit
+    }
+
 }

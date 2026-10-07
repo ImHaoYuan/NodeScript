@@ -2,6 +2,7 @@ package com.autoscript.bridge
 
 import com.autoscript.domain.automation.InputChannel
 import com.autoscript.domain.automation.InputChannelSession
+import com.autoscript.domain.engine.EngineId
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
 import java.io.ByteArrayInputStream
@@ -22,6 +23,14 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class NewlineFrameServerTest {
+    private val identities = RunIdentityRegistry()
+    private val ids = java.util.concurrent.atomic.AtomicLong(1)
+    private fun hello(): ByteArray = BridgeHandshake.hello(
+        identities.issue(EngineId(0), ids.getAndIncrement()).also { it.confirmSpawn(null) { true } }.token,
+    )
+    private fun authenticated(bytes: ByteArray) = ByteArrayInputStream(hello() + bytes)
+    @org.junit.jupiter.api.AfterEach fun closeIdentities() = identities.close()
+
 
     @Test
     fun `读取帧时取消不会被当作 EOF`() = runBlocking {
@@ -32,7 +41,7 @@ class NewlineFrameServerTest {
                 throw kotlinx.coroutines.CancellationException("read cancelled")
             }
         }
-        val server = NewlineFrameServer(router())
+        val server = NewlineFrameServer(router(), identities)
         try {
             val connection = server.serveConnection(input, ByteArrayOutputStream())
             withTimeout(5_000) { entered.await(); connection.join() }
@@ -50,9 +59,7 @@ class NewlineFrameServerTest {
     private fun frame(bytes: ByteArray) = bytes + "\n".toByteArray(StandardCharsets.UTF_8)
 
     /**
-     * 等回帧落地。**为什么需要**：帧任务挂在 server scope 而非连接 Job 下（慢请求不挡
-     * 快请求），所以 `serveConnection(...).join()` 只保证**读循环**结束，不保证在途帧
-     * 已写回 —— 直接断言会读出空流（本仓已有的一处竞态）。
+     * 等业务回帧（helloAck 不算业务响应）；连接 Job 现在包含 EOF 后的在途排空。
      */
     private suspend fun awaitFrame(out: ByteArrayOutputStream) {
         withTimeout(5_000) {
@@ -61,16 +68,16 @@ class NewlineFrameServerTest {
     }
 
     private fun readFrames(out: ByteArrayOutputStream): List<BridgeResponse> {
-        val lines = out.toString(StandardCharsets.UTF_8.name()).split("\n").filter { it.isNotEmpty() }
+        val lines = out.toString(StandardCharsets.UTF_8.name()).split("\n").filter { it.isNotEmpty() && !it.contains("helloAck") }
         return lines.map { transport.decodeResponse(it.toByteArray(StandardCharsets.UTF_8)) }
     }
 
     @Test
     fun `echo over streams`() = runBlocking {
-        val server = NewlineFrameServer(router())
+        val server = NewlineFrameServer(router(), identities)
         val requests = frame(transport.encodeRequest(com.autoscript.domain.bridge.BridgeRequest(1, "echo", "m", """{"x":1}""", 5_000))) +
             frame(transport.encodeRequest(com.autoscript.domain.bridge.BridgeRequest(2, "echo", "m", null, 5_000)))
-        val input = ByteArrayInputStream(requests)
+        val input = authenticated(requests)
         val output = ByteArrayOutputStream()
         withTimeout(5_000) {
             server.serveConnection(input, output).join()
@@ -89,11 +96,11 @@ class NewlineFrameServerTest {
 
     @Test
     fun `unknown namespace returns ERR_NOT_IMPLEMENTED frame`() = runBlocking {
-        val server = NewlineFrameServer(router())
+        val server = NewlineFrameServer(router(), identities)
         val requests = frame(transport.encodeRequest(com.autoscript.domain.bridge.BridgeRequest(3, "ghost", "m", null, 5_000)))
         val output = ByteArrayOutputStream()
         withTimeout(5_000) {
-            server.serveConnection(ByteArrayInputStream(requests), output).join()
+            server.serveConnection(authenticated(requests), output).join()
             withTimeout(1_000) {
                 while (readFrames(output).isEmpty()) delay(10)
             }
@@ -107,12 +114,12 @@ class NewlineFrameServerTest {
 
     @Test
     fun `malformed frame dropped, connection survives`() = runBlocking {
-        val server = NewlineFrameServer(router())
+        val server = NewlineFrameServer(router(), identities)
         val good = frame(transport.encodeRequest(com.autoscript.domain.bridge.BridgeRequest(4, "echo", "m", null, 5_000)))
         val requests = "不是json\n".toByteArray(StandardCharsets.UTF_8) + good
         val output = ByteArrayOutputStream()
         withTimeout(5_000) {
-            server.serveConnection(ByteArrayInputStream(requests), output).join()
+            server.serveConnection(authenticated(requests), output).join()
             withTimeout(1_000) {
                 while (readFrames(output).isEmpty()) delay(10)
             }
@@ -126,10 +133,10 @@ class NewlineFrameServerTest {
     @Test
     fun `oversize frame closes connection`() = runBlocking {
         val errors = mutableListOf<String>()
-        val server = NewlineFrameServer(router(), maxFrameBytes = 16) { errors += it }
+        val server = NewlineFrameServer(router(), identities, maxFrameBytes = 16) { errors += it }
         val requests = frame(ByteArray(64) { 'x'.code.toByte() })
         val output = ByteArrayOutputStream()
-        withTimeout(5_000) { server.serveConnection(ByteArrayInputStream(requests), output).join() }
+        withTimeout(5_000) { server.serveConnection(authenticated(requests), output).join() }
         assertEquals(0, readFrames(output).size)
         assertTrue(errors.isNotEmpty())
         server.close()
@@ -137,7 +144,7 @@ class NewlineFrameServerTest {
 
     @Test
     fun `loopback TCP round trip with concurrent requests`() = runBlocking {
-        val server = NewlineFrameServer(router())
+        val server = NewlineFrameServer(router(), identities)
         val listener = ServerSocket(0)
         try {
             server.acceptLoop(listener)
@@ -149,9 +156,14 @@ class NewlineFrameServerTest {
                             val sock = sockets[i - 1]
                             val req = com.autoscript.domain.bridge.BridgeRequest(i.toLong(), "echo", "m", """{"i":$i}""", 5_000)
                             val out = sock.getOutputStream()
+                            sock.soTimeout = 5_000
+                            val reader = sock.getInputStream().bufferedReader(StandardCharsets.UTF_8)
+                            out.write(hello())
+                            out.flush()
+                            assertTrue(reader.readLine().contains("helloAck"))
                             out.write(frame(transport.encodeRequest(req)))
                             out.flush()
-                            val line = sock.getInputStream().bufferedReader(StandardCharsets.UTF_8).readLine()
+                            val line = reader.readLine()
                                 ?: throw IllegalStateException("连接提前关闭（i=$i）")
                             transport.decodeResponse(line.toByteArray(StandardCharsets.UTF_8))
                         }
@@ -173,7 +185,7 @@ class NewlineFrameServerTest {
 
     @Test
     fun `帧坏了但 id 还在 —— 回错误帧而不是静默丢弃`() = runBlocking {
-        val server = NewlineFrameServer(router())
+        val server = NewlineFrameServer(router(), identities)
         // payload 是数字：decodeRequest 拒绝值型，但信封 id 读得到 —— 对端不该干等 TTL。
         val bad = frame(
             """{"t":"req","id":7,"ns":"echo","m":"m","ttl":5000,"payload":123}"""
@@ -181,7 +193,7 @@ class NewlineFrameServerTest {
         )
         val output = ByteArrayOutputStream()
         withTimeout(5_000) {
-            server.serveConnection(ByteArrayInputStream(bad), output).join()
+            server.serveConnection(authenticated(bad), output).join()
             withTimeout(1_000) { while (readFrames(output).isEmpty()) delay(10) }
         }
         val responses = readFrames(output)
@@ -205,12 +217,12 @@ class NewlineFrameServerTest {
             running.decrementAndGet()
             BridgeResponse.Ok(req.id, null)
         }
-        val server = NewlineFrameServer(slowRouter, maxInFlight = 2)
+        val server = NewlineFrameServer(slowRouter, identities, maxInFlight = 2)
         val requests = (1..6).fold(ByteArray(0)) { acc, i ->
             acc + frame(transport.encodeRequest(com.autoscript.domain.bridge.BridgeRequest(i.toLong(), "slow", "m", null, 5_000)))
         }
         val output = ByteArrayOutputStream()
-        val conn = server.serveConnection(ByteArrayInputStream(requests), output)
+        val conn = server.serveConnection(authenticated(requests), output)
         withTimeout(5_000) { while (peak.get() < 2) delay(5) }
         delay(100)   // 给"多起协程"留出发生的时间窗
         assertEquals(2, peak.get(), "在途帧数越过 maxInFlight：读循环没有背压")
@@ -238,12 +250,12 @@ class NewlineFrameServerTest {
 
     @Test
     fun `每帧带会话上下文——同一连接内共享`() = runBlocking {
-        val server = NewlineFrameServer(BridgeRouter(RequestRegistry()).also { it.register("ch", ChannelEcho()) })
+        val server = NewlineFrameServer(BridgeRouter(RequestRegistry()).also { it.register("ch", ChannelEcho()) }, identities)
         try {
             val session = InputChannelSession(InputChannel.ROOT)
             val req = frame(transport.encodeRequest(BridgeRequest(11, "ch", "probe", null, 5_000)))
             val out = ByteArrayOutputStream()
-            server.serveConnection(ByteArrayInputStream(req), out, session).join()
+            server.serveConnection(authenticated(req), out, session).join()
             awaitFrame(out)
             assertTrue(
                 out.toString(StandardCharsets.UTF_8.name()).contains("ROOT"),
@@ -256,18 +268,18 @@ class NewlineFrameServerTest {
 
     @Test
     fun `连接之间会话隔离——另一个连接看不到上一个设的通道`() = runBlocking {
-        val server = NewlineFrameServer(BridgeRouter(RequestRegistry()).also { it.register("ch", ChannelEcho()) })
+        val server = NewlineFrameServer(BridgeRouter(RequestRegistry()).also { it.register("ch", ChannelEcho()) }, identities)
         try {
             val a = ByteArrayOutputStream()
             server.serveConnection(
-                ByteArrayInputStream(frame(transport.encodeRequest(BridgeRequest(21, "ch", "probe", null, 5_000)))),
+                authenticated(frame(transport.encodeRequest(BridgeRequest(21, "ch", "probe", null, 5_000)))),
                 a, InputChannelSession(InputChannel.ADB),
             ).join()
             awaitFrame(a)
             val b = ByteArrayOutputStream()
             // 默认参数 = 新会话（生产里每条连接都是新会话）
             server.serveConnection(
-                ByteArrayInputStream(frame(transport.encodeRequest(BridgeRequest(22, "ch", "probe", null, 5_000)))),
+                authenticated(frame(transport.encodeRequest(BridgeRequest(22, "ch", "probe", null, 5_000)))),
                 b,
             ).join()
             awaitFrame(b)

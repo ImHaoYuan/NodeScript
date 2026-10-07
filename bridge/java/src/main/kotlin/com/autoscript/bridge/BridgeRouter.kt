@@ -1,5 +1,6 @@
 package com.autoscript.bridge
 
+import com.autoscript.domain.bridge.AuthenticatedRunContext
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.bridge.NamespaceHandler
@@ -7,6 +8,10 @@ import com.autoscript.domain.core.Clock
 import com.autoscript.domain.core.ErrorCode
 import com.autoscript.domain.core.SystemClock
 import kotlin.coroutines.cancellation.CancellationException
+import kotlin.coroutines.coroutineContext
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -53,34 +58,47 @@ class BridgeRouter(
     fun register(namespace: String, handler: RequestHandler): Boolean =
         handlers.putIfAbsent(namespace, handler) == null
 
-    suspend fun dispatch(request: BridgeRequest): BridgeResponse {
+    suspend fun dispatch(request: BridgeRequest): BridgeResponse = coroutineScope {
         val handler = handlers[request.namespace]
-        if (handler == null) {
-            return BridgeResponse.Err(
-                request.id, ErrorCode.ERR_NOT_IMPLEMENTED.code,
-                "未知 namespace: ${request.namespace}",
+            ?: return@coroutineScope BridgeResponse.Err(request.id, ErrorCode.ERR_NOT_IMPLEMENTED.code, "未知 namespace: ${request.namespace}")
+        // 0 仅为可信本地调用作用域；网络入口必须先认证，console/heartbeat 缺身份也会独立拒绝。
+        val connectionId = coroutineContext[AuthenticatedRunContext]?.connectionId ?: 0L
+        val result = CompletableDeferred<BridgeResponse>()
+        val ticket = registry.register(connectionId, request) { result.complete(it) }
+            ?: return@coroutineScope BridgeResponse.Err(
+                request.id,
+                if (registry.isClosed()) ErrorCode.ERR_ENGINE_STOPPED.code else ErrorCode.ERR_INVALID_PARAM.code,
+                "桥已关闭或本连接 requestId 重复",
             )
-        }
-        if (!registry.register(request) { /* 异步请求的 completer 语义：由 owner 后续 complete；同步路径直接返回 */ }) {
-            return BridgeResponse.Err(
-                request.id, ErrorCode.ERR_INVALID_PARAM.code,
-                "重复 requestId: ${request.id}",
-            )
-        }
         val ttl = request.ttlMillis.takeIf { it > 0 } ?: RequestRegistry.DEFAULT_TTL_MILLIS
-        return try {
-            withTimeout(ttl) { handler.handle(request) }
-                .also { registry.complete(request.id, it) }
-        } catch (e: TimeoutCancellationException) {
-            registry.complete(request.id, BridgeResponse.Err(request.id, ErrorCode.ERR_TIMEOUT.code, "handler 处理超时 $ttl ms"))
-            BridgeResponse.Err(request.id, ErrorCode.ERR_TIMEOUT.code, "handler 处理超时 $ttl ms")
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            registry.complete(request.id, BridgeResponse.Err(request.id, ErrorCode.ERR_INVALID_PARAM.code, "handler 异常: ${e.message}"))
-            BridgeResponse.Err(request.id, ErrorCode.ERR_INVALID_PARAM.code, "handler 异常: ${e.message}")
+        val work = launch(start = CoroutineStart.LAZY) {
+            val response = try {
+                withTimeout(ttl) { handler.handle(request) }
+            } catch (e: TimeoutCancellationException) {
+                BridgeResponse.Err(request.id, ErrorCode.ERR_TIMEOUT.code, "handler 处理超时 $ttl ms")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                BridgeResponse.Err(request.id, ErrorCode.ERR_INVALID_PARAM.code, "handler 异常: ${e.message}")
+            }
+            registry.complete(ticket, response)
+        }
+        // TTL sweep/关闭与 handler 完成共用 ticket 的一次性结算；失败的一方不能回迟到成功。
+        val completion = result.invokeOnCompletion { work.cancel() }
+        work.invokeOnCompletion { cause ->
+            if (cause is CancellationException && !result.isCompleted) result.cancel(cause)
+        }
+        try {
+            work.start()
+            result.await()
+        } finally {
+            registry.cancel(ticket)
+            completion.dispose()
+            work.cancel()
         }
     }
+
+    fun closeConnection(connectionId: Long) { registry.finishConnection(connectionId) }
 
     override fun close() {
         registry.finishAll()

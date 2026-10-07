@@ -28,7 +28,7 @@ class AppShellBootRecoverTest {
 
     private fun shell(log: IntentLog, archive: InMemoryRunArchive = InMemoryRunArchive()): AppShell =
         AppShell.assemble(
-            engineFactory = { id -> FakeEngineForDispatcher(id, pid = 4242) },
+            engineFactory = { id, _ -> FakeEngineForDispatcher(id, pid = 4242) },
             schedulerProvider = RecoverFakeProvider(),
             intentLog = log,
             runArchive = archive,

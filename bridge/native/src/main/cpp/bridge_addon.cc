@@ -6,8 +6,8 @@
 //     本函数负责转义字符串化，金样见 JsonTransportTest），返回 undefined = 等响应经 TSF 回来；
 //  2. socket 读线程收 ok/err → 经 TSF 双队列回投 JS（control 永不丢 / data 可丢包计数）；
 //     读线程由 `setSocketFd(fd>=0)` 首次注入时拉起（§7.8「宿主起线程」的 addon 侧半边：
-//     线程体住本文件，宿主只能经注入点拉起），poll 50ms 唤醒重读 g_sock 支持换 fd 重连；
-//  3. `setSocketFd(fd)`：宿主注入已连 socket（建连/重试/熔断归宿主，addon 只管帧读写，
+//     线程体住本文件，宿主只能经注入点拉起），poll 50ms 唤醒重读 g_sock；生产凭据一次消费，不自动重连；
+//  3. `setSocketFd(fd)`：宿主注入已通过 hello/ACK 认证的 socket（认证/熔断归宿主，addon 只管业务帧读写，
 //     介质可换 binder 不影响本文件 —— §7.5）；
 //  4. `setup(onFrame)`：JS 首帧接线 —— 建 data 面 TSF（一次性，闲置 unref §7.3）。
 //     未 setup 就到达的响应帧计入 `droppedData()`（诚实可查，不静默吞）。

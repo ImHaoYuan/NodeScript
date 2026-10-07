@@ -223,7 +223,7 @@ class AppShellApplication : Application(), HostSummary {
                 cacheDir = cacheDir,
                 schedulerProvider = AlarmSchedulerProvider(port = port),
                 screenGate = screenGateOf(this),
-                engineFactory = { engineId ->
+                engineFactory = { engineId, identities ->
                     NodeProcessEngine(
                         engineId,
                         NodeEngineConfig(
@@ -239,6 +239,7 @@ class AppShellApplication : Application(), HostSummary {
                             // BridgeAddonDeploy）。文件从没落过 = 不注入，脚本照跑。
                             addonPath = ScriptPaths.bridgeAddonFile(filesDir),
                         ),
+                        identityIssuer = identities,
                     )
                 },
                 // 首批内置脚本（§9.6 `assets/scripts/<projectId>/`）：枚举 + 按需读，

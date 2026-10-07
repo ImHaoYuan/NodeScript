@@ -165,6 +165,12 @@ class NodeProcessEngineTest {
                 stopGraceMillis = grace,
             ),
             launcher,
+            identityIssuer = { _, _ -> object : com.autoscript.domain.engine.RunIdentityLease {
+                override val token = "a".repeat(64)
+                override fun confirmSpawn(pid: Int?, isAlive: () -> Boolean) = Unit
+                override fun naturalExit() = Unit
+                override fun revoke() = Unit
+            } },
         )
     }
 
@@ -219,6 +225,7 @@ class NodeProcessEngineTest {
         assertEquals(lib.toString(), env[NodeProcessEngine.ENV_LIBNODE])
         assertEquals(addon.toString(), env[NodeProcessEngine.ENV_BRIDGE_ADDON])
         assertEquals("as-sock-1", env[NodeProcessEngine.ENV_HOST_SOCKET])
+        assertEquals("a".repeat(64), env[NodeProcessEngine.ENV_BRIDGE_TOKEN])
         assertEquals("n-7", env[NodeProcessEngine.ENV_RUN_NONCE])
         assertEquals(receipt.runId.toString(), env[NodeProcessEngine.ENV_RUN_ID], "runId 随 env 下传（§8.4 心跳身份）")
         assertEquals(dist.toString(), env[NodeProcessEngine.ENV_BRIDGE_DIST], "dist 落位根随 env 下传（§12.4 打包入口 attachNative 的 dist 来源）")

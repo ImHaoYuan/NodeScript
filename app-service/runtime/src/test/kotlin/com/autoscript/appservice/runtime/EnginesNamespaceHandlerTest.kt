@@ -6,6 +6,8 @@ import com.autoscript.domain.engine.EngineId
 import com.autoscript.domain.json.DomainJson
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import com.autoscript.domain.bridge.AuthenticatedRunContext
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
@@ -292,10 +294,34 @@ class EnginesNamespaceHandlerTest {
         val h = EnginesNamespaceHandler(controller)
         val resp = assertInstanceOf(
             BridgeResponse.Ok::class.java,
-            h.handle(enginesReq(1, "heartbeat", """{"runId":999,"seq":1}""")),
+            withContext(AuthenticatedRunContext(EngineId(0), 999, 1)) { h.handle(enginesReq(1, "heartbeat", """{"runId":999,"seq":1}""")) },
         )
         assertEquals("false", resp.payload, "未知 runId → Ok false（不是调用方错误，不 4xx）")
         assertTrue(controller.heartbeats().trackedRuns().isEmpty(), "无主心跳不得建账")
+    }
+
+    @Test
+    fun `heartbeat 无身份或冒用其他执行均拒绝且不刷新账本`() = runBlocking {
+        val (h, controller, _) = fullRig()
+        val exec = h.handle(enginesReq(1, "exec", execPayload())) as BridgeResponse.Ok
+        val runId = (DomainJson.decodeObject(exec.payload!!)["runId"] as DomainJson.Value.N).raw.toLong()
+        try {
+            val request = enginesReq(2, "heartbeat", """{"runId":$runId,"seq":1}""")
+            val anonymous = h.handle(request) as BridgeResponse.Err
+            val forged = withContext(AuthenticatedRunContext(EngineId(0), runId + 1, 1)) {
+                h.handle(request)
+            } as BridgeResponse.Err
+            assertEquals("ERR_PERMISSION_DENIED", anonymous.errorCode)
+            assertEquals("ERR_PERMISSION_DENIED", forged.errorCode)
+            assertTrue(controller.heartbeats().trackedRuns().isEmpty())
+            // 拒绝帧不能占用合法 seq：真身份随后发同 seq 仍是第一次心跳。
+            val accepted = withContext(AuthenticatedRunContext(EngineId(0), runId, 2)) {
+                h.handle(request)
+            } as BridgeResponse.Ok
+            assertEquals("true", accepted.payload)
+        } finally {
+            h.handle(enginesReq(3, "stop", """{"runId":$runId}"""))
+        }
     }
 
     @Test
@@ -309,12 +335,12 @@ class EnginesNamespaceHandlerTest {
 
         val first = assertInstanceOf(
             BridgeResponse.Ok::class.java,
-            h.handle(enginesReq(2, "heartbeat", """{"runId":$runId,"seq":5}""")),
+            withContext(AuthenticatedRunContext(EngineId(0), runId, 1)) { h.handle(enginesReq(2, "heartbeat", """{"runId":$runId,"seq":5}""")) },
         )
         assertEquals("true", first.payload)
         val dup = assertInstanceOf(
             BridgeResponse.Ok::class.java,
-            h.handle(enginesReq(3, "heartbeat", """{"runId":$runId,"seq":5}""")),
+            withContext(AuthenticatedRunContext(EngineId(0), runId, 1)) { h.handle(enginesReq(3, "heartbeat", """{"runId":$runId,"seq":5}""")) },
         )
         assertEquals("false", dup.payload, "同 seq 不刷时间戳：积压帧不得让死掉的 run 装作活着")
 

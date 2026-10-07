@@ -46,13 +46,9 @@ import com.autoscript.ui.theme.ThemeColors
  * - **任务日志**：全部项目的终态执行历史（原先项目页里的「历史」子页，2026-10-07 用户口径搬到这里，
  *   并从「某个项目」改成「全部项目」—— 每行带 `项目 / 脚本`）。
  *
- * **诚实边界 —— 系统日志今天的真实内容**（核过代码，不照设计愿望写）：
- * - 桥侧 `console.log` 的写入口把 `runId` 恒写成 0（`ConsoleCollector.handle`；请求帧里没有执行归属），
- *   所以**脚本自己的 console 输出今天也落在这个列表里**，而不是归到某次执行名下；
- * - 宿主装配/恢复/闹钟/保活事件经 `HostLog` 同时写 logcat 与收集器（runId = 0）；
- *   启动期有界缓冲在壳激活时回放。不是设备的完整 logcat，也不跨进程重启持久保存。
- * 两件事都在列表顶部如实说明，不把「系统日志」说成「纯宿主事件」。给脚本输出打 runId 要动桥协议帧，
- * 另批处理。
+ * **日志归属**：脚本桥连接认证后绑定 engineRunId，console 输出只在控制台按执行显示；
+ * 系统日志只读宿主 `HostLog` 的 runId=0 行，启动期有界缓冲在壳激活时回放。
+ * 两者都不是完整 logcat，也不跨进程重启持久保存；任务日志是终态历史，不是 console 全文。
  *
  * 读取与刷新由外壳驱动（进入本页/回前台/手动刷新）；本屏只画，状态原样来自 [ConsoleState] 与 [TaskLogState]
  * （控制台游标与累积行与控制台页同一份，读失败保留已读到的行）。
@@ -118,7 +114,7 @@ private fun SystemLogList(state: ConsoleState, lines: List<ConsoleLineState>, mo
     LazyColumn(modifier.fillMaxWidth(), contentPadding = PaddingValues(bottom = TabBarBottomClearance())) {
         item {
             ToneText(
-                text = "宿主装配、恢复、闹钟与保活事件（runId 0）。注意：脚本经桥的 console 输出也记在这里（尚未按执行归属）；" +
+                text = "宿主装配、恢复、闹钟与保活事件（runId 0）。脚本输出在控制台按执行归属显示，不是任务日志的持久全文；" +
                     "仅保留本次进程内的有界日志，不是完整 logcat。壳装配失败时本列表暂不可读。",
                 tone = StatusTone.MUTED,
                 style = MaterialTheme.typography.bodySmall,

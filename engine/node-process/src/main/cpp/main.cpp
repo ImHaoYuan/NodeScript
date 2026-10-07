@@ -8,6 +8,7 @@
 //                            并把 AUTOSCRIPT_SOCK_FD 注入 addon.setSocketFd。
 //  AUTOSCRIPT_RUN_ID         本次执行的 runId（spawn 侧注入，NodeProcessEngine 同名 env）——
 //                            本文件**透传不消费**：JS 侧读 process.env 打心跳（§8.4）。
+//  AUTOSCRIPT_BRIDGE_TOKEN   宿主签发的一次性凭据（在线必填）；hello/ack 后清除，不打印。
 //  AUTOSCRIPT_RUN_NONCE      §8.5 执行体幂等键（同上：透传，JS 读 process.env）。
 //  AUTOSCRIPT_BRIDGE_DIST    facade dist 落位根（§12.4 资产交付轨）—— **与 addon 绑定**：
 //                            给 addon 未给 dist / dist 顶层不存在 = exit 5（§7.8 契约，
@@ -24,8 +25,8 @@
 //                            uid 不等于本进程 uid 即拒（exit 3）。
 //
 // 启动序（§7.8，对应四步）：
-//  1) 连 :main socket（宿主建连 —— addon 契约是「宿主注入已连 fd」，不自连 §7.5），
-//     fd 经 AUTOSCRIPT_SOCK_FD 传给引导脚本；
+//  1) 连 :main socket 并完成一次性 hello/ACK（addon 只接已认证 fd，不自连 §7.5），
+//     ACK 成功才发布 AUTOSCRIPT_SOCK_FD，清 token 后进入 Node，避免 addon reader 抢 ACK；
 //  2) dlopen libnode.so（16KB 门禁产物，见 node-runtime-build）；
 //  3) dlsym node::Start（§7.8 符号表实证 mangled 名 _ZN4node5StartEiPPc，即契约）
 //     → node::Start 单 isolate，argv = node -e BOOTSTRAP -- <script> [args...]
@@ -38,6 +39,10 @@
 // 真机执行链（spawn、libc++_shared 装载、JNI 注册）仍待 CI。
 
 #include <dlfcn.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <chrono>
+#include <string>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -99,7 +104,56 @@ constexpr const char kBootstrap[] =
 // 连 :main 的 unix socket；成功返回 fd，失败 -1（errno 保留给调用方打印）。
 // 地址两形态（见文件头）：'/' 前导 = 文件系统路径；否则 = abstract 名。
 // 连上后 SO_PEERCRED 校验对端 uid == 自身 uid —— 抢绑 abstract 名的他 app 在此被拒。
-int ConnectHostSocket(const char* path) {
+using Deadline = std::chrono::steady_clock::time_point;
+
+// connect/hello/ack 共用一个期限；EINTR 不能重置计时，写端关闭不能以 SIGPIPE 杀宿主。
+bool WaitSocket(int fd, short events, Deadline deadline) {
+  for (;;) {
+    const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count();
+    if (left <= 0) { errno = ETIMEDOUT; return false; }
+    pollfd pfd{fd, events, 0};
+    int result = poll(&pfd, 1, static_cast<int>(left));
+    if (result < 0 && errno == EINTR) continue;
+    if (result == 0) errno = ETIMEDOUT;
+    return result > 0;  // POLLHUP/POLLERR 交后续 send/recv/SO_ERROR 如实处理。
+  }
+}
+
+bool AuthenticateHost(int fd, const char* token, Deadline deadline) {
+  if (token == nullptr || std::strlen(token) != 64) { errno = EACCES; return false; }
+  for (size_t i = 0; i < 64; ++i) {
+    if (!((token[i] >= '0' && token[i] <= '9') || (token[i] >= 'a' && token[i] <= 'f'))) {
+      errno = EACCES; return false;
+    }
+  }
+  const std::string hello = std::string("{\"t\":\"hello\",\"v\":1,\"token\":\"") + token + "\"}\n";
+  size_t offset = 0;
+  while (offset < hello.size()) {
+    if (!WaitSocket(fd, POLLOUT, deadline)) return false;
+    const ssize_t n = send(fd, hello.data() + offset, hello.size() - offset, MSG_NOSIGNAL | MSG_DONTWAIT);
+    if (n < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) continue;
+    if (n <= 0) return false;
+    offset += static_cast<size_t>(n);
+  }
+  // 此时尚未进入 Node/addon，唯一读者就是这里。只读到换行，不多吞业务字节。
+  std::string ack;
+  while (ack.size() < 1024) {
+    if (!WaitSocket(fd, POLLIN, deadline)) return false;
+    char c;
+    const ssize_t n = recv(fd, &c, 1, MSG_DONTWAIT);
+    if (n < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) continue;
+    if (n <= 0) { errno = ECONNRESET; return false; }
+    if (c == '\n') {
+      if (ack == "{\"t\":\"helloAck\",\"v\":1}") return true;
+      errno = EACCES; return false;
+    }
+    ack.push_back(c);
+  }
+  errno = EMSGSIZE;
+  return false;
+}
+
+int ConnectHostSocket(const char* path, Deadline deadline) {
   sockaddr_un addr;
   std::memset(&addr, 0, sizeof(addr));
   addr.sun_family = AF_UNIX;
@@ -122,13 +176,17 @@ int ConnectHostSocket(const char* path) {
     std::memcpy(addr.sun_path + 1, path, len);
     addrlen = static_cast<socklen_t>(offsetof(sockaddr_un, sun_path) + 1 + len);
   }
-  int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+  int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
   if (fd < 0) return -1;
   if (connect(fd, reinterpret_cast<sockaddr*>(&addr), addrlen) != 0) {
-    int saved = errno;
-    close(fd);
-    errno = saved;
-    return -1;
+    if (errno != EINPROGRESS || !WaitSocket(fd, POLLOUT, deadline)) {
+      int saved = errno; close(fd); errno = saved; return -1;
+    }
+    int error = 0;
+    socklen_t error_len = sizeof(error);
+    if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &error_len) != 0 || error != 0) {
+      int saved = error != 0 ? error : errno; close(fd); errno = saved; return -1;
+    }
   }
   struct ucred peer;
   socklen_t peerlen = sizeof(peer);
@@ -166,17 +224,31 @@ int main(int argc, char** argv) {
   int sock_fd = -1;
   const char* sock_path = std::getenv("AUTOSCRIPT_HOST_SOCKET");
   if (sock_path != nullptr && sock_path[0] != '\0') {
-    sock_fd = ConnectHostSocket(sock_path);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    sock_fd = ConnectHostSocket(sock_path, deadline);
     if (sock_fd < 0) {
       std::fprintf(stderr, ":nodeN 连桥 socket 失败 path=%s err=%s\n", sock_path,
                    std::strerror(errno));
       return kExitSocket;
+    }
+    const bool authenticated = AuthenticateHost(sock_fd, std::getenv("AUTOSCRIPT_BRIDGE_TOKEN"), deadline);
+    unsetenv("AUTOSCRIPT_BRIDGE_TOKEN");
+    if (!authenticated) {
+      std::fprintf(stderr, ":nodeN 桥身份认证失败 err=%s\n", std::strerror(errno));
+      close(sock_fd);
+      return kExitSocket;
+    }
+    // addon 既有写路径接阻塞 fd；握手完成后再发布，不能让其读线程先抢 ACK。
+    const int flags = fcntl(sock_fd, F_GETFL);
+    if (flags < 0 || fcntl(sock_fd, F_SETFL, flags & ~O_NONBLOCK) < 0) {
+      close(sock_fd); return kExitSocket;
     }
     char fd_text[16];
     std::snprintf(fd_text, sizeof(fd_text), "%d", sock_fd);
     setenv("AUTOSCRIPT_SOCK_FD", fd_text, 1);
   } else {
     unsetenv("AUTOSCRIPT_SOCK_FD");
+    unsetenv("AUTOSCRIPT_BRIDGE_TOKEN");
     std::fprintf(stderr, ":nodeN 离线启动（无 AUTOSCRIPT_HOST_SOCKET，桥不可用）\n");
   }
 

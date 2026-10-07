@@ -5,77 +5,59 @@ import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.core.Clock
 import com.autoscript.domain.core.ErrorCode
 import com.autoscript.domain.core.SystemClock
-import java.util.concurrent.ConcurrentHashMap
 
 /**
- * 请求注册表（TTL 语义，docs §7.5）。
- *
- * 职责：
- * - register：requestId → 待完成请求 + 到期时间（TTL 默认 [DEFAULT_TTL_MILLIS]）；
- * - complete：请求方拿到结果后核销（返回是否确实在册）；
- * - expireDue：收割到期请求，统一以 ERR_TIMEOUT 完成返回；
- * - finishAll：关停时以 ERR_ENGINE_STOPPED 全部完成（不再等待）。
- *
- * 线程安全；completer 在调用线上同步执行，调用方负责把响应投递到目标队列（TSF/EventBus）。
+ * 请求账（§7.5）：连接号由宿主分配，回复仍使用客户端 id。注册返回唯一 ticket，
+ * 完成/取消/TTL 均按 ticket 核销，迟到的旧结果不能删掉后来复用 id 的请求。
+ * 状态同锁，completer 在锁外执行；关闭后拒绝新增，避免 close/register 窗口漏单。
  */
-class RequestRegistry(
-    private val clock: Clock = SystemClock,
-) {
-    private data class Pending(
-        val request: BridgeRequest,
-        val deadlineMillis: Long,
-        val completer: (BridgeResponse) -> Unit,
+class RequestRegistry(private val clock: Clock = SystemClock) {
+    data class Key(val connectionId: Long, val requestId: Long)
+    class Ticket internal constructor(
+        val key: Key,
+        internal val deadline: Long,
+        internal val completer: (BridgeResponse) -> Unit,
     )
 
-    private val pending = ConcurrentHashMap<Long, Pending>()
+    private val lock = Any()
+    private val pending = HashMap<Key, Ticket>()
+    private var closed = false
 
-    /** 注册请求。同 id 重复注册返回 false（发送方去重/拒绝）。 */
-    fun register(request: BridgeRequest, completer: (BridgeResponse) -> Unit): Boolean {
+    fun register(connectionId: Long, request: BridgeRequest, completer: (BridgeResponse) -> Unit): Ticket? = synchronized(lock) {
+        val key = Key(connectionId, request.id)
+        if (closed || pending.containsKey(key)) return null
         val ttl = request.ttlMillis.takeIf { it > 0 } ?: DEFAULT_TTL_MILLIS
-        val deadline = clock.nowMillis() + ttl
-        return pending.putIfAbsent(request.id, Pending(request, deadline, completer)) == null
+        Ticket(key, clock.nowMillis() + ttl, completer).also { pending[key] = it }
     }
 
-    /** 核销一个请求：若在册则完成并移除，返回 true；不存在/已到期返回 false。 */
-    fun complete(id: Long, response: BridgeResponse): Boolean {
-        val removed = pending.remove(id) ?: return false
-        removed.completer(response)
-        return true
+    fun complete(ticket: Ticket, response: BridgeResponse): Boolean {
+        val removed = synchronized(lock) { pending.remove(ticket.key, ticket) }
+        if (removed) ticket.completer(response)
+        return removed
     }
 
-    /** 收割到期请求（以 ERR_TIMEOUT 完成）。返回收割数量；completer 已同步执行。 */
+    fun cancel(ticket: Ticket): Boolean = synchronized(lock) { pending.remove(ticket.key, ticket) }
+
     fun expireDue(nowMillis: Long = clock.nowMillis()): Int {
-        if (pending.isEmpty()) return 0
-        var count = 0
-        // 收集后在锁外逐个完成，避免 completer 回调里再操作 registry 导致 ConcurrentModification
-        val due = pending.entries.filter { it.value.deadlineMillis <= nowMillis }
-        for ((id, p) in due) {
-            if (pending.remove(id) != null) {
-                count++
-                p.completer(
-                    BridgeResponse.Err(
-                        id = id,
-                        errorCode = ErrorCode.ERR_TIMEOUT.code,
-                        detail = "请求 ${p.request.namespace}.${p.request.method} 超过 TTL ${p.request.ttlMillis}ms",
-                    ),
-                )
-            }
-        }
-        return count
+        val due = synchronized(lock) { pending.values.filter { it.deadline <= nowMillis } }
+        return due.count { complete(it, BridgeResponse.Err(it.key.requestId, ErrorCode.ERR_TIMEOUT.code, "请求超过 TTL")) }
     }
 
-    /** 立即以指定错误完成全部在册请求（服务关停/引擎死亡时）。 */
+    fun finishConnection(connectionId: Long): Int = finishMatching { it.key.connectionId == connectionId }
+
     fun finishAll(errorCode: ErrorCode = ErrorCode.ERR_ENGINE_STOPPED): Int {
-        val all = pending.keys.toList()
-        var count = 0
-        for (id in all) {
-            if (complete(id, BridgeResponse.Err(id, errorCode.code, null))) count++
-        }
-        return count
+        synchronized(lock) { closed = true }
+        return finishMatching(errorCode) { true }
     }
 
-    fun isRegistered(id: Long): Boolean = pending.containsKey(id)
-    fun size(): Int = pending.size
+    private fun finishMatching(error: ErrorCode = ErrorCode.ERR_ENGINE_STOPPED, match: (Ticket) -> Boolean): Int {
+        val all = synchronized(lock) { pending.values.filter(match) }
+        return all.count { complete(it, BridgeResponse.Err(it.key.requestId, error.code, null)) }
+    }
+
+    fun isRegistered(connectionId: Long, id: Long): Boolean = synchronized(lock) { pending.containsKey(Key(connectionId, id)) }
+    fun size(): Int = synchronized(lock) { pending.size }
+    fun isClosed(): Boolean = synchronized(lock) { closed }
 
     companion object {
         const val DEFAULT_TTL_MILLIS: Long = 5_000

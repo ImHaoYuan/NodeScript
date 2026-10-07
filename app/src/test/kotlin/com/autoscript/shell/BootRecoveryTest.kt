@@ -18,7 +18,7 @@ class BootRecoveryTest {
 
     /** 造一个不碰 Android 的壳（恢复只读 `shell.scheduler`，引擎永不起动）。 */
     private fun shell(): AppShell = AppShell.assemble(
-        engineFactory = { id -> FakeEngineForDispatcher(id, autoExitAfterMillis = null) },
+        engineFactory = { id, _ -> FakeEngineForDispatcher(id, autoExitAfterMillis = null) },
         schedulerProvider = object : com.autoscript.appservice.scheduler.core.SchedulerProvider {
             override suspend fun registerTrigger(targetFireAtMillis: Long, taskId: String) =
                 com.autoscript.appservice.scheduler.core.TriggerHandle { }

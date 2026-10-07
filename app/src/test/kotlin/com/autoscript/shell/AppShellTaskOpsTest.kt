@@ -187,7 +187,7 @@ class AppShellTaskOpsTest {
             cacheDir = cache,
             schedulerProvider = RecordingProvider(),
             screenGate = ScreenGate.AllowAll,
-            engineFactory = { id ->
+            engineFactory = { id, _ ->
                 FakeEngineForDispatcher(id, pid = 4242, autoExitAfterMillis = null)
                     .also { engines += it }
             },

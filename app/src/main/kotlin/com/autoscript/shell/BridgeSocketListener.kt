@@ -30,6 +30,9 @@ interface AcceptedBridgeConnection {
      */
     val peerUid: Int
 
+    /** PID 只能是内核凭据；平台确实不可得时为 null，与 UID fail-closed 分开。 */
+    val peerPid: Int? get() = null
+
     val input: InputStream
     val output: OutputStream
 
@@ -74,7 +77,7 @@ class BridgeSocketListener private constructor(
     @Volatile
     private var running = true
 
-    /** serve 面：每次 [start] 换代（旧在途连接挂旧 scope 随之收，新连接走新 router）。 */
+    /** serve 面：同壳重复 start 不变；换壳关闭旧 IO 与身份入口，新连接走新 router。 */
     @Volatile
     private var frameServer: NewlineFrameServer? = null
 
@@ -87,13 +90,15 @@ class BridgeSocketListener private constructor(
     fun rejectedCount(): Long = rejected.get()
 
     /**
-     * 开 accept/serve（壳就绪后、`install` 前调；**幂等** —— 二次调用只换 router 面，
-     * accept 线程不重启）。换代语义：旧 [NewlineFrameServer] 收掉（其 scope 内在途
-     * serve 被取消 → 连接经 `invokeOnCompletion` 释放），此后新连接全走 [shell] 的 router。
+     * 开 accept/serve（壳就绪后、`install` 前调）：同壳重复调用幂等，换壳不重启 accept
+     * 线程。旧 [NewlineFrameServer] 先显式关闭全部 IO（包括 pre-auth 与阻塞 read），
+     * 再取消请求；不能等阻塞 read 的协程完成后才关闭连接。新连接使用 [shell] 的身份账与 router。
      * 装配线程串行调用，无需加锁。
      */
     fun start(shell: AppShell) {
-        val next = NewlineFrameServer(shell.router)
+        check(running) { "桥监听已关闭" }
+        val next = shell.frameServer
+        if (frameServer === next) return
         frameServer?.close()
         frameServer = next
         if (acceptThread != null) return
@@ -131,7 +136,8 @@ class BridgeSocketListener private constructor(
                 continue
             }
             // serve 收尾（EOF/取消/异常）必关连接 —— fd 归 accept 方管，泄漏 = 慢死
-            fs.serveConnection(conn.input, conn.output).invokeOnCompletion { conn.close() }
+            val peerPid = try { conn.peerPid } catch (_: Exception) { null }
+            fs.serveConnection(conn.input, conn.output, peerPid = peerPid, closeConnection = conn::close)
         }
     }
 

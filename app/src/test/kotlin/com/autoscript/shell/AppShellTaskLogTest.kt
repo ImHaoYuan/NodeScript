@@ -73,7 +73,7 @@ class AppShellTaskLogTest {
                 override suspend fun registerTrigger(targetFireAtMillis: Long, taskId: String) = TriggerHandle { }
                 override suspend fun cancelTrigger(handle: TriggerHandle) = handle.cancel()
             },
-            engineFactory = { id -> HistoryEngine(id, ids) },
+            engineFactory = { id, _ -> HistoryEngine(id, ids) },
         ).use { assembled ->
             for ((taskId, path) in listOf("ok" to "ok.js", "bad" to "bad.js")) {
                 assembled.shell.scheduler.schedule(ScheduledTask(taskId, taskId, "demo", path, TimedSchedule.Once(60)))

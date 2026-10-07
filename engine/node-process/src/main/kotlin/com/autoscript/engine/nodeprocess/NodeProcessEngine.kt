@@ -8,6 +8,8 @@ import com.autoscript.domain.engine.EngineRunReceipt
 import com.autoscript.domain.engine.EngineRunRequest
 import com.autoscript.domain.engine.EngineStatus
 import com.autoscript.domain.engine.KillCause
+import com.autoscript.domain.engine.RunIdentityIssuer
+import com.autoscript.domain.engine.RunIdentityLease
 import com.autoscript.domain.engine.RunSummary
 import com.autoscript.domain.engine.ScriptEngine
 import com.autoscript.domain.engine.StopResult
@@ -16,6 +18,7 @@ import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -95,112 +98,111 @@ class NodeProcessEngine(
     override val id: EngineId,
     private val config: NodeEngineConfig,
     private val launcher: ProcessLauncher = ProcessBuilderLauncher(),
+    private val identityIssuer: RunIdentityIssuer? = null,
 ) : ScriptEngine {
 
-    @Volatile
-    private var process: SpawnedProcess? = null
+    /** 回调始终捕获本次执行，旧尾帧/旧清理不得按槽位找到新 run 的身份。 */
+    private class Execution(val process: SpawnedProcess, val lease: RunIdentityLease?) {
+        @Volatile var stopRequested = false
+        @Volatile var killRequested = false
+        @Volatile var summary: RunSummary? = null
+    }
 
-    /** `stop()` 已请求退出：存活期宿主自报 QUIESCING，退净后报 STOPPED（SIGTERM 的 143 不算崩溃）。 */
-    @Volatile
-    private var stopRequested: Boolean = false
+    @Volatile private var execution: Execution? = null
 
-    /**
-     * `kill()` 已执行（SIGKILL 后退出码的 128+sig 约定因平台而异，不可作终态判据）——
-     * 强杀钉死 CRASHED，与 `FakeEngine.kill` 同口径；优先级高于 stopRequested。
-     */
-    @Volatile
-    private var killRequested: Boolean = false
-
-    /**
-     * 上次执行的进程侧事实快照（backlog B11）：`execute` 开始时清空，[status] 判出
-     * **自然退出**时填充（含 exit 0 —— 摘要只是诊断读口，状态归类不看它）。
-     * 外部经 [ScriptEngine.lastRunSummary] 读 —— 强杀/请求停止那两条分支**不**填充：
-     * 137/143 是终止手段的产物，不是病因（bucket clarity）。
-     */
-    @Volatile
-    private var lastSummary: RunSummary? = null
-
-    /** 只在子进程存活时给真 pid；未启动/已退出回 null（§8.4 诚实口径，绝不 0/自身）。 */
+    /** 仅存活时给真 pid；receipt 中的启动快照不受此属性的变化影响。 */
     override val pid: Int?
-        get() = process?.takeIf { it.isAlive }?.pid
+        get() = execution?.process?.takeIf { it.isAlive }?.pid
 
-    override suspend fun execute(run: EngineRunRequest): EngineRunReceipt = withContext(Dispatchers.IO) {
-        // 同引擎一次一脚本（§8.2）：池纪律保证槽位排他，走到这说明上一执行体没被 quiesce 净 ——
-        // 先强杀防泄漏再如实失败（留着它 = 无人监管的野进程）。
-        process?.takeIf { it.isAlive }?.let { alive ->
-            val leaked = alive.pid
-            alive.destroyForcibly()
-            alive.waitFor(KILL_REAP_MILLIS)
-            throw IllegalStateException(
-                "同引擎一次一脚本被破坏：上一执行体仍在运行（pid=$leaked），已强杀防泄漏后拒绝本次启动",
-            )
-        }
+    override suspend fun execute(run: EngineRunRequest): EngineRunReceipt {
+        var lease: RunIdentityLease? = null
+        var started: SpawnedProcess? = null
+        var delivered = false
+        try {
+            return withContext(Dispatchers.IO) {
+                execution?.let { old ->
+                    if (old.process.isAlive) {
+                        old.lease?.revoke()
+                        old.process.destroyForcibly()
+                        old.process.waitFor(KILL_REAP_MILLIS)
+                        error("同引擎一次一脚本被破坏：上一执行体仍存活（pid=${old.process.pid}），已强杀后拒绝本次启动")
+                    }
+                    old.lease?.naturalExit()
+                }
+                val scriptAbs = ScriptPaths.scriptFile(config.filesDir, run.projectId, run.scriptPath)
+                if (!Files.isRegularFile(scriptAbs)) {
+                    throw AutojsException(
+                        ErrorCode.ERR_FILE_NOT_FOUND,
+                        "脚本不存在：$scriptAbs（projectId=${run.projectId}；装配期补部署见 ScriptDeployRecovery）",
+                    )
+                }
+                // 非绝对路径 = PATH 查找名（测试用 "node"），存在性交给 spawn 报；绝对路径缺位 = 打包缺件，点名。
+                if (config.hostBinary.isAbsolute && !Files.isRegularFile(config.hostBinary)) {
+                    throw AutojsException(
+                        ErrorCode.ERR_FILE_NOT_FOUND,
+                        "引擎宿主二进制未随 APK 落位：${config.hostBinary}（jniLibs 交付，node-runtime-build CI 产物，§19）",
+                    )
+                }
+                config.libnodePath?.let { lib ->
+                    if (lib.isAbsolute && !Files.isRegularFile(lib)) {
+                        throw AutojsException(
+                            ErrorCode.ERR_FILE_NOT_FOUND,
+                            "libnode.so 未随 APK 落位：$lib（node-runtime-build 产物，§3；main.cpp 缺它 exit 2）",
+                        )
+                    }
+                }
+                // addon 是**选填**特性（main.cpp 合同：缺它 = 不预载、脚本直跑、桥调用在调用点如实
+                // ERR_ENGINE_STOPPED）—— 所以"配置了但文件还没落位"降级为不注入，绝不为可选件杀整轮执行；
+                // 真正的缺件感由宿主二进制/libnode 两条**必填**预检承担（它们缺了 main.cpp 必然 exit 2/4）。
+                // **dist 与 addon 成对**（§7.8 kExitDist=5）：dist 配置了却没落位 = addon 也不注入
+                // （否则 main.cpp 会因"addon 在 dist 缺" exit 5 杀整轮）。pairedDist 在两边都就位时
+                // 才成立；它同时决定 addon 注入与 dist env 注入。
+                val pairedDist = config.addonPath
+                    ?.takeIf { Files.isRegularFile(it) }
+                    ?.let { config.bridgeDistPath?.takeIf { d -> Files.isRegularFile(d.resolve("bootstrap.js")) } }
+                val addonEffective = if (pairedDist != null) config.addonPath?.takeIf { Files.isRegularFile(it) } else null
 
-        val scriptAbs = ScriptPaths.scriptFile(config.filesDir, run.projectId, run.scriptPath)
-        if (!Files.isRegularFile(scriptAbs)) {
-            throw AutojsException(
-                ErrorCode.ERR_FILE_NOT_FOUND,
-                "脚本不存在：$scriptAbs（projectId=${run.projectId}；装配期补部署见 ScriptDeployRecovery）",
-            )
-        }
-        // 非绝对路径 = PATH 查找名（测试用 "node"），存在性交给 spawn 报；绝对路径缺位 = 打包缺件，点名。
-        if (config.hostBinary.isAbsolute && !Files.isRegularFile(config.hostBinary)) {
-            throw AutojsException(
-                ErrorCode.ERR_FILE_NOT_FOUND,
-                "引擎宿主二进制未随 APK 落位：${config.hostBinary}（jniLibs 交付，node-runtime-build CI 产物，§19）",
-            )
-        }
-        config.libnodePath?.let { lib ->
-            if (lib.isAbsolute && !Files.isRegularFile(lib)) {
-                throw AutojsException(
-                    ErrorCode.ERR_FILE_NOT_FOUND,
-                    "libnode.so 未随 APK 落位：$lib（node-runtime-build 产物，§3；main.cpp 缺它 exit 2）",
-                )
+                val runId = nodeEngineRunIds.getAndIncrement()
+                val env = linkedMapOf<String, String>()
+                config.libnodePath?.let { env[ENV_LIBNODE] = it.toString() }
+                addonEffective?.let { env[ENV_BRIDGE_ADDON] = it.toString() }
+                config.hostSocketName?.let { env[ENV_HOST_SOCKET] = it }
+                // dist env 同 addon 一起注入（pairedDist 已确认 bootstrap.js 在位）。
+                pairedDist?.let { env[ENV_BRIDGE_DIST] = it.toString() }
+                // 执行体身份（§8.5 幂等键 + §8.4 心跳打点）：runId/runNonce 随 env 下传，
+                // JS 侧（bootstrap/脚本）读 process.env 即可 startHeartbeat(runId) —— 不再另造 argv 通道。
+                env[ENV_RUN_ID] = runId.toString()
+                run.runNonce?.let { env[ENV_RUN_NONCE] = it }
+
+                val command = listOf(config.hostBinary.toString(), scriptAbs.toString()) + run.args
+                val cwd = ScriptPaths.projectRoot(config.filesDir, run.projectId)
+                // 在线必须与宿主同一本身份账；离线不签发、不凭空制造匿名桥身份。
+                lease = config.hostSocketName?.let {
+                    val issuer = identityIssuer ?: throw AutojsException(ErrorCode.ERR_ENGINE_STOPPED, "在线引擎缺身份签发入口")
+                    issuer.issue(id, runId)
+                }
+                lease?.let { env[ENV_BRIDGE_TOKEN] = it.token }
+                val spawned = try {
+                    launcher.spawn(command, env, cwd)
+                } catch (e: IOException) {
+                    throw AutojsException(ErrorCode.ERR_IO, "拉起引擎宿主失败：cmd=[${command.joinToString(" ")}] —— ${e.message}", e)
+                }
+                started = spawned
+                val current = Execution(spawned, lease)
+                execution = current
+                lease?.confirmSpawn(spawned.pid) { spawned.isAlive }
+                EngineRunReceipt(runId, HandleRef(refId = runId, generation = 1), spawned.pid)
+            }.also { delivered = true }
+        } finally {
+            // withContext 返回时也可能因调用方取消抛错；只清本次已取得的 lease/process。
+            if (!delivered) withContext(NonCancellable + Dispatchers.IO) {
+                lease?.revoke()
+                started?.let { child ->
+                    if (child.isAlive) child.destroyForcibly()
+                    child.waitFor(KILL_REAP_MILLIS)
+                }
             }
         }
-        // addon 是**选填**特性（main.cpp 合同：缺它 = 不预载、脚本直跑、桥调用在调用点如实
-        // ERR_ENGINE_STOPPED）—— 所以"配置了但文件还没落位"降级为不注入，绝不为可选件杀整轮执行；
-        // 真正的缺件感由宿主二进制/libnode 两条**必填**预检承担（它们缺了 main.cpp 必然 exit 2/4）。
-        // **dist 与 addon 成对**（§7.8 kExitDist=5）：dist 配置了却没落位 = addon 也不注入
-        // （否则 main.cpp 会因"addon 在 dist 缺" exit 5 杀整轮）。pairedDist 在两边都就位时
-        // 才成立；它同时决定 addon 注入与 dist env 注入。
-        val pairedDist = config.addonPath
-            ?.takeIf { Files.isRegularFile(it) }
-            ?.let { config.bridgeDistPath?.takeIf { d -> Files.isRegularFile(d.resolve("bootstrap.js")) } }
-        val addonEffective = if (pairedDist != null) config.addonPath?.takeIf { Files.isRegularFile(it) } else null
-
-        val runId = nodeEngineRunIds.getAndIncrement()
-        val env = linkedMapOf<String, String>()
-        config.libnodePath?.let { env[ENV_LIBNODE] = it.toString() }
-        addonEffective?.let { env[ENV_BRIDGE_ADDON] = it.toString() }
-        config.hostSocketName?.let { env[ENV_HOST_SOCKET] = it }
-        // dist env 同 addon 一起注入（pairedDist 已确认 bootstrap.js 在位）。
-        pairedDist?.let { env[ENV_BRIDGE_DIST] = it.toString() }
-        // 执行体身份（§8.5 幂等键 + §8.4 心跳打点）：runId/runNonce 随 env 下传，
-        // JS 侧（bootstrap/脚本）读 process.env 即可 startHeartbeat(runId) —— 不再另造 argv 通道。
-        env[ENV_RUN_ID] = runId.toString()
-        run.runNonce?.let { env[ENV_RUN_NONCE] = it }
-
-        val command = listOf(config.hostBinary.toString(), scriptAbs.toString()) + run.args
-        val cwd = ScriptPaths.projectRoot(config.filesDir, run.projectId)
-        stopRequested = false
-        killRequested = false
-        lastSummary = null        // 新执行体的摘要从零计（进程侧旧事实不留到下次 execute）
-        val spawned = try {
-            launcher.spawn(command, env, cwd)
-        } catch (e: IOException) {
-            throw AutojsException(
-                ErrorCode.ERR_IO,
-                "拉起引擎宿主失败：cmd=[${command.joinToString(" ")}] —— ${e.message}",
-                e,
-            )
-        }
-        process = spawned
-        EngineRunReceipt(
-            runId = runId,
-            handle = HandleRef(refId = runId, generation = 1),
-            pid = spawned.pid,
-        )
     }
 
     /**
@@ -209,9 +211,14 @@ class NodeProcessEngine(
      * 池侧 `PoolSlot.quiesce` 据此 kill 兜底。从未启动/已退净 → 如实 Clean（无事可停）。
      */
     override suspend fun stop(): StopResult = withContext(Dispatchers.IO) {
-        val p = process
-        if (p == null || !p.isAlive) return@withContext StopResult.Clean
-        stopRequested = true
+        val current = execution ?: return@withContext StopResult.Clean
+        val p = current.process
+        if (!p.isAlive) {
+            current.lease?.naturalExit()
+            return@withContext StopResult.Clean
+        }
+        current.stopRequested = true
+        current.lease?.revoke()
         p.destroy()
         if (p.waitFor(config.stopGraceMillis)) StopResult.Clean
         else StopResult.TimedOut(partial = true)
@@ -223,11 +230,12 @@ class NodeProcessEngine(
      * 本返回只供诊断（与 `UnavailableEngine`/`FakeEngine` 同口径）。
      */
     override suspend fun kill(): KillCause = withContext(Dispatchers.IO) {
-        killRequested = true
-        process?.let {
-            if (it.isAlive) {
-                it.destroyForcibly()
-                it.waitFor(KILL_REAP_MILLIS)
+        execution?.let { current ->
+            current.killRequested = true
+            current.lease?.revoke()
+            if (current.process.isAlive) {
+                current.process.destroyForcibly()
+                current.process.waitFor(KILL_REAP_MILLIS)
             }
         }
         KillCause.REQUESTED
@@ -243,27 +251,30 @@ class NodeProcessEngine(
      * stop/kill 已在途时开头的两个 return 就短路，不付这份等待）。
      */
     override suspend fun status(): EngineStatus {
-        val p = process ?: return EngineStatus.IDLE
-        if (p.isAlive) return if (stopRequested) EngineStatus.QUIESCING else EngineStatus.RUNNING
-        if (killRequested) return EngineStatus.CRASHED      // 强杀钉死：退出码不作判据（也不填摘要）
-        if (stopRequested) return EngineStatus.STOPPED      // 请求过停止：143 不是崩溃
+        val current = execution ?: return EngineStatus.IDLE
+        val p = current.process
+        if (p.isAlive) return if (current.stopRequested) EngineStatus.QUIESCING else EngineStatus.RUNNING
+        if (current.killRequested) return EngineStatus.CRASHED      // 强杀钉死：退出码不作判据（也不填摘要）
+        if (current.stopRequested) return EngineStatus.STOPPED      // 请求过停止：143 不是崩溃
+        current.lease?.naturalExit()
         return withContext(Dispatchers.IO) {
             p.awaitStderrDrained(STDERR_DRAIN_JOIN_MILLIS)
             if (p.exitValue() == 0) {
                 // exit 0 = 干净退出（STOPPED）——摘要仍快照（RunSummary(0, tail) 无害），
                 // 只供「上次跑了什么」的诊断读口，状态归类不依赖它。
-                snapshotSummary(p)
+                snapshotSummary(current)
                 EngineStatus.STOPPED
             } else {
-                snapshotSummary(p)
+                snapshotSummary(current)
                 EngineStatus.CRASHED
             }
         }
     }
 
     /** 快照进程侧事实（退出码 + 捕获的 stderr 尾部）。调用方已 [SpawnedProcess.awaitStderrDrained]。 */
-    private fun snapshotSummary(p: SpawnedProcess) {
-        lastSummary = RunSummary(
+    private fun snapshotSummary(current: Execution) {
+        val p = current.process
+        current.summary = RunSummary(
             exitCode = p.exitValue(),
             stderrTail = p.stderrTail.takeIf { it.isNotBlank() },
         )
@@ -273,7 +284,7 @@ class NodeProcessEngine(
      * 上次执行的进程侧事实（[ScriptEngine.lastRunSummary] 的宿主实现）：
      * 未执行 / 尚未退净 / 强杀与请求停止路径都如实回 null（那些退出码不是病因）。
      */
-    override suspend fun lastRunSummary(): RunSummary? = lastSummary
+    override suspend fun lastRunSummary(): RunSummary? = execution?.summary
 
     companion object {
         /**
@@ -286,6 +297,7 @@ class NodeProcessEngine(
         const val ENV_LIBNODE = "AUTOSCRIPT_LIBNODE"
         const val ENV_BRIDGE_ADDON = "AUTOSCRIPT_BRIDGE_ADDON"
         const val ENV_HOST_SOCKET = "AUTOSCRIPT_HOST_SOCKET"
+        const val ENV_BRIDGE_TOKEN = "AUTOSCRIPT_BRIDGE_TOKEN"
         const val ENV_RUN_ID = "AUTOSCRIPT_RUN_ID"
         const val ENV_RUN_NONCE = "AUTOSCRIPT_RUN_NONCE"
         const val ENV_BRIDGE_DIST = "AUTOSCRIPT_BRIDGE_DIST"
