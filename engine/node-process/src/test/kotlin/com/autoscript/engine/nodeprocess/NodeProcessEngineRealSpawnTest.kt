@@ -8,6 +8,8 @@ import com.autoscript.domain.engine.EngineStatus
 import com.autoscript.domain.engine.KillCause
 import com.autoscript.domain.engine.RunSummary
 import com.autoscript.domain.engine.StopResult
+import java.net.InetAddress
+import java.net.ServerSocket
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlinx.coroutines.delay
@@ -27,7 +29,8 @@ import org.junit.jupiter.api.io.TempDir
  * 2. 真 SIGTERM → [StopResult.Clean] → 状态 STOPPED；真 SIGKILL → 状态 CRASHED（不看退出码）；
  * 3. 真退出码 → STOPPED(exit 0)/CRASHED(exit≠0) 的状态推导在真实 wait 语义下成立。
  *
- * 桥/socket **不在本测范围**（离线 spawn：不注入 HOST_SOCKET，脚本不连宿主）——
+ * 桥/socket **不在本测范围**（离线 spawn：不注入 HOST_SOCKET，脚本不连桥宿主）——
+ * PID 测试的 loopback socket 只做测试方控制退出的握手，不走生产桥协议；
  * 桥链的本地验证归 `:app` 的 e2e（assemble→trigger→spawn→结算 全栈）。
  */
 class NodeProcessEngineRealSpawnTest {
@@ -76,20 +79,60 @@ class NodeProcessEngineRealSpawnTest {
 
     @Test
     fun `真起 node——pid 快照为真，退出0 STOPPED 且 pid 回 null`() {
+        // B15：立即 process.exit(0) 再断言“仍存活”是在和调度抢跑，不是 PID 契约。
+        // 子进程先发 ready 字节，再持连接等退出许可；不靠 sleep 猜它还活多久。
+        ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { gate ->
+            gate.soTimeout = 15_000
+            writeScript(
+                """
+                const gate = require('node:net').createConnection(${gate.localPort}, '127.0.0.1');
+                gate.on('connect', () => gate.write(Buffer.from([1])));
+                gate.once('data', signal => process.exit(signal[0] === 1 ? 0 : 2));
+                """.trimIndent(),
+            )
+            val e = engine()
+            try {
+                val receipt = runBlocking { e.execute(request()) }
+                gate.accept().use { peer ->
+                    peer.soTimeout = 15_000
+                    assertEquals(1, peer.getInputStream().read(), "子进程必须已执行到握手点")
+                    val self = selfPid()
+                    // 落成局部再判：receipt 是 :domain 类型，跨模块 public val 不给 smart cast。
+                    val childPid = receipt.pid
+                    assertTrue(childPid != null && childPid > 0, "receipt.pid 必须是真子进程 pid：${childPid}")
+                    assertNotEquals(self, childPid?.toLong(), "pid 绝不给自身（§8.4：会把看门狗引到杀主进程）")
+                    assertEquals(EngineStatus.RUNNING, runBlocking { e.status() })
+                    assertEquals(childPid, e.pid, "存活期 ScriptEngine.pid = 当前子进程 pid")
+
+                    // 生存期断言全部完成后才放行；即便测试线程被调度挂起，也不会让 Node 提前退出。
+                    peer.getOutputStream().write(1)
+                    peer.getOutputStream().flush()
+                }
+                val settled = runBlocking { awaitStatus(e, EngineStatus.STOPPED) }
+                assertEquals(EngineStatus.STOPPED, settled, "自然退出 0 → STOPPED")
+                assertNull(e.pid, "已退出 pid 回 null（§8.4：绝不留一个死 pid 让看门狗去采）")
+                assertEquals(0, runBlocking { e.lastRunSummary() }?.exitCode, "必须是自然退出，不借 stop/kill 结算")
+            } finally {
+                // 握手超时或中途断言失败也收走仍在运行的子进程；自然退出不伪装成强杀。
+                runBlocking { if (e.status() == EngineStatus.RUNNING) e.kill() }
+            }
+        }
+    }
+
+    @Test
+    fun `真起 node——立即退出0可结算，不假定 receipt 返回后仍存活`() {
         writeScript("process.exit(0)")
         val e = engine()
-        val receipt = runBlocking { e.execute(request()) }
-
-        val self = selfPid()
-        // 落成局部再判：receipt 是 :domain 类型，跨模块 public val 不给 smart cast。
-        val childPid = receipt.pid
-        assertTrue(childPid != null && childPid > 0, "receipt.pid 必须是真子进程 pid：${childPid}")
-        assertNotEquals(self, childPid?.toLong(), "pid 绝不给自身（§8.4：会把看门狗引到杀主进程）")
-        assertEquals(childPid, e.pid, "存活期 ScriptEngine.pid = 当前子进程 pid")
-
-        val settled = runBlocking { awaitStatus(e, EngineStatus.STOPPED) }
-        assertEquals(EngineStatus.STOPPED, settled, "自然退出 0 → STOPPED")
-        assertNull(e.pid, "已退出 pid 回 null（§8.4：绝不留一个死 pid 让看门狗去采）")
+        try {
+            val receipt = runBlocking { e.execute(request()) }
+            val childPid = receipt.pid
+            assertTrue(childPid != null && childPid > 0, "receipt 保留启动时的真 pid 快照")
+            assertEquals(EngineStatus.STOPPED, runBlocking { awaitStatus(e, EngineStatus.STOPPED) })
+            assertNull(e.pid, "立即退出也不得保留死 pid")
+            assertEquals(0, runBlocking { e.lastRunSummary() }?.exitCode)
+        } finally {
+            runBlocking { if (e.status() == EngineStatus.RUNNING) e.kill() }
+        }
     }
 
     @Test

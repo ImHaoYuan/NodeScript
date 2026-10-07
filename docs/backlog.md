@@ -2,6 +2,11 @@
 
 ## 2026-10-07 追记（批 72）
 
+- **B15 已结项（2026-10-07，批 73）**：真 Node 进程测试的退出时序竞态已修复。
+  `NodeProcessEngineRealSpawnTest` 改用 loopback 握手：子进程先报告 ready，测试完成存活期 PID
+  断言后才放行 `process.exit(0)`；另保留立即退出用例，验证 `receipt.pid` 是启动快照、退出后
+  `NodeProcessEngine.pid` 回 null。**定向测试连续 10 次失败/错误/跳过均 0；生产 PID getter
+  与契约未改。** 下方批 72 的 B15 原始记录保留作历史，当前状态以本条为准。
 - **A10② 已落地**：`:app` 四个文件的 28 处宿主日志经 `HostLog` 双写 logcat / 控制台，
   启动期有界缓冲在壳激活时回放。**A10① / A5 仍待做**：脚本输出仍没有执行归属，
   因而系统日志仍混有脚本输出。下方 A10 原始记录保留作历史，当前进展以本条及
@@ -12,7 +17,6 @@
   生产 `NodeProcessEngine.pid` 在已退出时正确返回 null（同文件生产实现的 `pid` getter）。
   **核实：2026-10-07 全量门首轮在第 88 行失败，后续原样重跑通过；本批未改引擎模块。**
   建议用可控信号让子进程在存活断言后再退出，不靠固定 sleep，也不放宽生产 pid 契约。
-
 > **本文件不是契约，也不是台账。** 契约在 [`docs/design/`](design/)（入口 [`framework-design.md`](framework-design.md)），
 > 落地状态在 [`design-status.md`](design-status.md)，口径变更在 [`design-decisions.md`](design-decisions.md)。
 > 这里只放**尚未排期的待做项** —— 是收件箱，不是承诺。三条纪律：
