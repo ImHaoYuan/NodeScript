@@ -6,10 +6,12 @@ on:
     paths:
       - 'bridge/treesitter/**'
       - '.github/workflows/treesitter-native.yml'
+      - 'node-runtime-build/VERSIONS.env'
   pull_request:
     paths:
       - 'bridge/treesitter/**'
       - '.github/workflows/treesitter-native.yml'
+      - 'node-runtime-build/VERSIONS.env'
   workflow_dispatch:
 
 jobs:
@@ -30,9 +32,15 @@ jobs:
         run: |
           # 不使用 android-actions/setup-android：v3 会额外请求已从 Google 仓库移除的
           # `tools` 包，导致 2026-10-06 的构建在 NDK 安装前失败。
+          # 版本号**从 VERSIONS.env 现读**，不在这里写第二份：曾经手抄的
+          # `ndk;28.0.12674087` 与 build-treesitter.sh 的 source.properties 校验对不上，
+          # 门禁在 NDK 版本漂移上红过一轮（目录语义是版本码，故取 NDK_VERSION_CODE）。
+          V=node-runtime-build/VERSIONS.env
+          NDK_CODE="$(sed -n 's/^NDK_VERSION_CODE=//p' "$V")"
+          [ -n "$NDK_CODE" ] || { echo "$V 缺 NDK_VERSION_CODE"; exit 1; }
           yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null
-          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --install "ndk;28.0.12674087"
-          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/28.0.12674087" >> "$GITHUB_ENV"
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_CODE"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/$NDK_CODE" >> "$GITHUB_ENV"
       
       - name: Build tree-sitter natives
         run: bash bridge/treesitter/scripts/build-treesitter.sh
