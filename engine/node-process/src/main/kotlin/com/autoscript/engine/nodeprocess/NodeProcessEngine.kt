@@ -234,26 +234,34 @@ class NodeProcessEngine(
     }
 
     /**
-     * 进程事实推导（见类 KDoc 状态语义表）；纯读易失字段，不阻塞、不抛。
+     * 进程事实推导（见类 KDoc 状态语义表）；纯读易失字段，不抛。
      * 判出「自然退出且 exit≠0」（=CRASHED）时顺带把进程侧摘要快照进 [lastSummary]。
+     *
+     * **只有自然退出那两条分支需要阻塞**：`isAlive=false`（已收尸）不代表排水线程已读到 EOF，
+     * 不等就快照会丢掉最后几行病因 —— 故这两条分支切 [Dispatchers.IO] 并在快照前
+     * [SpawnedProcess.awaitStderrDrained]（有界 500ms，超时用当前快照，绝不无限阻塞；
+     * stop/kill 已在途时开头的两个 return 就短路，不付这份等待）。
      */
     override suspend fun status(): EngineStatus {
         val p = process ?: return EngineStatus.IDLE
         if (p.isAlive) return if (stopRequested) EngineStatus.QUIESCING else EngineStatus.RUNNING
-        if (killRequested) return EngineStatus.CRASHED      // 强杀钉死：退出码不作判据
+        if (killRequested) return EngineStatus.CRASHED      // 强杀钉死：退出码不作判据（也不填摘要）
         if (stopRequested) return EngineStatus.STOPPED      // 请求过停止：143 不是崩溃
-        return if (p.exitValue() == 0) {
-            // exit 0 = 干净退出（STOPPED）——摘要仍快照（RunSummary(0, tail) 无害），
-            // 只供「上次跑了什么」的诊断读口，状态归类不依赖它。
-            snapshotSummary(p)
-            EngineStatus.STOPPED
-        } else {
-            snapshotSummary(p)
-            EngineStatus.CRASHED
+        return withContext(Dispatchers.IO) {
+            p.awaitStderrDrained(STDERR_DRAIN_JOIN_MILLIS)
+            if (p.exitValue() == 0) {
+                // exit 0 = 干净退出（STOPPED）——摘要仍快照（RunSummary(0, tail) 无害），
+                // 只供「上次跑了什么」的诊断读口，状态归类不依赖它。
+                snapshotSummary(p)
+                EngineStatus.STOPPED
+            } else {
+                snapshotSummary(p)
+                EngineStatus.CRASHED
+            }
         }
     }
 
-    /** 快照进程侧事实（退出码 + 捕获的 stderr 尾部）。进程已退净后调用方谓词保证。 */
+    /** 快照进程侧事实（退出码 + 捕获的 stderr 尾部）。调用方已 [SpawnedProcess.awaitStderrDrained]。 */
     private fun snapshotSummary(p: SpawnedProcess) {
         lastSummary = RunSummary(
             exitCode = p.exitValue(),
@@ -284,6 +292,12 @@ class NodeProcessEngine(
 
         /** 强杀后的收尸等待：只防僵尸残留，不承担语义（语义在 kill 已发即完成）。 */
         private const val KILL_REAP_MILLIS = 1_000L
+
+        /**
+         * 快照摘要前 join 排水线程的上限（backlog B11 竞态修复）：够读完管道尾部，
+         * 又不让「孙进程继承 stderr 不放」把 [status] 拖成无限等 —— 超时用当前快照。
+         */
+        private const val STDERR_DRAIN_JOIN_MILLIS = 500L
 
         /** 跨全部引擎实例的 runId 序列（见类 KDoc「runId 全局唯一」）。 */
         private val nodeEngineRunIds = AtomicLong(1)

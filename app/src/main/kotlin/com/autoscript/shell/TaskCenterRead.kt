@@ -71,20 +71,21 @@ object TaskCenterRead {
                 degraded = task.id in degradedTaskIds,
             )
         },
-        runs = runs.map { record ->
-            RunRow(
-                engineRunId = record.id,
-                intentRunId = linkOf?.invoke(record.id)?.intentRunId,
-                projectId = record.projectId,
-                scriptPath = record.scriptPath,
-                state = record.state,
-                startedAtMillis = record.startedAtMillis,
-                finishedAtMillis = record.finishedAtMillis,
-                exitCode = record.exitCode,
-                crashSummary = record.crashSummary,
-            )
-        },
+        runs = runs.map { runRow(it, linkOf?.invoke(it.id)) },
         recovery = recovery?.let { recoveryRow(it.records, it.failure) },
+    )
+
+    /** 档案逐字段投影（任务中心未结算记录与项目终态历史共用，不丢诊断字段）。 */
+    fun runRow(record: RunRecord, link: EngineRunLink?): RunRow = RunRow(
+        engineRunId = record.id,
+        intentRunId = link?.intentRunId,
+        projectId = record.projectId,
+        scriptPath = record.scriptPath,
+        state = record.state,
+        startedAtMillis = record.startedAtMillis,
+        finishedAtMillis = record.finishedAtMillis,
+        exitCode = record.exitCode,
+        crashSummary = record.crashSummary,
     )
 
     /** `TimedSchedule` → [ScheduleSpec]（三态一一对应；新增分支时 `when` 穷尽性会强制面对）。 */

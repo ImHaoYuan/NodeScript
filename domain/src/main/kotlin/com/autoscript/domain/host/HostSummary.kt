@@ -50,6 +50,14 @@ interface HostSummary {
     suspend fun taskCenter(): TaskCenterSnapshot
 
     /**
+     * 任务日志：全部项目的终态执行历史（§8.5；不混入任务中心的未结算记录）。
+     *
+     * 每次现读壳持有的 RunArchive，失败抛、空列表才表示没有已归档的终态。
+     * 启动失败没有 engineRunId，不能从本口读到，也不伪造一条引擎记录。
+     */
+    suspend fun taskLog(): TaskLogSnapshot
+
+    /**
      * 控制台快照（§7.3 seq 游标拉取 + §8.3 在途执行两端对照）。
      *
      * @param sinceSeq 只回 `seq > sinceSeq` 的行（首读传 0）；快照里的

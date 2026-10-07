@@ -145,6 +145,11 @@ fun ProjectScreen(
     onSaveFile: suspend (projectId: String, relPath: String, content: String) -> Unit,
     /** 排序档/逆向变更（写入 state —— 重读不重置呈现偏好）。 */
     onSortChange: (FileSort, Boolean) -> Unit,
+    /**
+     * 本页是否是 pager 当前停稳的那一页。pager 预组合邻页（`beyondViewportPageCount = 1`），
+     * 本屏的返回键拦截若不看它，用户在任务页按返回会被邻页的项目屏吞掉（去退一层目录）。
+     */
+    active: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     // 搜索词/当前目录/多选集合都是本屏私有的现值：过滤、下钻、选中都是**呈现**
@@ -220,7 +225,7 @@ fun ProjectScreen(
     // 返回键的退让次序照 TG：先收面板 → 再退选择模式 → 再清搜索 → 最后才退一层目录。
     // 每一档都只做一件事，且「还有下一档」才拦下返回 —— 于是根层没搜索时返回键
     // 照常退出应用（不吞），而每按一次都恰好撤回用户看到的上一步。
-    BackHandler(enabled = sheetTarget != null || selectionMode || query.isNotBlank() || currentFolder != null) {
+    BackHandler(enabled = active && (sheetTarget != null || selectionMode || query.isNotBlank() || currentFolder != null)) {
         when {
             sheetTarget != null -> sheetTarget = null
             selectionMode -> selected = emptySet()

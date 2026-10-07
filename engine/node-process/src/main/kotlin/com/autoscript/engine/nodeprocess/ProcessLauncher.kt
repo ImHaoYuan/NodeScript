@@ -53,6 +53,17 @@ interface SpawnedProcess {
      * 一份会翻倍无界的风险；病因诊断的权威面是 stderr（脚本/宿主都往这里写错）。
      */
     val stderrTail: String
+
+    /**
+     * 等 stderr 排水读到 EOF，至多 [timeoutMillis]；排净回 true，超时回 false（不抛、不无限阻塞）。
+     *
+     * 为什么需要：[isAlive] = false 只说明子进程已被收尸，**不说明**排水线程已把管道读完 ——
+     * 两者之间没有 happens-before，直接取 [stderrTail] 可能拿到半截尾部（病因恰在最后几行）。
+     * 超时（如孙进程继承了 stderr 一直不关管道）由调用方用当前快照兜底。
+     *
+     * 缺省实现回 true：没有排水线程的假实现，[stderrTail] 本身即最终态。
+     */
+    fun awaitStderrDrained(timeoutMillis: Long): Boolean = true
 }
 
 /**
@@ -93,9 +104,9 @@ class ProcessBuilderLauncher : ProcessLauncher {
                 redirectErrorStream(false)   // 分开两条通道：stdout 排空、stderr 捕获尾部（见类 KDoc）
             }
             .start()
-        // stderr 尾部缓冲（有界、只增到上限后丢最老）。单进程单写者（排水线程），
-        // 读取侧在进程已退净后读 —— 退净 → 排水线程已把管道读到 EOF → tail 即最终态，
-        // 天然 happens-before（`Process.waitFor` 返回）无内存可见性问题。
+        // stderr 尾部缓冲（有界、只增到上限后丢最老）。单进程单写者（排水线程），读写经
+        // @Synchronized 保可见性。注意「进程退净」**不蕴含**「排水线程已读到 EOF」——
+        // 收尸与管道读完之间无 happens-before；要最终态须先 awaitStderrDrained（join 排水线程）。
         val tail = StderrTail(RunSummary.MAX_DETAIL)   // 上限与 :domain 摘要契约同值
         val drain = Thread {
             try {
@@ -138,7 +149,7 @@ class ProcessBuilderLauncher : ProcessLauncher {
     private class JdkSpawnedProcess(
         private val process: Process,
         @Suppress("unused") private val drain: Thread,   // 持引用防 GC 提前回收排水线程句柄
-        @Suppress("unused") private val drainErr: Thread,
+        private val drainErr: Thread,
         private val tail: StderrTail,
     ) : SpawnedProcess {
         override val pid: Int? = try {
@@ -154,6 +165,15 @@ class ProcessBuilderLauncher : ProcessLauncher {
         override fun exitValue(): Int? = if (process.isAlive) null else process.exitValue()
 
         override val stderrTail: String get() = tail.snapshot()
+
+        override fun awaitStderrDrained(timeoutMillis: Long): Boolean {
+            try {
+                drainErr.join(timeoutMillis.coerceAtLeast(1))   // join(0) = 无限等，故下限 1ms
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()               // 保留中断标记，用当前快照兜底
+            }
+            return !drainErr.isAlive
+        }
 
         override fun destroy() = process.destroy()
 

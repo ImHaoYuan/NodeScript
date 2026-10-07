@@ -3,6 +3,9 @@ package com.autoscript.shell
 import com.autoscript.appservice.scriptrepo.core.DeployPath
 import com.autoscript.domain.scripts.ScriptPaths
 import java.io.IOException
+import java.nio.ByteBuffer
+import java.nio.charset.CharacterCodingException
+import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
@@ -59,11 +62,12 @@ object ScriptFileOps {
     /**
      * 读一个脚本文件的文本（项目页点文件进编辑）。
      *
-     * 三条拒绝（都抛，原文给 UI）：
+     * 拒绝条件（都抛，原文给 UI）：
      * - 目标不是**已存在的普通文件**（目录/不存在）—— 编辑器只编辑文件；
      * - 超过 [MAX_EDIT_BYTES]；
      * - 内容含 NUL（二进制）—— 当文本读进来再存回去就是**损坏用户文件**，
-     *   宁可在这里拒绝（UTF-8 解码本身不抛：非法字节会解成 U+FFFD，静默损坏）。
+     *   宁可在这里拒绝；
+     * - 非法 UTF-8 字节：严格解码，不用替换字符冒充原文。
      */
     fun read(filesDir: Path, projectId: String, relPath: String): String {
         val target = resolveInProject(filesDir, projectId, relPath)
@@ -76,7 +80,14 @@ object ScriptFileOps {
             // 用户手里的 .js/.txt 打不开时，这句话本身就是答复。
             "这不是文本文件（含二进制字节）：$relPath —— 编辑器只开 UTF-8 文本（.js/.txt/.json/.md 等）"
         }
-        return String(bytes, StandardCharsets.UTF_8)
+        return try {
+            StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+                .decode(ByteBuffer.wrap(bytes)).toString()
+        } catch (e: CharacterCodingException) {
+            throw IllegalArgumentException("这不是合法的 UTF-8 文本：$relPath —— 编辑器拒绝打开以免损坏原文件", e)
+        }
     }
 
     /**

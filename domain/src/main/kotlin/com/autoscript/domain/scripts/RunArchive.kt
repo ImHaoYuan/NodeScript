@@ -43,6 +43,14 @@ interface RunArchive {
     /** 按项目反查（任务中心列表）。 */
     suspend fun recordsOfProject(projectId: String): List<RunRecord>
 
+    /**
+     * 全部记录（任何状态、任何项目；按 engineRunId 升序）。
+     *
+     * 任务日志（跨项目终态历史）的输入：由调用方按终态过滤、排序。档案只追加不清理，
+     * 体积随执行数线性增长 —— 调用方（呈现层读口）不应在热路径上反复调用。
+     */
+    suspend fun records(): List<RunRecord>
+
     /** 尚未终态化的记录（启动时核对「档案 RUNNING 但引擎已不在途」的孤儿清理输入）。 */
     suspend fun unfinished(): List<RunRecord>
 }

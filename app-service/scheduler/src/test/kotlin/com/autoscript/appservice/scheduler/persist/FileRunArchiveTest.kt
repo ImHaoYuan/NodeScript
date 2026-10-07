@@ -45,6 +45,22 @@ class FileRunArchiveTest {
     }
 
     @Test
+    fun `records 回全部项目全部状态，重启回放后仍在`() = runBlocking {
+        val first = FileRunArchive(dir)
+        first.put(run(30, RunState.SUCCEEDED).copy(projectId = "other"))
+        first.put(run(10, RunState.RUNNING))
+        first.put(run(20, RunState.FAILED))
+        assertEquals(listOf(10L, 20L, 30L), first.records().map { it.id })
+        first.close()
+
+        val second = FileRunArchive(dir)
+        assertEquals(listOf(10L, 20L, 30L), second.records().map { it.id })
+        assertEquals(setOf("p1", "other"), second.records().map { it.projectId }.toSet())
+        second.close()
+        Unit
+    }
+
+    @Test
     fun `终态不可改写不可复活，点名拒绝`() = runBlocking {
         val archive = FileRunArchive(dir)
         archive.put(run(1, RunState.SUCCEEDED), EngineRunLink(1, 1))

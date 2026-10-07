@@ -114,6 +114,22 @@ class ConsoleStateTest {
     }
 
     @Test
+    fun `乱序回包不回退游标且按 seq 去重`() {
+        val newer = ConsoleState.of(
+            ConsoleState.NOT_LOADED,
+            snap(lines = listOf(row(10), row(15), row(20)), nextSeq = 20L),
+            nowMillis = 2L,
+        )
+        val older = ConsoleState.of(
+            newer,
+            snap(lines = listOf(row(10), row(12), row(15)), nextSeq = 15L),
+            nowMillis = 3L,
+        )
+        assertEquals(20L, older.nextSeq)
+        assertEquals(listOf(10L, 12L, 15L, 20L), older.lines.map { it.seq })
+    }
+
+    @Test
     fun `三样现值每次现取 不拿旧值当现状`() {
         val loud = ConsoleState.of(
             ConsoleState.NOT_LOADED,

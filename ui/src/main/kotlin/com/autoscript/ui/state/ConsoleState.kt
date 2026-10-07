@@ -74,8 +74,8 @@ data class ConsoleState(
             val fresh = added.lines.filter { it.seq !in seen }
             return ConsoleState(
                 load = LoadState.Loaded,
-                lines = previous.lines + fresh.map { ConsoleLineState.of(it, zone) },
-                nextSeq = added.nextSeq,
+                lines = (previous.lines + fresh.map { ConsoleLineState.of(it, zone) }).sortedBy { it.seq },
+                nextSeq = maxOf(previous.nextSeq, added.nextSeq),
                 pageFull = added.pageFull,
                 droppedTotal = added.droppedTotal,
                 activeRuns = added.activeRuns.map { ActiveRunState.of(it) },

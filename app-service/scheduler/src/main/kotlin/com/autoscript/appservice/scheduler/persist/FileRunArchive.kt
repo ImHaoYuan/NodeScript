@@ -73,6 +73,10 @@ class FileRunArchive(private val dir: Path) : RunArchive, AutoCloseable {
         records.values.filter { it.projectId == projectId }.sortedBy { it.id }
     }
 
+    override suspend fun records(): List<RunRecord> = synchronized(writeLock) {
+        records.values.sortedBy { it.id }
+    }
+
     override suspend fun unfinished(): List<RunRecord> = synchronized(writeLock) {
         records.values.filter { !it.state.isTerminal }.sortedBy { it.id }
     }
