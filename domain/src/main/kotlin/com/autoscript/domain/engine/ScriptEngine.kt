@@ -1,6 +1,7 @@
 package com.autoscript.domain.engine
 
 import com.autoscript.domain.bridge.HandleRef
+import com.autoscript.domain.permission.ScriptAuthorizationSnapshot
 
 /** :nodeN 引擎进程宿主 SPI（docs §8）。实现位于 :engine:node-process。 */
 interface ScriptEngine {
@@ -65,6 +66,17 @@ data class EngineRunRequest(
     val args: List<String> = emptyList(),
     val runNonce: String? = null,   // 调度幂等锚点（§8.1/§8.5）：执行体用 runNonce 做对外副作用幂等键
     val timeoutMillis: Long? = null,
+    /**
+     * 这次执行的**授权快照**（A5，§11）：宿主对本次 spawn 已算好的不可变授权（掩码 + 来源档），
+     * 由 `RuntimeController.start` 一次算出、经池请求传到这里，再由引擎原样交给
+     * [RunIdentityIssuer.issue] 落到执行身份上。
+     *
+     * 为什么必须随请求带下来而不是让签发方自己算：签发方（身份账）不知道也不该知道
+     * 来源策略 —— 让它在签发时另算一遍，就出现「预检校验的是 A 掩码、签发出去的是 B 掩码」
+     * 的窗口（A5 整改第 4 条）。null = **离线/未接身份**（不签发桥身份的那些路径：
+     * 引擎离线模式、替身引擎）—— 那种情况没有可签发的掩码，如实为 null，不编一个。
+     */
+    val authorization: ScriptAuthorizationSnapshot? = null,
 )
 
 data class EngineRunReceipt(

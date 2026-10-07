@@ -26,6 +26,8 @@ import com.autoscript.domain.engine.ScriptEngine
 import com.autoscript.domain.host.TaskCenterSnapshot
 import com.autoscript.domain.host.ConsoleSnapshot
 import com.autoscript.domain.host.TaskRegistration
+import com.autoscript.domain.permission.CapabilityMask
+import com.autoscript.domain.permission.ScriptAuthorizationPolicy
 import com.autoscript.appservice.scheduler.core.TriggerSource
 import com.autoscript.domain.scripts.RunArchive
 import com.autoscript.domain.scripts.RunRecord
@@ -183,6 +185,25 @@ object AppShellKit {
         monitor: ProcessMonitor = ProcessMonitor(),
         watchdog: EngineWatchdog? = null,
         watchdogScope: CoroutineScope? = null,
+        /**
+         * **来源授权策略**（A5，§11）：本壳所有执行拿到什么桥面能力的判据来源。
+         *
+         * 缺省 = 无来源元数据（`TrustTier.UNKNOWN` 的保守档 A，见
+         * [com.autoscript.domain.permission.TrustTierMasks.UNKNOWN_DEFAULT]）。
+         * 生产接真元数据时在这里传一个带
+         * [com.autoscript.domain.permission.TrustTierResolver] 的策略，就能**按项目**分级 ——
+         * 这是本参数的用途（它是注入缝），不是三个全局布尔开关。
+         */
+        authorization: ScriptAuthorizationPolicy = ScriptAuthorizationPolicy(),
+        /**
+         * 便捷覆盖（A5，§11）：非 null 时所有执行按它拿掩码，等价于
+         * `ScriptAuthorizationPolicy(override = capabilityMask)`。测试/受信直投路径用。
+         *
+         * **与 [authorization] 同时给时以本参数为准**（见 [AppShell.assemble] 同名参数的 KDoc：
+         * 本参数整体替换策略对象，不是叠加）。本方法把两个参数无条件转下去，不做取舍判断 ——
+         * 规则只有一条，写在装配根那一处。
+         */
+        capabilityMask: CapabilityMask? = null,
     ): AssembledShell {
         val autojsDir = filesDir.resolve(".autojs")
         Files.createDirectories(autojsDir)
@@ -308,6 +329,8 @@ object AppShellKit {
             imagesHandler = imagesHandler,
             powerManagerHandler = powerManagerHandler,
             systemHandlers = systemHandlers,
+            authorization = authorization,
+            capabilityMask = capabilityMask,
         )
         // 看门狗开机即转（§8.4）：不转的话三路判据就只是"可以转"——在途 run 的出格行为
         // 没有一个周期性的观察者，`awaitCompletion` 的等待超时是唯一兜底（而它只管

@@ -4,6 +4,7 @@ import com.autoscript.domain.bridge.AuthenticatedRunContext
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.engine.EngineId
+import com.autoscript.domain.permission.CapabilityMask
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CancellationException
@@ -20,7 +21,13 @@ import org.junit.jupiter.api.Test
 
 class RequestIsolationTest {
     private fun req(id: Long = 1, ttl: Long = 5_000) = BridgeRequest(id, "probe", "m", null, ttl)
-    private fun caller(id: Long) = AuthenticatedRunContext(EngineId(0), id, id)
+
+    /**
+     * 已认证调用方夹具。**掩码给全量**：本类钉的是「请求隔离/连接归属」，不是 A5 授权
+     * （授权路径的允许/拒绝矩阵在 `BridgeRouterTest` 的 mask 用例里）—— 这里若给窄掩码，
+     * 被拒的原因就变成授权而非隔离，断言会指着错的东西。
+     */
+    private fun caller(id: Long) = AuthenticatedRunContext(EngineId(0), id, id, CapabilityMask.ALL)
 
     @Test
     fun `双连接同时用正负请求号不会冲突，关闭一条不影响另一条`() = runBlocking {

@@ -6,8 +6,10 @@ import kotlin.coroutines.coroutineContext
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.bridge.RpcNamespaceHandler
+import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
 import com.autoscript.domain.json.DomainJson
+import com.autoscript.domain.permission.BridgeCapability
 
 /**
  * `engines` namespace 桥处理器（docs §8 / §12.3）：JS `engines.*` 面的 Kotlin 对偶。
@@ -45,11 +47,13 @@ import com.autoscript.domain.json.DomainJson
  *   不是错误）；未知 runId（不在途/已结算/从未存在）→ 仍 Ok `false` **且不记账** ——
  *   "不知道这个 run"本身不是调用方错误，但也不得把它伪装成一次有效心跳，更不得让无主
  *   条目堆积顶出活 run 的账（[RuntimeController.heartbeat] 先验在途再落账本）；
- * - `channel`：payload `{name}` → 创建或复用命名通道 → Ok `{name,channelId}`；
+ * - `channel`：payload `{name}` → 创建或复用**本执行名下**的命名通道 → Ok `{name,channelId}`
+ *   （所有者 = 认证连接的 engineRunId；不同执行取同名通道各拿各的 id，见「命名通道」段注释）；
  * - `channelEmit`：payload `{channelId,event,payload?}` → 记入通道事件缓冲 → Ok null；
+ *   通道不存在/已关闭/「不归本执行」 → ERR_NOT_FOUND；
  * - `channelDrain`：payload `{channelId,sinceSeq?,max?}` → 游标拉取（供 :app 层经
- *   EventBus/TSF 转发给订阅端，见领域注释：退出/事件推送走桥 EventBus）；
- * - `channelClose`：payload `{channelId}` → 关闭并丢弃缓冲 → Ok `true`；
+ *   EventBus/TSF 转发给订阅端，见领域注释：退出/事件推送走桥 EventBus）；同上按所有者校验；
+ * - `channelClose`：payload `{channelId}` → 关闭并丢弃缓冲 → Ok `true`；同上按所有者校验；
  * - 未知方法 → Err ERR_NOT_IMPLEMENTED；非法载荷 → Err ERR_INVALID_PARAM。
  */
 class EnginesNamespaceHandler(
@@ -78,7 +82,18 @@ class EnginesNamespaceHandler(
     private suspend fun exec(request: BridgeRequest): BridgeResponse {
         val p = parseExec(request.payload)
         val bounded = p.copy(waitTimeoutMillis = p.waitTimeoutMillis ?: request.ttlMillis)
-        return when (val outcome = controller.start(bounded)) {
+        // 跨脚本派生授权（A5，§11）：脚本经 exec 拉起新执行要先过闸（缺 CROSS_SCRIPT_CONTROL
+        // 或会造成提权 → ERR_PERMISSION_DENIED）；宿主/UI 发起的调用没有认证上下文，不受此限。
+        // 返回的**子授权快照**原样放进请求：下游（池 → 引擎 → 身份签发）搬的是同一份，
+        // 不存在「这里校验 A 掩码、那边签发 B 掩码」的窗口（A5 整改第 4 条）。
+        val caller = coroutineContext[AuthenticatedRunContext]
+        val childAuthorization = try {
+            controller.authorizeStart(caller, bounded.projectId)
+        } catch (e: AutojsException) {
+            return err(request, e.error, e.message)
+        }
+        val authorized = bounded.copy(authorization = childAuthorization)
+        return when (val outcome = controller.start(authorized)) {
             is RuntimeController.StartOutcome.Started -> ok(
                 request,
                 DomainJson.encode(
@@ -100,6 +115,18 @@ class EnginesNamespaceHandler(
 
     private suspend fun stop(request: BridgeRequest): BridgeResponse {
         val runId = requiredLong(decodePayload(request.payload), "runId")
+        // 跨脚本目标授权（A5，§11）：停**自己**任何掩码都放行（`EngineSessionImpl.cancel`
+        // 靠它）；停别的执行要 CROSS_SCRIPT_CONTROL 且不得触达授权不低于自己的执行。
+        // 目录级要求是 NONE（见 BridgeCapabilityCatalog 的 METHOD_REQUIRED 说明）——
+        // 「是不是别的执行」只有这里看得到（要 runId），所以分档判据落在 handler。
+        // 不在途 → ERR_NOT_FOUND（既有口径）。
+        coroutineContext[AuthenticatedRunContext]?.let { caller ->
+            try {
+                controller.authorizeTarget(caller, runId, BridgeCapability.CROSS_SCRIPT_CONTROL)
+            } catch (e: AutojsException) {
+                return err(request, e.error, e.message)
+            }
+        }
         return when (val outcome = controller.stop(runId)) {
             RuntimeController.StopOutcome.StoppedClean -> ok(request, "true")
             is RuntimeController.StopOutcome.StoppedTimeout ->
@@ -119,6 +146,14 @@ class EnginesNamespaceHandler(
      */
     private suspend fun status(request: BridgeRequest): BridgeResponse {
         val runId = requiredLong(decodePayload(request.payload), "runId")
+        // 同上：看自己的状态任何掩码放行；看别的执行要 CROSS_SCRIPT_OBSERVE。
+        coroutineContext[AuthenticatedRunContext]?.let { caller ->
+            try {
+                controller.authorizeTarget(caller, runId, BridgeCapability.CROSS_SCRIPT_OBSERVE)
+            } catch (e: AutojsException) {
+                return err(request, e.error, e.message)
+            }
+        }
         val st = controller.probeStatus(runId)
             ?: return err(request, ErrorCode.ERR_NOT_FOUND, "未知 runId: $runId")
         return ok(request, DomainJson.encode(st.name))
@@ -175,9 +210,26 @@ class EnginesNamespaceHandler(
     // 通道是脚本↔宿主 JSON 事件的命名缓冲（§8 RuntimeChannel）。订阅推送（host→script）
     // 走桥 EventBus/TSF（:app 层经 channelDrain 拉取后转发）；本层只做缓冲 + 游标，
     // 不做回调推送（与 ConsoleCollector/EventBus 的"节流拉取"语义一致）。
+    //
+    // **所有者口径（A5，§11）**：通道**按发起执行私有**，不是全局共享 ——
+    // 所有者 = 认证连接的 engineRunId（[AuthenticatedRunContext.engineRunId]）。
+    // 名字索引也按所有者分桶（[channelIds]），因此：
+    // - 不同执行取同名通道 → **各拿各的 id**，互不可见（不是"复用同一个全局通道"）；
+    // - 猜别人的 channelId → `ERR_NOT_FOUND`（通道**存在但不归你**，与"不存在"回同一个码，
+    //   不给"这个号存在过"的探测面）；
+    // - 宿主直投（无认证上下文）→ 归属"宿主"（[HOST_OWNER]），与任何脚本都不共享。
+    //
+    // 为什么必须这样：通道事件是脚本↔宿主的数据面，若全局共享，任何 UNKNOWN 只要猜到
+    // channelId（或先取一个同名通道）就能读写甚至关闭**高信任执行**的通道 —— 那就是
+    // 一条绕过掩码的跨脚本数据通道。按所有者隔离后，通道不再是跨执行面，
+    // `engines.channel*` 目录项要 NONE 才自洽（见 `BridgeCapabilityCatalog`）。
+    //
+    // 边界：这**不是**沙箱，只约束桥面通道。同 UID 代码仍可绕开桥直接读写文件（§11.3 第 1 条）。
 
     private data class ChannelState(
         val channelId: Long,
+        /** 所有者：发起执行的 engineRunId；[HOST_OWNER] = 宿主直投。 */
+        val owner: Long,
         val name: String,
         val events: ArrayDeque<ChannelEvent> = ArrayDeque(),
         var nextSeq: Long = 1,
@@ -188,38 +240,59 @@ class EnginesNamespaceHandler(
     data class ChannelEvent(val seq: Long, val event: String, val payload: String?)
 
     private val channels = HashMap<Long, ChannelState>()
-    private val byName = HashMap<String, Long>()
+
+    /** 名字索引「按所有者分桶」：`owner → (name → channelId)`，同名不同主各是各的。 */
+    private val channelIds = HashMap<Long, HashMap<String, Long>>()
     private var nextChannelId = 1L
     private val channelGuard = Any()
 
-    private fun channel(request: BridgeRequest): BridgeResponse {
+    /**
+     * 当前调用的通道所有者。
+     *
+     * 无认证上下文 = 宿主直投（装配/UI/测试）→ [HOST_OWNER]；有身份 → 它的 engineRunId。
+     * 这是通道归属的**唯一**判据，不从 payload 读（脚本自报不算）。
+     */
+    private suspend fun ownerOf(): Long = coroutineContext[AuthenticatedRunContext]?.engineRunId ?: HOST_OWNER
+
+    /**
+     * 取本所有者名下的通道；不存在、已关闭、或**不属于本所有者**一律 null
+     * （调用方统一折成 `ERR_NOT_FOUND`：存在但不归你 与 不存在 回同一个码）。
+     *
+     * 调用方必须已持 [channelGuard]。
+     */
+    private fun ownedLocked(channelId: Long, owner: Long): ChannelState? =
+        channels[channelId]?.takeIf { it.owner == owner && !it.closed }
+
+    private suspend fun channel(request: BridgeRequest): BridgeResponse {
         val o = decodePayload(request.payload)
         val name = requiredStr(o, "name")
         if (name.isBlank()) return err(request, ErrorCode.ERR_INVALID_PARAM, "通道名不得为空")
+        val owner = ownerOf()
         val id = synchronized(channelGuard) {
-            val existing = byName[name]
-            if (existing != null && channels[existing]?.closed == false) {
-                existing
+            val mine = channelIds.getOrPut(owner) { HashMap() }
+            val existing = mine[name]?.let { channels[it] }?.takeIf { !it.closed }
+            if (existing != null) {
+                existing.channelId
             } else {
                 val nid = nextChannelId++
-                channels[nid] = ChannelState(channelId = nid, name = name)
-                byName[name] = nid
+                channels[nid] = ChannelState(channelId = nid, owner = owner, name = name)
+                mine[name] = nid
                 nid
             }
         }
         return ok(request, DomainJson.encode(mapOf("name" to name, "channelId" to id)))
     }
 
-    private fun channelEmit(request: BridgeRequest): BridgeResponse {
+    private suspend fun channelEmit(request: BridgeRequest): BridgeResponse {
         val o = decodePayload(request.payload)
         val channelId = requiredLong(o, "channelId")
         val event = requiredStr(o, "event")
         val payload = optStr(o, "payload")
         if (event.isBlank()) return err(request, ErrorCode.ERR_INVALID_PARAM, "事件名不得为空")
+        val owner = ownerOf()
         synchronized(channelGuard) {
-            val state = channels[channelId]
+            val state = ownedLocked(channelId, owner)
                 ?: return err(request, ErrorCode.ERR_NOT_FOUND, "未知 channelId: $channelId")
-            if (state.closed) return err(request, ErrorCode.ERR_NOT_FOUND, "通道已关闭: $channelId")
             state.events.addLast(ChannelEvent(seq = state.nextSeq++, event = event, payload = payload))
             while (state.events.size > channelCapacity) {
                 state.events.removeFirst()
@@ -229,16 +302,17 @@ class EnginesNamespaceHandler(
         return ok(request, null)
     }
 
-    private fun channelDrain(request: BridgeRequest): BridgeResponse {
+    private suspend fun channelDrain(request: BridgeRequest): BridgeResponse {
         val o = decodePayload(request.payload)
         val channelId = requiredLong(o, "channelId")
         val sinceSeq = optLong(o, "sinceSeq") ?: 0L
         val max = (optLong(o, "max") ?: 128L).toInt()
         require(max > 0) { "max 必须 > 0" }
+        val owner = ownerOf()
         val picked: List<ChannelEvent>
         var last = sinceSeq
         synchronized(channelGuard) {
-            val state = channels[channelId]
+            val state = ownedLocked(channelId, owner)
                 ?: return err(request, ErrorCode.ERR_NOT_FOUND, "未知 channelId: $channelId")
             picked = state.events.filter { it.seq > sinceSeq }.take(max)
             for (e in picked) last = e.seq
@@ -256,13 +330,15 @@ class EnginesNamespaceHandler(
         )
     }
 
-    private fun channelClose(request: BridgeRequest): BridgeResponse {
+    private suspend fun channelClose(request: BridgeRequest): BridgeResponse {
         val channelId = requiredLong(decodePayload(request.payload), "channelId")
+        val owner = ownerOf()
         synchronized(channelGuard) {
-            val state = channels.remove(channelId)
+            val state = ownedLocked(channelId, owner)
                 ?: return err(request, ErrorCode.ERR_NOT_FOUND, "未知 channelId: $channelId")
+            channels.remove(channelId)
             state.closed = true
-            byName.remove(state.name)
+            channelIds[owner]?.remove(state.name)
         }
         return ok(request, "true")
     }
@@ -305,5 +381,14 @@ class EnginesNamespaceHandler(
 
     companion object {
         const val DEFAULT_CHANNEL_CAPACITY = 256
+
+        /**
+         * 宿主直投（无认证上下文）的通道所有者标识。
+         *
+         * 用 `-1` 而不是 `0`：`AuthenticatedRunContext` 已 require `engineRunId > 0`，
+         * 0 是保留给"宿主直写日志"的哨兵（见其 KDoc）—— 通道归属另用一个明确的负值，
+         * 免得两处哨兵含义打架。宿主通道与任何脚本通道都不共享（见「命名通道」段注释）。
+         */
+        const val HOST_OWNER: Long = -1L
     }
 }

@@ -2,6 +2,8 @@ package com.autoscript.shell
 
 import com.autoscript.bridge.BridgeHandshake
 import com.autoscript.domain.engine.EngineId
+import com.autoscript.domain.permission.CapabilityMask
+import com.autoscript.domain.permission.ScriptAuthorizationSnapshot
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
@@ -30,6 +32,12 @@ class BridgeSocketListenerTest {
 
     @TempDir
     lateinit var dir: Path
+
+    /**
+     * 本类钉的是 socket 监听缝（绑定降级/uid 门禁/关断），与授权档无关 ——
+     * 签发一律给全量快照；授权语义在 `AppShellAuthorizationTest` 与 `RunIdentityRegistryTest` 钉。
+     */
+    private fun probeAuthorization() = ScriptAuthorizationSnapshot(mask = CapabilityMask.ALL)
 
     /** 假连接：预填输入帧、截留输出、close 置标（拒收/serve 收尾两条路都可观测）。 */
     private class FakeConn(
@@ -168,7 +176,7 @@ class BridgeSocketListenerTest {
             // engines.heartbeat 对不在途 runId 如实回 Ok false（§8.4：不是调用方错误，不 4xx）
             val frame =
                 """{"t":"req","id":7,"ns":"engines","m":"heartbeat","ttl":2000,"payload":"{\"runId\":42,\"seq\":1}","side":null}""" + "\n"
-            val token = s.shell.identities.issue(EngineId(0), 42).also { it.confirmSpawn(null) { true } }.token
+            val token = s.shell.identities.issue(EngineId(0), 42, "socket-probe", probeAuthorization()).also { it.confirmSpawn(null) { true } }.token
             val me = FakeConn(peerUid = 1_000, frame = BridgeHandshake.hello(token).toString(Charsets.UTF_8) + frame)
             bound.enqueue(me)
             await("响应回写") { me.response().contains("\"t\":\"ok\"") }
@@ -206,7 +214,7 @@ class BridgeSocketListenerTest {
             kit().use { s ->
                 listener.start(s.shell)
                 val unknown = FakeConn(1_000, BridgeHandshake.hello("0".repeat(64)).toString(Charsets.UTF_8))
-                val lease = s.shell.identities.issue(EngineId(0), 42).also { it.confirmSpawn(123) { true } }
+                val lease = s.shell.identities.issue(EngineId(0), 42, "socket-probe", probeAuthorization()).also { it.confirmSpawn(123) { true } }
                 val mismatch = FakeConn(1_000, BridgeHandshake.hello(lease.token).toString(Charsets.UTF_8), peerPid = 456)
                 for (conn in listOf(unknown, mismatch)) {
                     bound.enqueue(conn)
@@ -235,7 +243,7 @@ class BridgeSocketListenerTest {
             kit().use { first ->
                 kit().use { second ->
                     listener.start(first.shell)
-                    val lease = first.shell.identities.issue(EngineId(0), 42).also { it.confirmSpawn(null) { true } }
+                    val lease = first.shell.identities.issue(EngineId(0), 42, "socket-probe", probeAuthorization()).also { it.confirmSpawn(null) { true } }
                     val preauth = BlockingConn(byteArrayOf())
                     val active = BlockingConn(BridgeHandshake.hello(lease.token))
                     bound.enqueue(preauth)
@@ -247,8 +255,8 @@ class BridgeSocketListenerTest {
                     listener.start(second.shell)
                     assertTrue(preauth.closed.await(5, TimeUnit.SECONDS))
                     assertTrue(active.closed.await(5, TimeUnit.SECONDS))
-                    assertThrows(IllegalStateException::class.java) { first.shell.identities.issue(EngineId(0), 43) }
-                    val fresh = second.shell.identities.issue(EngineId(0), 44).also { it.confirmSpawn(null) { true } }
+                    assertThrows(IllegalStateException::class.java) { first.shell.identities.issue(EngineId(0), 43, "socket-probe", probeAuthorization()) }
+                    val fresh = second.shell.identities.issue(EngineId(0), 44, "socket-probe", probeAuthorization()).also { it.confirmSpawn(null) { true } }
                     val next = BlockingConn(BridgeHandshake.hello(fresh.token))
                     bound.enqueue(next)
                     assertTrue(next.waiting.await(5, TimeUnit.SECONDS))
@@ -274,7 +282,7 @@ class BridgeSocketListenerTest {
             )
         }
         val captured = requireNotNull(issuer)
-        assertThrows(IllegalStateException::class.java) { captured.issue(EngineId(0), 45) }
+        assertThrows(IllegalStateException::class.java) { captured.issue(EngineId(0), 45, "socket-probe", probeAuthorization()) }
     }
 
     @Test
@@ -288,7 +296,7 @@ class BridgeSocketListenerTest {
             listener.start(s2.shell)            // 换代：旧 frameServer 收掉，循环复用
             val frame =
                 """{"t":"req","id":9,"ns":"engines","m":"heartbeat","ttl":2000,"payload":"{\"runId\":42,\"seq\":1}","side":null}""" + "\n"
-            val token = s2.shell.identities.issue(EngineId(0), 42).also { it.confirmSpawn(null) { true } }.token
+            val token = s2.shell.identities.issue(EngineId(0), 42, "socket-probe", probeAuthorization()).also { it.confirmSpawn(null) { true } }.token
             val me = FakeConn(peerUid = 1_000, frame = BridgeHandshake.hello(token).toString(Charsets.UTF_8) + frame)
             bound.enqueue(me)
             await("换代后仍 serve") { me.response().contains("\"t\":\"ok\"") }

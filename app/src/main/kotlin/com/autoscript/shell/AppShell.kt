@@ -22,8 +22,12 @@ import com.autoscript.bridge.RunIdentityRegistry
 import com.autoscript.domain.engine.RunIdentityIssuer
 import com.autoscript.bridge.RequestRegistry
 import com.autoscript.domain.engine.EngineId
+import com.autoscript.domain.bridge.AuthenticatedRunContext
 import com.autoscript.domain.bridge.NamespaceHandler
+import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.engine.ScriptEngine
+import com.autoscript.domain.permission.CapabilityMask
+import com.autoscript.domain.permission.ScriptAuthorizationPolicy
 import com.autoscript.domain.scripts.RunArchive
 import com.autoscript.platform.capabilities.CapabilityNamespaces
 
@@ -269,7 +273,49 @@ class AppShell(
              * 工厂产出后注入；`:app` 不 new 具体实现、不直连 `:platform`（§6）。
              */
             systemHandlers: SystemHandlers? = null,
+            /**
+             * **来源授权策略**（A5，§11）：本壳所有执行拿到什么桥面能力的**唯一**判据来源。
+             *
+             * 缺省 = `ScriptAuthorizationPolicy()`：没有来源元数据 → `TrustTier.UNKNOWN` 档
+             * （[com.autoscript.domain.permission.TrustTierMasks.UNKNOWN_DEFAULT]）。
+             * **这是一处真实的行为变化**（2026-10-08 已裁定为「保守档 A」）：跨脚本面
+             * （`engines.exec/stop/status/poolStats`）与 `workManager.*` 从此对脚本拒
+             * （`ERR_PERMISSION_DENIED`），其余面（a11y/截图/文件/npm/设备面）保持批 74 的全量。
+             * 逐条对照见 [com.autoscript.domain.permission.TrustTierMasks] 的 KDoc 表格 ——
+             * 别把它读成"保持现行行为"。
+             *
+             * **这是注入缝，不是全局开关**：生产接真元数据时传一个带
+             * [com.autoscript.domain.permission.TrustTierResolver] 的策略，就能**按项目**分级
+             * （内置项目全量、市场项目窄档…），而不是被一个全局布尔一刀切。
+             * 这一份实例同时喂给 [RunIdentityRegistry] 与 [RuntimeController]（见装配处），
+             * 两处各建一份 = 两套矩阵，改了其一静默不一致。
+             *
+             * **它不改变三态门禁**：掩码只决定「这次执行被授权用哪些桥面」，
+             * 系统层给不给（a11y 服务、投屏授权）仍由 `PermissionFacade` 现问系统（§9.5）。
+             * 用户在系统里开了投屏/无障碍**不会**给脚本新增掩码位。
+             * 两张目录是两个枚举（设备 `Capability` vs 桥面 `BridgeCapability`），别混。
+             */
+            authorization: ScriptAuthorizationPolicy = ScriptAuthorizationPolicy(),
+            /**
+             * 便捷覆盖（A5，§11）：非 null 时**所有**执行按它拿掩码，等价于传
+             * `ScriptAuthorizationPolicy(override = capabilityMask)` —— 测试/受信直投路径用。
+             * 需要**按项目**分级时用 [authorization] 接 `TrustTierResolver`，别用本参数
+             * （它是"一刀切"的便利口，不是策略）。
+             *
+             * **与 [authorization] 同时给时以本参数为准**（实现是
+             * `capabilityMask?.let { ScriptAuthorizationPolicy(override = it) } ?: authorization`，
+             * 即本参数**整体替换**策略对象，不是叠加）。刻意不做 `require` 禁掉这种组合：
+             * [AppShellKit.assemble] 是把两个参数**无条件**转下来的，没法区分"调用方显式传了
+             * 缺省策略"与"调用方没传"（Kotlin 缺省实参每次调用新建实例），加了 require 会把
+             * 合法的转发路径一并打红。规则就这一条：**给了 [capabilityMask] 就等于放弃
+             * [authorization]** —— 要按项目分级就别给前者。
+             */
+            capabilityMask: CapabilityMask? = null,
         ): AppShell {
+            // 便捷覆盖与显式策略二选一：显式给了 capabilityMask 就包一层 override 策略，
+            // 否则用调用方给的策略（缺省 = 无来源元数据档）。**一份实例两处用**
+            // （身份签发 + controller 的派生授权判据）—— 见 [authorization] 的 KDoc。
+            val policy = capabilityMask?.let { ScriptAuthorizationPolicy(override = it) } ?: authorization
             val identities = RunIdentityRegistry()
             val events = EventBus()
             val registry = RequestRegistry()
@@ -280,7 +326,10 @@ class AppShell(
                 val console = ConsoleCollector()
                 router.register("console", console)
 
-                val controller = RuntimeController(FixedEnginePool({ id -> engineFactory(id, identities) }, poolCapacity))
+                val controller = RuntimeController(
+                    FixedEnginePool({ id -> engineFactory(id, identities) }, poolCapacity),
+                    authorization = policy,
+                )
                 val enginesHandler = EnginesNamespaceHandler(controller)
                 router.register("engines", enginesHandler)
 
@@ -311,7 +360,24 @@ class AppShell(
                 )
                 // 脚本建任务面（`auto.workManager.*`）：调度器是本壳自建的（与 a11y/screen
                 // 注入缝不同 —— 真实现不在 `:platform`），故恒挂载，无注入缝。
-                router.register("workManager", WorkManagerNamespaceHandler(scheduler))
+                //
+                // 但**建任务要过授权闸**（A5，§11 派生运行入口）：create 写的是持久任务，
+                // 将来每次触发都拉起新执行 —— 那是一次绕过掩码的派生。判据放这里（装配层），
+                // 因为它要算子掩码、比调用方掩码，而这两件事只有 `:app` 同时看得见
+                // （scheduler 模块的 arch 门禁禁 `domain.permission`）。
+                // 语义 = `engines.exec` 的同一套：调用方要有 `CROSS_SCRIPT_CONTROL`，
+                // 且掩码要覆盖**被建任务将来会拿到的**掩码（跨脚本不得提权）。
+                // 宿主直投（无认证上下文）= 链的根，放行。
+                val authorizeCreate: suspend (String) -> String? = { projectId ->
+                    val caller = kotlin.coroutines.coroutineContext[AuthenticatedRunContext]
+                    try {
+                        controller.authorizeStart(caller, projectId)
+                        null
+                    } catch (e: AutojsException) {
+                        e.message
+                    }
+                }
+                router.register("workManager", WorkManagerNamespaceHandler(scheduler, authorizeCreate))
 
                 // 看门狗：采样器 + 心跳来源在此装配；policy 取 controller 自己那份（单一事实来源，
                 //  Threshold 改变只改一处）。缺省 new 一个套在真 controller 上的生产实例。

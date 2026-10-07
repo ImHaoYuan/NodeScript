@@ -69,6 +69,8 @@ class FixedEnginePool(
                     args = request.args,
                     runNonce = request.runNonce,        // 幂等锚点透传执行体（§8.5）
                     timeoutMillis = request.scriptTimeoutMillis,
+                    // 授权快照原样下传（A5，§11）：引擎不重算，只把它交给身份签发方。
+                    authorization = request.authorization,
                 )
             )
             slot.markRunning()               // execute 返回 = 进程已拉起：BOOTING → RUNNING（§8.3）
