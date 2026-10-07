@@ -66,6 +66,8 @@ class NodeProcessEngineTest {
         /** destroy() 后是否退（false = 忽略 SIGTERM，用于 TimedOut 案）。 */
         var exitsOnDestroy = true
         var exitsOnForcibly = true
+        /** [awaitStderrDrained] 的调用记录（断言「只有自然退出路径等排水」）。 */
+        val drainWaits = mutableListOf<Long>()
 
         override val isAlive: Boolean get() = alive
 
@@ -90,6 +92,41 @@ class NodeProcessEngineTest {
         override fun waitFor(timeoutMillis: Long): Boolean = !alive
 
         override val stderrTail: String get() = capturedStderrTail
+
+        override fun awaitStderrDrained(timeoutMillis: Long): Boolean {
+            drainWaits += timeoutMillis
+            return true    // 无真排水线程：capturedStderrTail 本身即最终态
+        }
+    }
+
+    /**
+     * 「已收尸、排水线程还没读完管道」的确定性模型（B11 竞态回归）：进程一出生就已退出，
+     * 但 stderr 尾部只有前半截；剩下的字节**只在** [awaitStderrDrained] 被调用（= join 排水线程）
+     * 且 [drainCompletes] 时才落进尾部。不靠 sleep/时序 —— 修复前（不 join 直接快照）恒拿半截，
+     * 修复后恒拿全量；[drainCompletes] = false 模拟 join 超时（孙进程霸着管道）。
+     */
+    private class LaggingDrainProcess(
+        private val exit: Int,
+        private val before: String,
+        private val after: String,
+        private val drainCompletes: Boolean = true,
+    ) : SpawnedProcess {
+        val drainWaits = mutableListOf<Long>()
+        private var tail = before
+
+        override val pid: Int? = 77
+        override val isAlive: Boolean get() = false
+        override fun exitValue(): Int? = exit
+        override fun destroy() = Unit
+        override fun destroyForcibly() = Unit
+        override fun waitFor(timeoutMillis: Long): Boolean = true
+        override val stderrTail: String get() = tail
+
+        override fun awaitStderrDrained(timeoutMillis: Long): Boolean {
+            drainWaits += timeoutMillis
+            if (drainCompletes) tail = before + after
+            return drainCompletes
+        }
     }
 
     private fun writeScript(rel: String = "a.js", body: String = "process.exit(0)"): Path {
@@ -270,11 +307,20 @@ class NodeProcessEngineTest {
             runBlocking { e2.lastRunSummary() },
             "CRASHED 时 lastRunSummary 带退出码 + stderr 尾部（病因的权威落点）",
         )
-        // 下次 execute 清空旧摘要（新执行体从零计）
+        // 同一引擎复用时也必须清空旧摘要：新执行体尚未自然退出，不能继承上一轮病因。
         val l3 = FakeLauncher()
         val e3 = engine(l3)
         runBlocking { e3.execute(request()) }
-        assertNull(runBlocking { e3.lastRunSummary() }, "execute 后未退净 = 无事实，旧摘要清空")
+        assertNull(runBlocking { e3.lastRunSummary() }, "同一引擎复用后未退净 = 无事实，旧摘要清空")
+        l3.nextProcess.alive = false
+        l3.nextProcess.exitCode = 0
+        l3.nextProcess.capturedStderrTail = "second run\n"
+        assertEquals(EngineStatus.STOPPED, runBlocking { e3.status() })
+        assertEquals(
+            RunSummary(exitCode = 0, stderrTail = "second run\n"),
+            runBlocking { e3.lastRunSummary() },
+            "第二轮自然退出后只能发布第二轮摘要，不能复用上一轮事实",
+        )
     }
 
     @Test
@@ -362,5 +408,58 @@ class NodeProcessEngineTest {
             NodeProcessEngine.ENV_BRIDGE_ADDON in env,
             "缺文件 = 降级不注入（与 bridgeDistPath 同一条选填纪律；main.cpp 直跑脚本）",
         )
+    }
+
+    /** 每次 spawn 都交出同一个预制进程（排水滞后模型用）。 */
+    private fun launcherOf(proc: SpawnedProcess) = object : ProcessLauncher {
+        override fun spawn(command: List<String>, env: Map<String, String>, workingDir: Path) = proc
+    }
+
+    @Test
+    fun `自然退出先等排水再快照——已收尸但管道没读完时不丢病因尾巴（B11 竞态）`() {
+        writeScript()
+        val proc = LaggingDrainProcess(exit = 3, before = "at main.js:1\n", after = "TypeError: boom\n")
+        val e = engine(launcherOf(proc))
+        runBlocking { e.execute(request()) }
+        assertEquals(EngineStatus.CRASHED, runBlocking { e.status() })
+        assertEquals(listOf(500L), proc.drainWaits, "快照前 join 排水线程一次，上限 500ms")
+        assertEquals(
+            RunSummary(exitCode = 3, stderrTail = "at main.js:1\nTypeError: boom\n"),
+            runBlocking { e.lastRunSummary() },
+            "修复前直接快照只拿到前半截；join 后必须是全量尾部",
+        )
+    }
+
+    @Test
+    fun `排水 join 超时——用当前快照兜底，不无限阻塞`() {
+        writeScript()
+        val proc = LaggingDrainProcess(exit = 1, before = "partial\n", after = "never\n", drainCompletes = false)
+        val e = engine(launcherOf(proc))
+        runBlocking { e.execute(request()) }
+        assertEquals(EngineStatus.CRASHED, runBlocking { e.status() })
+        assertEquals(
+            RunSummary(exitCode = 1, stderrTail = "partial\n"),
+            runBlocking { e.lastRunSummary() },
+            "孙进程霸着管道时 join 超时，摘要取当前快照",
+        )
+    }
+
+    @Test
+    fun `stop 与 kill 路径不等排水——终止手段的产物不填摘要也不付等待`() {
+        writeScript()
+        val launcher = FakeLauncher()
+        val e = engine(launcher, grace = 50)
+        runBlocking { e.execute(request()) }
+        val stopped = launcher.nextProcess
+        assertEquals(StopResult.Clean, runBlocking { e.stop() })
+        assertEquals(EngineStatus.STOPPED, runBlocking { e.status() })
+        assertTrue(stopped.drainWaits.isEmpty(), "请求停止后的 status 不 join 排水")
+
+        val killed = FakeProcess(pid = 4646)
+        launcher.nextProcess = killed
+        runBlocking { e.execute(request()) }
+        runBlocking { e.kill() }
+        assertEquals(EngineStatus.CRASHED, runBlocking { e.status() })
+        assertTrue(killed.drainWaits.isEmpty(), "强杀后的 status 不 join 排水")
     }
 }
