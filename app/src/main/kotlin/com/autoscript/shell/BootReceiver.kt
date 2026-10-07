@@ -3,7 +3,6 @@ package com.autoscript.shell
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.util.Log
 
 /**
  * 开机广播的纯判定（docs §8.6 重启后排期重建）。
@@ -37,7 +36,7 @@ class BootReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         if (!BootEvents.isBootCompleted(intent.action)) return
-        Log.i(TAG, "开机完成：走正常装配路径续排（restoreTasks 重建闹钟，重投遗留意向）")
+        HostLog.i(TAG, "开机完成：走正常装配路径续排（restoreTasks 重建闹钟，重投遗留意向）")
     }
 
     private companion object {

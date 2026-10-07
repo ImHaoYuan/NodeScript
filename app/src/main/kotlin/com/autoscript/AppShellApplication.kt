@@ -2,7 +2,6 @@ package com.autoscript
 
 import android.app.Application
 import android.os.Process
-import android.util.Log
 import com.autoscript.appservice.npm.NpmCliDeployer
 import com.autoscript.domain.host.CapabilityCenterSnapshot
 import com.autoscript.domain.host.ConsoleSnapshot
@@ -22,6 +21,7 @@ import com.autoscript.shell.AlarmFires
 import com.autoscript.shell.AlarmPort
 import com.autoscript.shell.AlarmReceiver
 import com.autoscript.shell.AlarmSchedulerProvider
+import com.autoscript.shell.HostLog
 import com.autoscript.shell.AndroidAlarmPort
 import com.autoscript.shell.AndroidBridgeBinder
 import com.autoscript.shell.AndroidForegroundOps
@@ -147,7 +147,7 @@ class AppShellApplication : Application(), HostSummary {
     override fun onCreate() {
         super.onCreate()
         instance = this
-        Log.i(TAG, "装配启动：壳创建中（引擎/a11y 按 §6 缝注入，未接 = 如实记账）")
+        HostLog.i(TAG, "装配启动：壳创建中（引擎/a11y 按 §6 缝注入，未接 = 如实记账）")
         // 自装配（§4.1 的真实调用点）：闹钟要有人接、崩溃遗留要有人重投、任务中心要有档案 ——
         // 这三件事都要求「壳在 Application 起来时就存在」，而不是等某个 Activity 顺手装配。
         // 屏幕门禁取真 PowerManager（[screenGateOf]）；引擎工厂 = [NodeProcessEngine] 真 spawn
@@ -208,7 +208,7 @@ class AppShellApplication : Application(), HostSummary {
                     uid,
                 )
                 if (bridgeListener == null) {
-                    Log.w(TAG, "桥监听绑定失败（abstract 名被抢/权限）：本次装配走离线 spawn（不注入 hostSocketName）")
+                    HostLog.w(TAG, "桥监听绑定失败（abstract 名被抢/权限）：本次装配走离线 spawn（不注入 hostSocketName）")
                 }
             }
             val bridge = bridgeListener
@@ -293,14 +293,14 @@ class AppShellApplication : Application(), HostSummary {
             // `auto.npm.install` 回 ERR_NOT_IMPLEMENTED，这行日志是排查的第一现场。
             val npmFail = built.npmCliFailure
             if (npmFail != null) {
-                Log.w(TAG, "npm 执行体未接线：$npmFail")
+                HostLog.w(TAG, "npm 执行体未接线：$npmFail")
             } else {
                 val fresh = (built.npmCli as? NpmCliDeployer.Outcome.Ready)?.deployedFresh
-                Log.i(TAG, "npm CLI 就位（filesDir/npm，本次${if (fresh == true) "新部署" else "幂等命中"}）")
+                HostLog.i(TAG, "npm CLI 就位（filesDir/npm，本次${if (fresh == true) "新部署" else "幂等命中"}）")
             }
             built.shell
         } catch (t: Throwable) {
-            Log.e(TAG, "壳自装配失败：保持未就绪（闹钟走漏投记账，不伪造投递）", t)
+            HostLog.e(TAG, "壳自装配失败：保持未就绪（闹钟走漏投记账，不伪造投递）", t)
             null
         }
     }
@@ -310,9 +310,10 @@ class AppShellApplication : Application(), HostSummary {
      * 幂等：重复 install 只替换旧壳，[AlarmDispatch] 的路线随之换新。
      */
     fun install(shell: AppShell) {
+        shell.connectHostLog()  // 先回放启动期日志，再开放闹钟与恢复路线；单纯 assemble 不接线。
         this.shell = shell
         alarmDispatch.install(SchedulerAlarmRoute(shell.scheduler))
-        Log.i(TAG, "壳就绪：闹钟路线接通（dispatch.missed=${alarmDispatch.missed().size}）")
+        HostLog.i(TAG, "壳就绪：闹钟路线接通（dispatch.missed=${alarmDispatch.missed().size}）")
         // 开机恢复（§8.5）：壳就绪后把崩溃遗留意向重新入队。挂后台协程、不阻塞装配；
         // 恢复走 dispatcher 真投递（落引擎 + 写归档），失败只记日志 —— 绝不让恢复异常
         // 把刚装好的壳掀翻（装配完成 > 恢复成功，恢复下次启动仍可重试：未 COMMIT 行还在）。
@@ -340,10 +341,10 @@ class AppShellApplication : Application(), HostSummary {
             } catch (t: Throwable) {
                 // BootRecovery 自己兜住异常，这里是双保险：调度器抛出的任何东西
                 // 都不该把开机流程变成崩溃。
-                Log.e(TAG, "开机恢复抛出异常（已吞，见 recoverySnapshot）", t)
+                HostLog.e(TAG, "开机恢复抛出异常（已吞，见 recoverySnapshot）", t)
                 return@launch
             }
-            Log.i(TAG, "开机恢复：${snapshot.describe()}")
+            HostLog.i(TAG, "开机恢复：${snapshot.describe()}")
         }
     }
 
@@ -383,7 +384,7 @@ class AppShellApplication : Application(), HostSummary {
             val keeper = ForegroundKeeper(ops, PlatformWiring.wakeLockLedger(applicationContext))
             ForegroundHost.keeper = keeper
             if (!keeper.start()) {
-                Log.w(TAG, "保活未生效：服务拉不起或唤醒锁取不到（SCREEN_ON 任务将被如实拒绝）")
+                HostLog.w(TAG, "保活未生效：服务拉不起或唤醒锁取不到（SCREEN_ON 任务将被如实拒绝）")
             }
             keeper.also { keepAlive = it }
         }
@@ -412,7 +413,7 @@ class AppShellApplication : Application(), HostSummary {
             Class.forName(component.className)
         }
     } catch (t: Throwable) {
-        Log.w(TAG, "查 launcher Activity 失败：通知点不开（保活本身不受影响）", t)
+        HostLog.w(TAG, "查 launcher Activity 失败：通知点不开（保活本身不受影响）", t)
         null
     }
 
@@ -614,7 +615,7 @@ class AppShellApplication : Application(), HostSummary {
      */
     fun installAlarmPort(port: AlarmPort) {
         alarmPort = port
-        Log.i(TAG, "闹钟出口就绪：${port.javaClass.simpleName}（exact=${port.canScheduleExact}）")
+        HostLog.i(TAG, "闹钟出口就绪：${port.javaClass.simpleName}（exact=${port.canScheduleExact}）")
     }
 
     /**
@@ -624,7 +625,7 @@ class AppShellApplication : Application(), HostSummary {
     fun alarmWork(taskId: String, done: () -> Unit) {
         val current = shell
         if (current == null) {
-            Log.w(TAG, "闹钟响了但壳未就绪：taskId=$taskId（记账不投递，见 missedAlarms()）")
+            HostLog.w(TAG, "闹钟响了但壳未就绪：taskId=$taskId（记账不投递，见 missedAlarms()）")
             // 记账是同步的，广播窗口内即可 finish；后续若装了壳，重投由调度器自己的排期负责。
             alarmDispatch.recordMissed(taskId)     // 同步记账（装配前的漏投入口）
             done()
@@ -636,11 +637,11 @@ class AppShellApplication : Application(), HostSummary {
         appScope.launchGuaranteed(done) {
             try {
                 val delivered = alarmDispatch.fire(taskId)
-                if (!delivered) Log.w(TAG, "闹钟回投无路线：taskId=$taskId（已计入漏投）")
+                if (!delivered) HostLog.w(TAG, "闹钟回投无路线：taskId=$taskId（已计入漏投）")
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (t: Throwable) {
-                Log.e(TAG, "闹钟回投失败：taskId=$taskId", t)
+                HostLog.e(TAG, "闹钟回投失败：taskId=$taskId", t)
             }
         }
     }

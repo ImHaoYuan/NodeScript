@@ -1,5 +1,18 @@
 # AutoScript 待办池（backlog）
 
+## 2026-10-07 追记（批 72）
+
+- **A10② 已落地**：`:app` 四个文件的 28 处宿主日志经 `HostLog` 双写 logcat / 控制台，
+  启动期有界缓冲在壳激活时回放。**A10① / A5 仍待做**：脚本输出仍没有执行归属，
+  因而系统日志仍混有脚本输出。下方 A10 原始记录保留作历史，当前进展以本条及
+  [`本日流水`](log/2026-10-07.md) 批 72 为准。
+- **B15（新增，S，未排期）**：真 Node 进程测试存在退出时序竞态。
+  `engine/node-process/src/test/kotlin/com/autoscript/engine/nodeprocess/NodeProcessEngineRealSpawnTest.kt:79,88`
+  用 `process.exit(0)` 立即退出，却在取过 `selfPid()` 后仍断言 `receipt.pid == e.pid`；
+  生产 `NodeProcessEngine.pid` 在已退出时正确返回 null（同文件生产实现的 `pid` getter）。
+  **核实：2026-10-07 全量门首轮在第 88 行失败，后续原样重跑通过；本批未改引擎模块。**
+  建议用可控信号让子进程在存活断言后再退出，不靠固定 sleep，也不放宽生产 pid 契约。
+
 > **本文件不是契约，也不是台账。** 契约在 [`docs/design/`](design/)（入口 [`framework-design.md`](framework-design.md)），
 > 落地状态在 [`design-status.md`](design-status.md)，口径变更在 [`design-decisions.md`](design-decisions.md)。
 > 这里只放**尚未排期的待做项** —— 是收件箱，不是承诺。三条纪律：

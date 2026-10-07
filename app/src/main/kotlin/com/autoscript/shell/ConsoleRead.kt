@@ -19,8 +19,8 @@ import com.autoscript.domain.host.ConsoleSnapshot
  *
  * 三条纪律：
  * - **游标只进不退**：`nextSeq` 取 `drain` 的返回（本批最大 seq；空批原样回传入参），
- *   不在这里"补算" —— 行在并发追加下 seq 与入队序可交错（见 `ConsoleCollectorTest`），
- *   自己推游标就会漏行；
+ *   不在这里"补算" —— 收集器把发号/入队/读取串行化（见 `ConsoleCollectorTest`），
+ *   这里原样传回那一批的末行 seq；
  * - **拉满如实标 [ConsoleSnapshot.pageFull]**：`raw.size == maxLines` 只说明这批装不下，
  *   呈现层用「可能还有」措辞提示继续拉，不假装已经到底；
  * - **丢包数原样带上**（[ConsoleSnapshot.droppedTotal]）：有界队列丢最老是数据面的

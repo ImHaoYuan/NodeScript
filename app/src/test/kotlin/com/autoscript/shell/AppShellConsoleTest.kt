@@ -2,6 +2,8 @@ package com.autoscript.shell
 
 import com.autoscript.appservice.scheduler.core.SchedulerProvider
 import com.autoscript.appservice.scheduler.core.TriggerHandle
+import com.autoscript.domain.bridge.BridgeRequest
+import com.autoscript.domain.bridge.BridgeResponse
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -76,6 +78,43 @@ class AppShellConsoleTest {
             assertEquals(2, page.lines.size)
             assertTrue(page.pageFull)
             assertEquals(2L, page.nextSeq)
+        }
+        Unit
+    }
+
+    @Test
+    fun `启动日志与桥日志落在同一读口 激活之前构造新壳不抢接线`() = runBlocking {
+        val writer = HostLogWriter(logcat = { _, _, _, _ -> })
+        writer.i("Host", "装配开始")
+        kit().use { first ->
+            first.shell.connectHostLog(writer)
+            val boot = first.consoleView(0, 100)
+            assertEquals(listOf("Host: 装配开始"), boot.lines.map { it.text })
+            assertTrue(boot.lines.all { it.external })
+
+            val reply = first.shell.router.dispatch(
+                BridgeRequest(11, "console", "log", """{"level":"log","text":"script"}""", 5_000),
+            )
+            assertTrue(reply is BridgeResponse.Ok)
+            writer.w("Host", "闹钟异常")
+            val next = first.consoleView(boot.nextSeq, 100)
+            assertEquals(listOf("script", "Host: 闹钟异常"), next.lines.map { it.text })
+            assertEquals(listOf(2L, 3L), next.lines.map { it.seq })
+            assertTrue(next.lines.all { it.external }, "A10① 未做，脚本仍不带执行归属")
+
+            AppShellKit.assemble(
+                filesDir = dir.resolve("other-files"),
+                cacheDir = dir.resolve("other-cache"),
+                schedulerProvider = NoopProvider(),
+            ).use { second ->
+                writer.i("Host", "尚未换壳")
+                assertEquals(listOf("Host: 尚未换壳"), first.consoleView(next.nextSeq, 100).lines.map { it.text })
+                assertTrue(second.consoleView(0, 100).lines.isEmpty(), "assemble 不改变日志去向")
+                second.shell.connectHostLog(writer)
+                first.shell.close()  // 旧壳延迟关闭，不得摘掉新壳刚接上的连接。
+                writer.i("Host", "新壳已激活")
+                assertEquals(listOf("Host: 新壳已激活"), second.consoleView(0, 100).lines.map { it.text })
+            }
         }
         Unit
     }
