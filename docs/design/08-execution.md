@@ -89,7 +89,7 @@ interface EnginePool {                                // 实现在 :app-service:
 | 意图日志（scheduler） | `intentRunId`（`IntentRun.runId`） | intent log |
 | 引擎运行记录（engine） | `engineRunId`（`EngineRunReceipt.runId`） | `RunRecord(id)` |
 
-`:domain` 的 `EngineRunLink(intentRunId, engineRunId)` 是关联契约；`RunArchive` SPI 是引擎侧档案（`put(record, link)` / `record` / `link` / `recordsOfIntent` / `recordsOfProject` / `records` / `unfinished`）。
+`:domain` 的 `EngineRunLink(intentRunId, engineRunId)` 是关联契约；`RunArchive` SPI 是引擎侧档案（`put(record, link)` / `record` / `link` / `recordsOfIntent` / `recordsOfProject` / `unfinished`）。
 纪律：终态（`SUCCEEDED/FAILED/CRASHED/CANCELLED`）append-only，**不可改写、不可复活**，违反必须响亮失败而不是静默吞。只写一侧 = 孤儿记录（「引擎在跑而任务中心查不到」或反之），
 **实现注记已外迁**：`JournalFileStore`/`FileRunArchive` 的持久形态与两条孤儿结算路，逐字见 [`design-status.md` §8.5 实现注记](../design-status.md#实现注记自各分卷外迁逐字保留)。
 `DispatchReport.link` 在门禁拒绝/排队超时/启动失败时如实为 null。接线在 `:app` 的 `ControllerRunDispatcher`（拿到 Receipt 后生成 link）+ `AppShell`（scheduler 持 `RunArchive`）。
