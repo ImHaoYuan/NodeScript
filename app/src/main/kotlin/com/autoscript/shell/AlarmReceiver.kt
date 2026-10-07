@@ -3,7 +3,6 @@ package com.autoscript.shell
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.util.Log
 import com.autoscript.AppShellApplication
 
 /**
@@ -27,13 +26,13 @@ class AlarmReceiver : BroadcastReceiver() {
         if (intent.action != AlarmFires.ACTION_FIRE) return
         val taskId = intent.getStringExtra(AlarmFires.EXTRA_TASK_ID)
         if (taskId.isNullOrEmpty()) {
-            Log.w(TAG, "闹钟广播缺 EXTRA_TASK_ID：action=${intent.action}（忽略本次投递）")
+            HostLog.w(TAG, "闹钟广播缺 EXTRA_TASK_ID：action=${intent.action}（忽略本次投递）")
             return
         }
         // 进程刚好在重启途中时 application 可能还没 attach：此时不投递，由 AlarmDispatch 记账。
         val shell = context.applicationContext as? AppShellApplication
         if (shell == null) {
-            Log.w(TAG, "闹钟响了但宿主 Application 不是 AppShellApplication（忽略 taskId=$taskId）")
+            HostLog.w(TAG, "闹钟响了但宿主 Application 不是 AppShellApplication（忽略 taskId=$taskId）")
             return
         }
         val pending = goAsync()

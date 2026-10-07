@@ -49,7 +49,8 @@ import com.autoscript.ui.theme.ThemeColors
  * **诚实边界 —— 系统日志今天的真实内容**（核过代码，不照设计愿望写）：
  * - 桥侧 `console.log` 的写入口把 `runId` 恒写成 0（`ConsoleCollector.handle`；请求帧里没有执行归属），
  *   所以**脚本自己的 console 输出今天也落在这个列表里**，而不是归到某次执行名下；
- * - 宿主装配/调度/闹钟那些事件今天走的是 `android.util.Log`，**没有写进收集器**，所以这里**看不到**它们。
+ * - 宿主装配/恢复/闹钟/保活事件经 `HostLog` 同时写 logcat 与收集器（runId = 0）；
+ *   启动期有界缓冲在壳激活时回放。不是设备的完整 logcat，也不跨进程重启持久保存。
  * 两件事都在列表顶部如实说明，不把「系统日志」说成「纯宿主事件」。给脚本输出打 runId 要动桥协议帧，
  * 另批处理。
  *
@@ -117,8 +118,8 @@ private fun SystemLogList(state: ConsoleState, lines: List<ConsoleLineState>, mo
     LazyColumn(modifier.fillMaxWidth(), contentPadding = PaddingValues(bottom = TabBarBottomClearance())) {
         item {
             ToneText(
-                text = "不属于任何执行的输出（runId 0）。注意：脚本经桥的 console 输出今天也记在这里（尚未按执行归属）；" +
-                    "宿主装配/调度/闹钟事件尚未写入本列表。",
+                text = "宿主装配、恢复、闹钟与保活事件（runId 0）。注意：脚本经桥的 console 输出也记在这里（尚未按执行归属）；" +
+                    "仅保留本次进程内的有界日志，不是完整 logcat。壳装配失败时本列表暂不可读。",
                 tone = StatusTone.MUTED,
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),

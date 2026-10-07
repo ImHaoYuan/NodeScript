@@ -6,8 +6,7 @@ import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.core.ErrorCode
 import com.autoscript.domain.json.DomainJson
 import java.time.Instant
-import java.util.concurrent.ConcurrentLinkedQueue
-import java.util.concurrent.atomic.AtomicLong
+import java.util.ArrayDeque
 
 /**
  * 控制台日志行（§8 ScriptEngine.console 数据面契约的内存形态）。
@@ -28,7 +27,7 @@ data class ConsoleLine(
  * console 数据面收集器：Kotlin Router 侧注册 `console` namespace 的 [NamespaceHandler]。
  *
  * - `log` 方法：payload JSON `{"level":"log|info|warn|error|debug","text":"..."}`，
- *   `side.runId` 透传执行归属（无则 0 = 引擎外日志）→ 有界追加 → `Ok(id, null)`；
+ *   请求帧尚无执行归属，当前恒记 `runId = 0`（A10① 待接）→ 有界追加 → `Ok(id, null)`；
  * - 未知方法 → ERR_NOT_IMPLEMENTED（桥的诚实上报，不伪造成功）；
  * - 无效载荷（非法 JSON / 缺 text）→ ERR_INVALID_PARAM。
  * 事件式消费走 [drain]（seq 游标拉取，对齐 EventBus 节流拉取语义，不做回调推送）。
@@ -37,13 +36,17 @@ class ConsoleCollector(
     private val capacity: Int = DEFAULT_CAPACITY,
 ) : RequestHandler {
 
+    init {
+        require(capacity > 0) { "capacity 必须 > 0" }
+    }
 
     /** 申报方法表（wire-schema 对账挂点）：单源指向生成物 [WireMethods.BY_NS]，不手抄。 */
     override fun methods(): Set<String> = WireMethods.BY_NS.getValue("console")
 
-    private val seq = AtomicLong(1)
-    private val lines = ConcurrentLinkedQueue<ConsoleLine>()
-    @Volatile private var dropped = 0L
+    // seq 分配、入队、淘汰和读取必须同锁：否则游标先越过尚未入队的小 seq，那行将永远读不到。
+    private var seq = 1L
+    private val lines = ArrayDeque<ConsoleLine>()
+    private var dropped = 0L
 
     override suspend fun handle(request: BridgeRequest): BridgeResponse {
         if (request.method != "log") {
@@ -58,17 +61,20 @@ class ConsoleCollector(
         return BridgeResponse.Ok(request.id, null)
     }
 
-    /** 宿主直写（带归属 runId）：addon/socket 面已有解析时用。 */
-    fun append(runId: Long, level: String, text: String): ConsoleLine {
-        val line = ConsoleLine(seq = seq.getAndIncrement(), runId = runId, level = level, text = text)
-        lines.add(line)
-        while (lines.size > capacity) {
-            if (lines.poll() != null) dropped++
+    /** 宿主直写；回放启动缓冲时可保留原始时间，seq 仍由收集器在入队时统一分配。 */
+    @Synchronized
+    fun append(runId: Long, level: String, text: String, atMillis: Long = Instant.now().toEpochMilli()): ConsoleLine {
+        val line = ConsoleLine(seq = seq++, runId = runId, level = level, text = text, atMillis = atMillis)
+        if (lines.size == capacity) {
+            lines.removeFirst()
+            dropped++
         }
+        lines.addLast(line)
         return line
     }
 
     /** 游标拉取（seq > sinceSeq，按序，最多 max 条）。返回（最大 seq，本批）。 */
+    @Synchronized
     fun drain(sinceSeq: Long, max: Int = 128): Pair<Long, List<ConsoleLine>> {
         require(max > 0) { "max 必须 > 0" }
         val picked = ArrayList<ConsoleLine>(minOf(max, lines.size))
@@ -83,7 +89,10 @@ class ConsoleCollector(
         return last to picked
     }
 
+    @Synchronized
     fun droppedCount(): Long = dropped
+
+    @Synchronized
     fun size(): Int = lines.size
 
     private data class LogParams(val level: String, val text: String)

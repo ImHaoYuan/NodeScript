@@ -4,13 +4,18 @@ import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.core.ErrorCode
 import com.autoscript.domain.json.DomainJson
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 class ConsoleCollectorTest {
 
@@ -86,14 +91,14 @@ class ConsoleCollectorTest {
     fun `并发追加不丢行`() = runBlocking {
         val c = ConsoleCollector(capacity = 10_000)
         (1..200).map { i ->
-            async { c.append(runId = 0, level = "debug", text = "c$i") }
+            async(Dispatchers.Default) { c.append(runId = 0, level = "debug", text = "c$i") }
         }.awaitAll()
         assertEquals(200, c.size())
         assertEquals(0L, c.droppedCount())
         val (_, lines) = c.drain(0, max = 10_000)
         assertEquals(200, lines.size)
-        // 并发下 seq 分配与入队顺序可交错（非阻塞 append 的固有性质）：只断言 seq 集合完整
-        assertEquals((1L..200L).toSortedSet(), lines.map { it.seq }.toSortedSet())
+        // 发号与入队同锁，实际出队顺序（不只是集合）必须严格递增。
+        assertEquals((1L..200L).toList(), lines.map { it.seq })
     }
 
     @Test
@@ -108,5 +113,84 @@ class ConsoleCollectorTest {
         assertEquals("小心", lines.single().text)
         assertEquals("warn", lines.single().level)
         router.close()
+    }
+
+    @Test
+    fun `非正容量拒绝 防止永不结束的裁剪循环`() {
+        assertThrows(IllegalArgumentException::class.java) { ConsoleCollector(capacity = 0) }
+        assertThrows(IllegalArgumentException::class.java) { ConsoleCollector(capacity = -1) }
+    }
+
+    @Test
+    fun `回放原始时间不改变入队游标`() {
+        val c = ConsoleCollector()
+        c.append(0L, "info", "new", atMillis = 900L)
+        c.append(0L, "info", "early", atMillis = 100L)
+        val (cursor, lines) = c.drain(0)
+        assertEquals(2L, cursor)
+        assertEquals(listOf(900L, 100L), lines.map { it.atMillis })
+        assertEquals(listOf(1L, 2L), lines.map { it.seq })
+    }
+
+    @Test
+    fun `并发写满时容量与丢弃数精确`() = runBlocking {
+        val c = ConsoleCollector(capacity = 19)
+        (1..8).map { writer ->
+            async(Dispatchers.Default) {
+                repeat(250) { c.append(0L, "info", "$writer-$it") }
+            }
+        }.awaitAll()
+        assertEquals(19, c.size())
+        assertEquals(1_981L, c.droppedCount())
+        val (cursor, lines) = c.drain(0, 100)
+        assertEquals(2_000L, cursor)
+        assertEquals((1_982L..2_000L).toList(), lines.map { it.seq })
+    }
+
+    @Test
+    fun `边并发写入边分页 不跳过尚未入队的小序号`() {
+        val total = 4_000
+        val c = ConsoleCollector(capacity = total)
+        val start = CountDownLatch(1)
+        val finished = CountDownLatch(4)
+        val pool = Executors.newFixedThreadPool(5)
+        try {
+            val writers = (1..4).map { writer ->
+                pool.submit {
+                    check(start.await(10, TimeUnit.SECONDS))
+                    try {
+                        repeat(1_000) { c.append(0L, "info", "$writer-$it") }
+                    } finally {
+                        finished.countDown()
+                    }
+                }
+            }
+            val reader = pool.submit<List<Long>> {
+                check(start.await(10, TimeUnit.SECONDS))
+                val read = ArrayList<Long>(total)
+                var cursor = 0L
+                while (!Thread.currentThread().isInterrupted) {
+                    // 先取完成标志再拉末批，避免写线程恰好在空拉取之后写完导致尾行没读到。
+                    val allWritten = finished.count == 0L
+                    val (next, page) = c.drain(cursor, max = 7)
+                    assertTrue(next >= cursor)
+                    if (page.isNotEmpty()) {
+                        assertEquals((cursor + 1..next).toList(), page.map { it.seq })
+                        read.addAll(page.map { it.seq })
+                    }
+                    cursor = next
+                    if (allWritten && page.isEmpty()) break
+                    if (page.isEmpty()) Thread.yield()
+                }
+                read
+            }
+            start.countDown()
+            writers.forEach { it.get(10, TimeUnit.SECONDS) }
+            assertEquals((1L..total.toLong()).toList(), reader.get(10, TimeUnit.SECONDS))
+            assertEquals(0L, c.droppedCount())
+        } finally {
+            start.countDown()
+            pool.shutdownNow()
+        }
     }
 }

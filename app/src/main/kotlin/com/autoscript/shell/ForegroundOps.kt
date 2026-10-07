@@ -10,7 +10,6 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
-import android.util.Log
 import com.autoscript.platform.system.power.WakeLockLedger
 
 /**
@@ -130,21 +129,21 @@ abstract class ForegroundServiceBase : Service() {
                         // （真机实测：界面在前台也照杀）。所以照样进前台——保命，但
                         // **不记账**（`isActive()` 因账本为空回 false，能力中心如实显示未生效）。
                         if (ops.activateForeground()) {
-                            Log.w(TAG, "ACTION_START 缺 token/期限：已进前台保命，但不记账（不假装保活）")
+                            HostLog.w(TAG, "ACTION_START 缺 token/期限：已进前台保命，但不记账（不假装保活）")
                         } else {
-                            Log.e(TAG, "ACTION_START 缺 token/期限且进前台失败：本进程随即会被系统回收")
+                            HostLog.e(TAG, "ACTION_START 缺 token/期限且进前台失败：本进程随即会被系统回收")
                         }
                     }
                     !ops.activateForeground() -> {
                         // 进前台失败：如实记账（keeper.isActive 会因此为 false），
                         // 而**不是**让 Application 以为保活已生效。
-                        Log.e(TAG, "进入前台失败：本次不保活（原因见上一条日志）")
+                        HostLog.e(TAG, "进入前台失败：本次不保活（原因见上一条日志）")
                         ForegroundHost.foregroundRunning = false
                     }
                     keeper == null -> {
                         // 已在前台、装配层却没就绪：**不记账**，也**不 stopSelf** ——
                         // 停掉会让"装配完成后重试"这条路径失去落点（同本函数末尾 START_NOT_STICKY 的理由）。
-                        Log.w(TAG, "已进前台但装配层未就绪：本次不记账（不假装已保活）")
+                        HostLog.w(TAG, "已进前台但装配层未就绪：本次不记账（不假装已保活）")
                     }
                     else -> {
                         // 已在前台（上面那一步成功）→ 交 Keeper 记账（取锁 + 开 ticker）。
@@ -161,7 +160,7 @@ abstract class ForegroundServiceBase : Service() {
                 keeper?.stop()
                 ops.deactivateForeground()
             }
-            else -> Log.w(TAG, "未知 action=${intent?.action}：忽略")
+            else -> HostLog.w(TAG, "未知 action=${intent?.action}：忽略")
         }
         return START_NOT_STICKY
     }
@@ -233,20 +232,20 @@ class AndroidForegroundOps private constructor(
         true
     } catch (t: Throwable) {
         // 缺 FOREGROUND_SERVICE 权限 / 后台启动受限（BAL）等：如实 false。
-        Log.e(TAG, "拉起保活服务失败（后台启动受限或缺权限）", t)
+        HostLog.e(TAG, "拉起保活服务失败（后台启动受限或缺权限）", t)
         false
     }
 
     override fun stopService(): Boolean = try {
         context.stopService(Intent(context, serviceClass))
     } catch (t: Throwable) {
-        Log.e(TAG, "停止保活服务失败", t)
+        HostLog.e(TAG, "停止保活服务失败", t)
         false
     }
 
     override fun activateForeground(): Boolean {
         val s = service ?: run {
-            Log.e(TAG, "activateForeground 只许服务侧调用（本实例没有 Service）")
+            HostLog.e(TAG, "activateForeground 只许服务侧调用（本实例没有 Service）")
             return false
         }
         return try {
@@ -263,7 +262,7 @@ class AndroidForegroundOps private constructor(
             ForegroundHost.foregroundRunning = true
             true
         } catch (t: Throwable) {
-            Log.e(TAG, "startForeground 失败（类型/权限）", t)
+            HostLog.e(TAG, "startForeground 失败（类型/权限）", t)
             ForegroundHost.foregroundRunning = false
             false
         }
@@ -277,7 +276,7 @@ class AndroidForegroundOps private constructor(
             ForegroundHost.foregroundRunning = false
             wasRunning
         } catch (t: Throwable) {
-            Log.e(TAG, "stopForeground 失败", t)
+            HostLog.e(TAG, "stopForeground 失败", t)
             false
         }
     }
@@ -318,7 +317,7 @@ class AndroidForegroundOps private constructor(
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
         } catch (t: Throwable) {
-            Log.e(TAG, "构造通知内容 Intent 失败（通知仍可用，只是点不开）", t)
+            HostLog.e(TAG, "构造通知内容 Intent 失败（通知仍可用，只是点不开）", t)
             null
         }
     }

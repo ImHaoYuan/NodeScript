@@ -120,7 +120,21 @@ class AppShell(
         return scheduler.recoverUncommitted()
     }
 
+    private var hostLogConnection: AutoCloseable? = null
+
+    /** 激活壳时才接宿主日志；构造另一个壳不得抢走当前壳的诊断输出。 */
+    fun connectHostLog() = connectHostLog(HostLog.writer)
+
+    @Synchronized
+    internal fun connectHostLog(writer: HostLogWriter) {
+        hostLogConnection?.close()
+        hostLogConnection = writer.attach(console)
+    }
+
+    @Synchronized
     override fun close() {
+        hostLogConnection?.close()
+        hostLogConnection = null
         router.close()
     }
 
