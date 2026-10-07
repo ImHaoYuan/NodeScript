@@ -3,6 +3,8 @@ package com.autoscript.bridge
 import com.autoscript.domain.automation.InputChannel
 import com.autoscript.domain.automation.InputChannelSession
 import com.autoscript.domain.engine.EngineId
+import com.autoscript.domain.permission.CapabilityMask
+import com.autoscript.domain.permission.ScriptAuthorizationSnapshot
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
 import java.io.ByteArrayInputStream
@@ -23,10 +25,14 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class NewlineFrameServerTest {
+    /** 帧编解码用例与授权无关：掩码给全量（授权语义在 RunIdentityRegistryTest / :app 侧钉）。 */
     private val identities = RunIdentityRegistry()
     private val ids = java.util.concurrent.atomic.AtomicLong(1)
     private fun hello(): ByteArray = BridgeHandshake.hello(
-        identities.issue(EngineId(0), ids.getAndIncrement()).also { it.confirmSpawn(null) { true } }.token,
+        identities.issue(
+            EngineId(0), ids.getAndIncrement(), "frame-probe",
+            ScriptAuthorizationSnapshot(mask = CapabilityMask.ALL),
+        ).also { it.confirmSpawn(null) { true } }.token,
     )
     private fun authenticated(bytes: ByteArray) = ByteArrayInputStream(hello() + bytes)
     @org.junit.jupiter.api.AfterEach fun closeIdentities() = identities.close()

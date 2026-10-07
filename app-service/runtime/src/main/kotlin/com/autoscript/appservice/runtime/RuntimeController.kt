@@ -1,10 +1,16 @@
 package com.autoscript.appservice.runtime
 
+import com.autoscript.domain.bridge.AuthenticatedRunContext
 import com.autoscript.domain.bridge.HandleRef
+import com.autoscript.domain.core.AutojsException
+import com.autoscript.domain.core.ErrorCode
 import com.autoscript.domain.engine.EngineStatus
 import com.autoscript.domain.engine.KillCause
 import com.autoscript.domain.engine.RunSummary
 import com.autoscript.domain.engine.StopResult
+import com.autoscript.domain.permission.BridgeCapability
+import com.autoscript.domain.permission.ScriptAuthorizationPolicy
+import com.autoscript.domain.permission.ScriptAuthorizationSnapshot
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CancellationException
@@ -44,6 +50,20 @@ class RuntimeController(
      * 「心跳失联 → 再等满窗口 → 才杀」的三段节奏，不必真等 1.5s + 5s。
      */
     private val clock: () -> Long = { System.currentTimeMillis() },
+    /**
+     * 跨脚本目标授权（A5，§11）。持有它是为了让「动别的执行」这条判据只有一处：
+     * `engines` handler 与调度投递都经本类的 [authorizeTarget]/[start] 过闸，
+     * 不各自记得再判一次（判据分散 = 迟早漏一处）。
+     */
+    private val crossScript: CrossScriptAuthorizer = CrossScriptAuthorizer(),
+    /**
+     * 来源授权策略（A5，§11）：**与身份签发方同一份实例**（`AppShell.assemble` 只建一个）。
+     *
+     * 为什么必须同源：`engines.exec` 的「派生不得提权」判据要算**子执行的掩码**，
+     * 而子掩码的真值来自签发时那份策略。两处各建一个 = 两套矩阵，改了其一静默不一致，
+     * 现场表现为「exec 放行的组合，子进程起来却被自己的掩码拒」。
+     */
+    private val authorization: ScriptAuthorizationPolicy = ScriptAuthorizationPolicy(),
 ) {
     private val guard = Mutex()
     private val active = HashMap<Long, PoolHandle>()
@@ -73,7 +93,12 @@ class RuntimeController(
 
     /** 取槽启动；满则按 [PoolAcquireRequest.waitTimeoutMillis] 排队（null = 无限等）。 */
     suspend fun start(request: PoolAcquireRequest): StartOutcome = guard.withLock {
-        when (val outcome = pool.acquire(request)) {
+        // 授权决策**一次算死**（A5 整改第 4 条）：调用方没给快照时在这里补一份，随后
+        // 池请求 → 引擎请求 → 身份签发 → 连接上下文搬的都是这**同一份**，下游不重算 ——
+        // 否则会出现「预检校验的是 A 掩码、签发出去的是 B 掩码」的窗口。
+        val effective = request.authorization?.let { request }
+            ?: request.copy(authorization = authorization.decide(request.projectId).snapshot())
+        when (val outcome = pool.acquire(effective)) {
             is PoolAcquireOutcome.Granted -> {
                 val receipt = outcome.handle.receipt
                 active[receipt.runId] = outcome.handle
@@ -83,6 +108,48 @@ class RuntimeController(
             PoolAcquireOutcome.TimedOut -> StartOutcome.QueueTimeout
             is PoolAcquireOutcome.Failed -> StartOutcome.StartFailed(outcome.message)
         }
+    }
+
+    /**
+     * 目标授权（A5，§11）：调用方 [caller] 要操作 [targetRunId]。
+     *
+     * 委托 [CrossScriptAuthorizer]（纯函数）；**目标在不在途**与**目标授权快照**在同一把
+     * [guard] 下一次取出 —— 分两次取会在中间被 stop/kill 摘走，出现「目标在途表里、
+     * 快照却读到 null」的错配。「不在途 → `ERR_NOT_FOUND`」这条判据因此**在这里**做
+     * （在途表就在本类手里，纯函数不该拿到整张表只为判一次包含关系）；
+     * [CrossScriptAuthorizer] 只回答「在途的前提下，这次触达允不允许」。
+     */
+    suspend fun authorizeTarget(
+        caller: AuthenticatedRunContext,
+        targetRunId: Long,
+        required: BridgeCapability,
+    ) = guard.withLock {
+        val target = active[targetRunId]
+            ?: throw AutojsException(ErrorCode.ERR_NOT_FOUND, "未知 runId: $targetRunId")
+        crossScript.authorizeTarget(
+            caller = caller,
+            targetRunId = targetRunId,
+            required = required,
+            target = target.request.authorization,
+        )
+    }
+
+    /**
+     * 派生授权（A5，§11）：调用方 [caller] 要拉起 [projectId] 的新执行。
+     *
+     * 子掩码由**与签发同源**的 [authorization] 现算，并**返回这份快照** —— 调用方
+     * （`engines` handler）必须把它原样放进 [PoolAcquireRequest.authorization]，这样
+     * 「派生不得提权」判据校验的掩码与真正签发出去的掩码是同一份（A5 整改第 4 条）。
+     * 未授权时抛 `ERR_PERMISSION_DENIED`，调用方（handler）转成桥错误码。
+     *
+     * 宿主发起（[caller] == null）时不做调用方判据（宿主是链的根），仍**走同一份**
+     * [authorization] 算掩码 —— 所以它同时也是「宿主这条路的掩码从哪来」的唯一读口，
+     * 不需要再开一个只算不算判的孪生方法（那会多一个只服务测试的公开 API）。
+     */
+    fun authorizeStart(caller: AuthenticatedRunContext?, projectId: String): ScriptAuthorizationSnapshot {
+        val child = authorization.decide(projectId)
+        crossScript.authorizeStart(caller, child.mask)
+        return child.snapshot()
     }
 
     /** 优雅停止一次执行（四步 quiesce 由池/槽位驱动，TimedOut 已 kill 兜底）。 */
@@ -227,8 +294,14 @@ class RuntimeController(
         return startedAtMillis + declared
     }
 
-    /** 在途 runId 快照（诊断/UI 用）。 */
-    fun activeRunIds(): Set<Long> = active.keys.toSet()
+    /**
+     * 在途 runId 快照（诊断/UI 用；跨脚本授权的目标判据走 [authorizeTarget]，不经这里 ——
+     * 那条路要与目标快照同锁取出，不能先取一张可能过期的表）。
+     *
+     * **必须持 [guard]**：`active` 是普通 [HashMap]，无锁读 `keys` 在并发 start/stop 下
+     * 是数据竞争（A5 整改第 3 条）。挂起函数是因为要拿挂起锁。
+     */
+    suspend fun activeRunIds(): Set<Long> = guard.withLock { active.keys.toSet() }
 
     /**
      * 完成等待（docs §8.2 执行语义：JS `engines.exec` 句柄的 `onExit` 订阅 ——

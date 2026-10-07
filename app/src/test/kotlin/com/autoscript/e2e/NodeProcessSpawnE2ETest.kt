@@ -10,6 +10,7 @@ import com.autoscript.appservice.scheduler.persist.FileRunArchive
 import com.autoscript.appservice.scheduler.persist.JournalFileStore
 import com.autoscript.appservice.scheduler.persist.PersistentIntentLog
 import com.autoscript.bridge.NewlineFrameServer
+import com.autoscript.domain.permission.CapabilityMask
 import com.autoscript.domain.scripts.RunState
 import com.autoscript.domain.scripts.isTerminal
 import com.autoscript.engine.nodeprocess.NodeEngineConfig
@@ -297,6 +298,13 @@ class NodeProcessSpawnE2ETest {
             engineFactory = { id, issuer -> NodeProcessEngine(
                 id, NodeEngineConfig(files, Path.of("node"), hostSocketName = socketPath), identityIssuer = issuer,
             ) },
+            // 本条测的是「同 reqId 并发不串 + 同槽重跑 + 自停回池」，与授权分级无关。
+            // 脚本会调一个**测试自造**的 `probe` 命名空间（见上面的 shell.mount），
+            // 而 A5 的目录对未申报命名空间是**拒**（`UNKNOWN_NAMESPACE_REQUIRED = ALL`）——
+            // 缺省 UNKNOWN 档的脚本因此会在触达 handler 前就被 Router 拒掉，卡在 barrier 上。
+            // 这是目录的预期语义，不是缺陷：**给测试装配一个受信直投掩码**，
+            // 而**不是**往生产目录里给 `probe` 开条目（那等于把测试脚手架写进策略）。
+            capabilityMask = CapabilityMask.ALL,
         )
         val shell = assembled.shell
         shell.mount("probe") { request ->

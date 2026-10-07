@@ -6,6 +6,8 @@ import com.autoscript.domain.engine.EngineRunRequest
 import com.autoscript.domain.engine.EngineStatus
 import com.autoscript.domain.engine.RunIdentityIssuer
 import com.autoscript.domain.engine.RunIdentityLease
+import com.autoscript.domain.permission.CapabilityMask
+import com.autoscript.domain.permission.ScriptAuthorizationSnapshot
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.CountDownLatch
@@ -57,7 +59,14 @@ class RunIdentityLifecycleTest {
         Files.write(script, "process.exit(0)".toByteArray())
         return NodeProcessEngine(EngineId(0), NodeEngineConfig(dir, Path.of("node"), hostSocketName = "test-socket"), launcher, issuer)
     }
-    private fun request() = EngineRunRequest("p1", "test.js")
+    /**
+     * 在线引擎（`hostSocketName` 非 null）必须带授权快照才能 spawn —— 这是 A5 的
+     * fail-closed 口径：宿主装配没把决策传下来，就拒绝启动而不是编一个掩码。
+     */
+    private fun request() = EngineRunRequest(
+        "p1", "test.js",
+        authorization = ScriptAuthorizationSnapshot(mask = CapabilityMask.ALL),
+    )
 
     @Test
     fun `票据在spawn前签发，确认PID来自同一进程，noPid不降级`() = runBlocking {
@@ -71,7 +80,7 @@ class RunIdentityLifecycleTest {
             assertEquals(lease.token, env[NodeProcessEngine.ENV_BRIDGE_TOKEN])
             assertEquals(issuedRun.toString(), env[NodeProcessEngine.ENV_RUN_ID])
             child
-        }, { _, runId -> issued = true; issuedRun = runId; lease })
+        }, { _, runId, _, _ -> issued = true; issuedRun = runId; lease })
         val receipt = e.execute(request())
         assertTrue(lease.confirmed)
         assertNull(lease.pid)
@@ -86,7 +95,7 @@ class RunIdentityLifecycleTest {
     @Test
     fun `spawn异常撤销凭据，在线无issuer在spawn前拒绝`() {
         val lease = Lease()
-        val e = engine({ _, _, _ -> throw java.io.IOException("spawn failed") }, { _, _ -> lease })
+        val e = engine({ _, _, _ -> throw java.io.IOException("spawn failed") }, { _, _, _, _ -> lease })
         assertThrows(AutojsException::class.java) { runBlocking { e.execute(request()) } }
         assertTrue(lease.revoked)
         assertFalse(lease.confirmed)
@@ -99,7 +108,7 @@ class RunIdentityLifecycleTest {
         val first = Child()
         var next = first
         val leases = mutableListOf<Lease>()
-        val e = engine({ _, _, _ -> next }, { _, _ -> Lease().also { leases.add(it) } })
+        val e = engine({ _, _, _ -> next }, { _, _, _, _ -> Lease().also { leases.add(it) } })
         val a = e.execute(request())
         first.live = false
         assertEquals(EngineStatus.STOPPED, e.status())
@@ -124,7 +133,7 @@ class RunIdentityLifecycleTest {
             entered.complete(Unit)
             check(release.await(5, TimeUnit.SECONDS))
             child
-        }, { _, _ -> lease })
+        }, { _, _, _, _ -> lease })
         val job = launch { e.execute(request()) }
         try {
             withTimeout(2_000) { entered.await() }

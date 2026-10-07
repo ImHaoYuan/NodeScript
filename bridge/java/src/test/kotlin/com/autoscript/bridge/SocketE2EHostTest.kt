@@ -1,6 +1,8 @@
 package com.autoscript.bridge
 
 import com.autoscript.domain.bridge.BridgeResponse
+import com.autoscript.domain.permission.CapabilityMask
+import com.autoscript.domain.permission.ScriptAuthorizationPolicy
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.InetAddress
@@ -115,8 +117,14 @@ class SocketE2EHostTest {
             "bridge/js 未 build（先 npm run build），跳过真机 E2E",
         )
         val collector = ConsoleCollector()
+        // E2E 钉的是「socket 帧 + 路由」这条链，与授权档无关 → 直接给全量快照。
         val identities = RunIdentityRegistry()
-        val lease = identities.issue(com.autoscript.domain.engine.EngineId(0), 73)
+        val lease = identities.issue(
+            com.autoscript.domain.engine.EngineId(0), 73, "e2e-probe",
+            com.autoscript.domain.permission.ScriptAuthorizationSnapshot(
+                mask = com.autoscript.domain.permission.CapabilityMask.ALL,
+            ),
+        )
         lease.confirmSpawn(null) { true }
         val server = NewlineFrameServer(routerWithConsole(collector), identities)
         val serverSocket = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))

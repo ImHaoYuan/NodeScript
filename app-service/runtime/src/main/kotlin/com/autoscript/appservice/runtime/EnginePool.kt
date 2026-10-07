@@ -4,6 +4,7 @@ import com.autoscript.domain.engine.EngineRunReceipt
 import com.autoscript.domain.engine.KillCause
 import com.autoscript.domain.engine.ScriptEngine
 import com.autoscript.domain.engine.StopResult
+import com.autoscript.domain.permission.ScriptAuthorizationSnapshot
 
 /**
  * 引擎进程池契约（docs §8.1/§8.2）：
@@ -51,6 +52,22 @@ data class PoolAcquireRequest(
     val runNonce: String? = null,               // 调度幂等锚点，透传 EngineRunRequest（§8.5）
     val scriptTimeoutMillis: Long? = null,      // 脚本自身超时，透传 EngineRunRequest（引擎不计时，见其 KDoc）
     val waitTimeoutMillis: Long? = null,        // 排队等待上限；null = 无限等
+    /**
+     * 本次 spawn 的**授权快照**（A5，§11）：掩码 + 来源档，由 [RuntimeController.start] 一次
+     * 算出（问装配层注入的 `ScriptAuthorizationPolicy`），沿本请求 → `EngineRunRequest`
+     * → `RunIdentityIssuer.issue` → 连接上下文一路传下去。
+     *
+     * 为什么放在请求里而不是让下游各自算：授权判据（跨脚本目标授权、派生不得提权）与
+     * 实际签发的掩码必须是**同一份**。下游重算 = 两套事实，现场表现为「预检放行的组合，
+     * 子进程起来被自己的掩码拒」。
+     *
+     * **不是 wire 字段**：它由宿主一侧算出，脚本无法自报；桥 handler 也**不读** payload 里的
+     * 任何授权相关键（见 `EnginesNamespaceHandler.parseExec`）。
+     *
+     * null = 调用方未给（测试替身/直投老路径）→ [RuntimeController.start] 按策略现算一份
+     * （见其 KDoc：这只是"没传就补一个"的便利，不是第二条策略来源）。
+     */
+    val authorization: ScriptAuthorizationSnapshot? = null,
     /**
      * 时限归属（见 [TimeoutEnforcer]）。缺省 [TimeoutEnforcer.AWAITER]（调度链路）。
      *

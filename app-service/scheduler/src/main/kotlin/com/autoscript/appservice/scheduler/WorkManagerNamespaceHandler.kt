@@ -25,6 +25,12 @@ import java.time.ZoneId
  * 挂载点仍在 `AppShell.assemble` 恒挂载（调度器是本壳自建的，不经注入缝）——
  * 与 a11y/screen 缝的区别：能力实现在 `:platform`（必须注入）。
  *
+ * **创建授权（A5，§11 派生运行入口）**：[create] 会写一条**持久**任务，它此后每次触发
+ * 都会拉起一次新的执行 —— 是一条绕过掩码的派生入口（脚本这次被授权窄掩码，但建下的任务
+ * 在脚本退出后照样跑）。故装配层注入 [authorizeCreate]：由它按**真实调用身份**算这次要
+ * 建的任务**将来会拿到什么授权**，并要求调用方覆盖之；缺注入 = 无授权接缝 → 一律拒
+ * （fail closed，见 [authorizeCreate] 的 KDoc）。
+ *
  * 线格式（与 `bridge/js` workManager.ts 逐字段对齐，扁平 JSON，无嵌套数组之外的结构）：
  * - `create`：`{id?,name,projectId,scriptPath,schedule:{kind,...},screen?,args?,
  *   scriptTimeoutMillis?,timezone?,enabled?}` → Ok `{"id":"…"}`。
@@ -36,8 +42,17 @@ import java.time.ZoneId
  * - `cancel`：`{id}` → Ok `true`（幂等：从未登记的 id 照样 true，与 `Scheduler.cancel` 一致）。
  * - `list`：无参 → Ok `[task,…]`（与 create 同一任务形状；按 id 排序）。
  * - 未知方法 → ERR_NOT_IMPLEMENTED；非法载荷 → ERR_INVALID_PARAM。
+ *
+ * @param authorizeCreate 建任务前的授权判据（A5，§11）。入参 = 被建任务的项目号；
+ *   返回 null = 放行，非 null = 拒并给出原因。它由装配层（`:app`）注入 —— 本模块的
+ *   arch 门禁禁止依赖 `:domain` 的权限面（`domain.permission..` 在黑名单里），所以
+ *   判据（算子掩码、比调用方掩码）只能住在 `:app`；这里只留一个**不含权限类型**的缝。
+ *   **null（缺注入）= 全拒**：没接就是"没有授权来源"，按 fail closed 处理，绝不默认放行。
  */
-class WorkManagerNamespaceHandler(private val scheduler: Scheduler) : RpcNamespaceHandler() {
+class WorkManagerNamespaceHandler(
+    private val scheduler: Scheduler,
+    private val authorizeCreate: (suspend (projectId: String) -> String?)? = null,
+) : RpcNamespaceHandler() {
 
 
     /** 申报方法表（wire-schema 对账挂点）：单源指向生成物 [WireMethods.BY_NS]，不手抄。 */
@@ -61,14 +76,30 @@ class WorkManagerNamespaceHandler(private val scheduler: Scheduler) : RpcNamespa
     }
 
     private suspend fun create(f: Map<String, DomainJson.Value>): String {
+        val projectId = DomainJson.reqStr(f, "projectId").takeIf { it.isNotBlank() }
+            ?: throw IllegalArgumentException("projectId 不得为空串")
+        // 授权先于一切（A5，§11）：建任务 = 派生运行的持久入口，未过闸不得登记，
+        // 更不得先落盘再拒（那就留下一条无人授权的任务）。
+        //
+        // 注意**不能**写成 `authorizeCreate?.invoke(projectId) ?: "缺判据"`：那样
+        // 「接缝存在且放行（返回 null）」与「接缝不存在」会落进同一个分支，
+        // 结果是把所有放行都翻成拒绝。两种"没有授权"要分开表达：
+        // 接缝缺席 = 装配缺陷（拒，附说明）；接缝回 null = 明确放行。
+        val seam = authorizeCreate
+            ?: throw AutojsException(
+                ErrorCode.ERR_PERMISSION_DENIED,
+                "workManager.create 未接授权判据（装配层未注入）：拒绝建立持久任务",
+            )
+        seam.invoke(projectId)?.let { deny ->
+            throw AutojsException(ErrorCode.ERR_PERMISSION_DENIED, deny)
+        }
         val schedule = parseSchedule(DomainJson.reqObj(f, "schedule"))
         val task = ScheduledTask(
             id = (f["id"] as? DomainJson.Value.S)?.v?.takeIf { it.isNotBlank() }
                 ?: java.util.UUID.randomUUID().toString(),
             name = DomainJson.reqStr(f, "name").takeIf { it.isNotBlank() }
                 ?: throw IllegalArgumentException("name 不得为空串"),
-            projectId = DomainJson.reqStr(f, "projectId").takeIf { it.isNotBlank() }
-                ?: throw IllegalArgumentException("projectId 不得为空串"),
+            projectId = projectId,
             scriptPath = DomainJson.reqStr(f, "scriptPath").takeIf { it.isNotBlank() }
                 ?: throw IllegalArgumentException("scriptPath 不得为空串"),
             schedule = schedule,

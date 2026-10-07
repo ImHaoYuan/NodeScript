@@ -5,6 +5,7 @@ import com.autoscript.appservice.scheduler.core.TriggerHandle
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.bridge.AuthenticatedRunContext
+import com.autoscript.domain.permission.CapabilityMask
 import com.autoscript.domain.engine.EngineId
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -44,7 +45,7 @@ class AppShellConsoleTest {
     )
 
     @Test
-    fun `收集器是壳持有的那一个 游标续拉不重不漏`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1)) {
+    fun `收集器是壳持有的那一个 游标续拉不重不漏`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1, CapabilityMask.ALL)) {
         val s = kit()
         s.use { assembled ->
             // 首读：空壳（没起过引擎、没打过日志）—— 空是事实，不是没读到。
@@ -72,7 +73,7 @@ class AppShellConsoleTest {
     }
 
     @Test
-    fun `单批上限由调用方定 拉满标 pageFull`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1)) {
+    fun `单批上限由调用方定 拉满标 pageFull`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1, CapabilityMask.ALL)) {
         val s = kit()
         s.use { assembled ->
             repeat(3) { assembled.shell.console.append(runId = 0, level = "log", text = "t$it") }
@@ -85,7 +86,7 @@ class AppShellConsoleTest {
     }
 
     @Test
-    fun `启动日志与桥日志落在同一读口 激活之前构造新壳不抢接线`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1)) {
+    fun `启动日志与桥日志落在同一读口 激活之前构造新壳不抢接线`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1, CapabilityMask.ALL)) {
         val writer = HostLogWriter(logcat = { _, _, _, _ -> })
         writer.i("Host", "装配开始")
         kit().use { first ->

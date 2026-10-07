@@ -7,6 +7,7 @@ import com.autoscript.domain.core.ErrorCode
 import com.autoscript.domain.engine.EngineId
 import com.autoscript.domain.engine.RunIdentityIssuer
 import com.autoscript.domain.engine.RunIdentityLease
+import com.autoscript.domain.permission.ScriptAuthorizationSnapshot
 import java.security.SecureRandom
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -20,6 +21,13 @@ import kotlinx.coroutines.launch
 /**
  * 每壳一份执行身份账（§7.5/A5）。票据只允许领取一次，绑定后不再按活性探针拒绝尾帧。
  * 所有状态在同锁转换，回调/等待/活性探针均在锁外；不以同 UID 凭据代替沙箱或能力授权。
+ *
+ * **A5 起本类也是授权快照的落点，但不再自己算授权**：`issue(...)` 收下调用方
+ * （`RuntimeController.start` 那条链）**已经算好**的
+ * [com.autoscript.domain.permission.ScriptAuthorizationSnapshot]，原样存进 lease，
+ * 认证时随 [Binding.caller] 下发。为什么不在本类里按 projectId 现算：那样「预检校验的掩码」
+ * 与「签发出去的掩码」是两次独立计算，中间任何策略/元数据变化都会让二者分叉 ——
+ * 授权决策必须在 spawn 链上**只发生一次**（A5 整改第 4 条）。
  */
 class RunIdentityRegistry(
     private val clock: Clock = Clock { System.nanoTime() / 1_000_000 },
@@ -42,14 +50,21 @@ class RunIdentityRegistry(
         }
     }
 
-    override fun issue(engineId: EngineId, engineRunId: Long): RunIdentityLease = synchronized(lock) {
+    override fun issue(
+        engineId: EngineId,
+        engineRunId: Long,
+        projectId: String,
+        authorization: ScriptAuthorizationSnapshot,
+    ): RunIdentityLease = synchronized(lock) {
         check(!closed) { "桥身份入口已关闭" }
         require(engineRunId > 0)
         var token: String
         do {
             token = ByteArray(32).also(random::nextBytes).joinToString("") { "%02x".format(it) }
         } while (tokens.containsKey(token))
-        Lease(token, engineId, engineRunId, clock.nowMillis() + admissionMillis).also {
+        // 授权快照在**上游**已算好（见类 KDoc）：这里只落账，不再算一次。
+        // projectId 仅存进 lease 供审计/诊断，不参与任何判定。
+        Lease(token, engineId, engineRunId, projectId, authorization, clock.nowMillis() + admissionMillis).also {
             tokens[token] = it
             leases.add(it)
         }
@@ -84,7 +99,9 @@ class RunIdentityRegistry(
                 if (closed || lease.state != State.CLAIMED || lease.deadline <= clock.nowMillis()) denied()
                 lease.state = State.ACTIVE
                 bound = true
-                Binding(AuthenticatedRunContext(lease.engineId, lease.runId, connectionId)) { lease.disconnect() }
+                Binding(
+                    AuthenticatedRunContext(lease.engineId, lease.runId, connectionId, lease.authorization.mask),
+                ) { lease.disconnect() }
             }
         } finally {
             if (!bound) lease.revoke()
@@ -106,6 +123,10 @@ class RunIdentityRegistry(
         override val token: String,
         val engineId: EngineId,
         val runId: Long,
+        /** 项目号：**仅供审计/诊断**（授权已在 [authorization] 里算好，本字段不参与判定）。 */
+        val projectId: String,
+        /** 本次执行的授权快照（上游一次算好，运行期不可变）。 */
+        val authorization: ScriptAuthorizationSnapshot,
         val deadline: Long,
     ) : RunIdentityLease {
         var state = State.ISSUED
