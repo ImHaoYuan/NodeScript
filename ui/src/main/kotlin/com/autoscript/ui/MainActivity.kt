@@ -51,11 +51,14 @@ import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
+import com.autoscript.domain.editor.SyntaxHighlighter
 import com.autoscript.domain.host.HostSummary
 import com.autoscript.domain.host.TaskRegistration
 import com.autoscript.ui.components.EaseInOutQuad
+import com.autoscript.ui.components.EditorHighlightHost
 import com.autoscript.ui.components.GlyphKind
 import com.autoscript.ui.components.LocalBarAction
+import com.autoscript.ui.components.LocalEditorHighlightHost
 import com.autoscript.ui.components.LocalTabBarHidden
 import com.autoscript.ui.components.TabBarBottomClearance
 import com.autoscript.ui.components.TabItem
@@ -206,26 +209,29 @@ class MainActivity : ComponentActivity() {
                             // pager 的修饰符是它自己的（滚动/裁剪/尺寸），发给页内容等于
                             // 把同一份约束套两层。
                             when (Tab.entries[current]) {
-                                Tab.HOME -> ProjectScreen(
-                                    state = projectState,
-                                    onSwitchTheme = themeSwitch.onSwitch,
-                                    // 菜单项写**目标模式**（TG 的日夜项同款）：
-                                    // 冷启缺省跟随系统，此时按"当下是不是深色"定文案。
-                                    themeSwitchLabel = themeSwitchLabel(dark),
-                                    onCreate = { projectId, name, isFolder ->
-                                        scope.launch { createEntryOp(projectId, name, isFolder) }
-                                    },
-                                    // 点文件进编辑面：读/存都**不在这里落状态** —— 成败归编辑器自己
-                                    // 显示（清单没变），保存成功后才重读一次清单（大小/时刻变了）。
-                                    onReadFile = { projectId, relPath -> readScriptFileOp(projectId, relPath) },
-                                    onSaveFile = { projectId, relPath, content ->
-                                        saveScriptFileOp(projectId, relPath, content)
-                                    },
-                                    onSortChange = { sort, reversed ->
-                                        projectState = projectState.copy(sort = sort, reversed = reversed, opError = null, opNotice = null)
-                                    },
-                                    modifier = Modifier,
-                                )
+                                // 编辑器语法高亮的宿主口只供到项目页（编辑面在它里面）。
+                                Tab.HOME -> CompositionLocalProvider(LocalEditorHighlightHost provides highlightHost) {
+                                    ProjectScreen(
+                                        state = projectState,
+                                        onSwitchTheme = themeSwitch.onSwitch,
+                                        // 菜单项写**目标模式**（TG 的日夜项同款）：
+                                        // 冷启缺省跟随系统，此时按"当下是不是深色"定文案。
+                                        themeSwitchLabel = themeSwitchLabel(dark),
+                                        onCreate = { projectId, name, isFolder ->
+                                            scope.launch { createEntryOp(projectId, name, isFolder) }
+                                        },
+                                        // 点文件进编辑面：读/存都**不在这里落状态** —— 成败归编辑器自己
+                                        // 显示（清单没变），保存成功后才重读一次清单（大小/时刻变了）。
+                                        onReadFile = { projectId, relPath -> readScriptFileOp(projectId, relPath) },
+                                        onSaveFile = { projectId, relPath, content ->
+                                            saveScriptFileOp(projectId, relPath, content)
+                                        },
+                                        onSortChange = { sort, reversed ->
+                                            projectState = projectState.copy(sort = sort, reversed = reversed, opError = null, opNotice = null)
+                                        },
+                                        modifier = Modifier,
+                                    )
+                                }
                                 Tab.TASKS -> TaskCenterScreen(
                                     state = taskState,
                                     console = consoleState,
@@ -570,6 +576,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun hostSummary(): HostSummary? = application as? HostSummary
+
+    /**
+     * 编辑器语法高亮的宿主实现：编辑器只认 [EditorHighlightHost]，不碰 [HostSummary]。
+     * 读口未接线时回 [SyntaxHighlighter.NONE]（纯文本编辑，不是错误）。
+     */
+    private val highlightHost = EditorHighlightHost { relPath ->
+        hostSummary()?.createSyntaxHighlighter(relPath) ?: SyntaxHighlighter.NONE
+    }
 
     /**
      * 四个页签。`short`（页签条两字短名）与全称（顶栏标题）分开 —— 窄屏塞不下全称；
