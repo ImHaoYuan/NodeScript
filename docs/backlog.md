@@ -23,6 +23,7 @@
 | **A5** | 桥没有 per-engine 身份：同一 uid 的任何进程可达全部命名空间（`SECURITY.md` 已承认是有意为之），无法按脚本/按 run 归因与审计 | 同 uid 门禁 `BridgeSocketListener.kt:117-122` 是 fail-closed；abstract 名可预测 | ✅ 2026-10-01 | 以后想加 per-run 权限会很贵 | M（协议变更，须与 `main.cpp` + JS bootstrap 同批） |
 | ~~**A6**~~ | 已完成（2026-10-02）—— 叙事见 [`docs/log/2026-10-02.md`](log/2026-10-02.md) （本条不留历史；口径变更另见 [`design-decisions.md`](design-decisions.md)） | — | ✅ | — | — |
 | ~~**A8**~~ | 已完成（2026-10-07，批 64）—— 裁定**选项①**（文案改成与三态无关，显示逻辑不动），八条逐条重写；**同批顺带修正 `ADB_INPUT` 三态**（恒 `DEGRADED` → 真探测 `GRANTED`/`DENIED`，理由见流水）。叙事见 [`docs/log/2026-10-07.md`](log/2026-10-07.md)，口径见 [`design-decisions.md`](design-decisions.md) 第 38 项（本条不留历史） | — | ✅ | — | — |
+| **A10** | **脚本的 console 输出没有执行归属；宿主事件不进控制台收集器** —— 日志管理页的「系统日志」因此不是「纯宿主事件」：脚本输出也落在里面（`runId` 恒 0），宿主装配/调度/闹钟/恢复/保活事件却**看不到**（走 `android.util.Log`）。页面顶部已如实说明，本条是补齐它。两半各自独立：① 给桥请求帧补 `runId`（`BridgeRequest` 现无 `side` 字段，`ConsoleCollector` 类注释写的「`side.runId` 透传」是愿望不是现状）→ 脚本输出归到各次执行，系统日志自然只剩 `runId=0` 的宿主行；② 把宿主事件镜像进收集器（`runId=0`）→ 系统日志才真有宿主事件可看 | `bridge/java/.../ConsoleCollector.kt`（`handle` 恒 `append(runId = 0L, …)`；生产代码无任何 `append(runId, …)` 调用方）；`domain/.../bridge/BridgeContract.kt`（`BridgeRequest` 五个字段无归属）；`app/.../AppShellApplication.kt` 等处的 `Log.i/w/e`；`ui/.../LogManagementScreen.kt`（顶部说明） | ✅ 2026-10-07 | 日志管理页的「系统日志」名不副实，只靠一段说明撑着；①与 A5 同一次协议变更 | ① M（须与 `main.cpp` + JS bootstrap 同批）；② S |
 
 
 ## B. CI / 工程基建
