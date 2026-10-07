@@ -427,8 +427,8 @@ fun Glyph(
  * 加这组参数，**没有各自的包装函数** —— 一层的包装只是把同一个 `Glyph` 调用的实参
  * 藏起来，读的人反而要跳一层才知道粗细是多少。
  *
- * 实测尺寸：24dp 画布 × [BAR_MORE_DOTS_WEIGHT] → 点半径 2.75dp（点径 5.5dp、点距 7.4dp）；
- * 行尾那颗是点径 2.8dp —— 差近一倍，这是**要求**不是随手调的：顶栏是整屏唯一的全局入口，
+ * 实测尺寸：24dp 画布 × [BAR_MORE_DOTS_WEIGHT] → 点半径约 2.43dp（点径约 4.86dp、点距 7.4dp）；
+ * 行尾那颗是点径 2.8dp —— 约 1.7 倍，这是**要求**不是随手调的：顶栏是整屏唯一的全局入口，
  * 行尾只是"这一行的操作"，两者重量必须读得出层级。层级由 `MoreDotsTest` 守着，
  * 免得下一个人顺手把两处改成一样。
  *
@@ -437,8 +437,8 @@ fun Glyph(
  */
 internal val BarMoreDotsSize = 24.dp
 
-/** 顶栏三点的粗细倍率：最粗的一档（见 [BarMoreDotsSize]）。 */
-internal const val BAR_MORE_DOTS_WEIGHT = 1.3f
+/** 顶栏三点的粗细倍率：最粗的一档（见 [BarMoreDotsSize]；2026-10-07 用户口径「粗细降低一点点」：1.3 → 1.15）。 */
+internal const val BAR_MORE_DOTS_WEIGHT = 1.15f
 
 /** 行尾三点的画布边长：比顶栏小一号（它住在 48dp 触控目标里，右边还要留 4dp 呼吸位）。 */
 internal val RowMoreDotsSize = 20.dp
