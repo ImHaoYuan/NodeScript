@@ -85,9 +85,9 @@
 
 | 指标 | 目标 |
 |---|---|
-| APK 体积 | ≤ 40MB release（`libnode.so` + `libopencv.so` + assets）—— **已超支（≈92MB 未压缩三件套），2026-10-02 拍板「接受 + 能力中心明示实测安装体积」，见 [`design-decisions.md`](../design-decisions.md) 第 20 项** |
+| APK 体积 | ≤ 150MB release（`libnode.so` + `libopencv.so` + assets）—— **2026-10-07 用户裁定：预算由 `≤ 40MB` 改为 `≤ 150MB`**（口径见 [`design-decisions.md`](../design-decisions.md) 第 41 项；第 20 项的实测链与 `InstallSizeRead` 处置保留）。**按新预算不再超支**：真形态 debug APK 实测 51,838,708 B ≈ 49.4 MiB（artifact `37581330329`，2026-10-07） |
 
-> **APK 体积预算是本表唯一已被实测推翻的条目（2026-09-25 记账）**：`:engine:node-process` 侧 jniLibs 三件套
+> **APK 体积预算被实测推翻过，随后按实测重定（2026-09-25 记账；2026-10-07 重定为 `≤ 150MB release`，见 [`design-decisions.md`](../design-decisions.md) 第 41 项）**：`:engine:node-process` 侧 jniLibs 三件套
 > `libnoden.so` + `libnode.so` + `libc++_shared.so` 实测未压缩合计已 ≈81MB（APK 压缩安装后另计）——**2026-09-26 ICU 之后要按 ≈92MB 读**：`libnode.so` 由 `--with-intl=none` 换成 `small-icu zh,en` 后实测 70,725,976 → 81,950,376 B（**+11,224,400 B = +10.70 MiB = +15.87%**），
 > 增量全在 `libnode.so`，故三件套 +10.70 MiB；取证 = 两个 `node-slice` artifact（`36153816811` / `36185853302`）+ 各自 `config.gypi`（旧 `icu_small=false`，新 `icu_small=true, icu_locales=en,root,zh, icu_path=deps/icu-small`）。
 > §18 第 4 项的拍板（只要 zh,en）**已按本条买单**——不拍这条的话全量 ICU 还要再多，预算只会更超（下文 `libopencv` 两处「占三件套 8.6%/7.8%」的分母仍是 ICU 前的 81MB，
@@ -102,6 +102,8 @@
 > 可整轨后移；`libnode.so` 有 exec 硬需求，动它要先解决 §19 的落位链）；
 > (c) 继续裁 OpenCV 面（`imgcodecs` 只留 PNG/JPEG 已是最小可用集，再裁要动 SPI 承诺）。
 > 记账而非静默删除：预算数字是 §15 的契约，推翻它得留证据链（`node-runtime-build/out*/SHASUMS256` + artifact 体积）。
+> **2026-10-07 的重定走的正是这条路**：新数字、理由与实测锚记在 [`design-decisions.md`](../design-decisions.md) 第 41 项，
+> 本节实测账（≈92MB 取证、OpenCV 占比、(a)/(b)/(c) 三条出路）**一字未删**。
 
 | 冷启动→就绪 | ≤ 800ms（无系统抖动） |
 | 脚本 warm start（二次复用 slot） | ≤ 300ms |
