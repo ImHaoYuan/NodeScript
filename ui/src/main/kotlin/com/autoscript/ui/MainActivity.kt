@@ -19,6 +19,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
@@ -145,6 +148,7 @@ class MainActivity : ComponentActivity() {
     /** 每次 `onResume` +1：驱动 [LaunchedEffect] 重问系统（回前台即重读）。 */
     private var resumeTick: Int by mutableStateOf(0)
 
+    @OptIn(ExperimentalFoundationApi::class) // LocalBringIntoViewSpec 在 foundation 1.7 仍是实验 API
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // 边到边（§6）：**显式开**，而不是等 Android 15 因为 targetSdk 35 替我们开 ——
@@ -192,9 +196,13 @@ class MainActivity : ComponentActivity() {
                     toast = toast,
                     modifier = themeSwitch.modifier,
                 ) { shellModifier ->
+                        // 页内滚动容器要用的「露出来」口径（光标入视等）：pager 自己换成
+                        // [NoPagerBringIntoView]，页内容里再还原成这一份。
+                        val pageBringIntoView = LocalBringIntoViewSpec.current
                         // 四屏装进 **HorizontalPager**：这是 TG 主页签的做法
                         // （`MainTabsActivity extends ViewPagerActivity`），换来两件事 ——
                         // ① 点页签是**横向滑动**过去，不是淡入淡出；② 内容可以**横划切页**。
+                        CompositionLocalProvider(LocalBringIntoViewSpec provides NoPagerBringIntoView) {
                         HorizontalPager(
                             state = pagerState,
                             modifier = shellModifier,
@@ -205,6 +213,7 @@ class MainActivity : ComponentActivity() {
                             // 切页只走页签点按（onSelectTab 的 animateScrollToPage）。
                             userScrollEnabled = false,
                         ) { current ->
+                            CompositionLocalProvider(LocalBringIntoViewSpec provides pageBringIntoView) {
                             // 四屏收 **Modifier**（自己那份布局意图）而不是 pager 的修饰符：
                             // pager 的修饰符是它自己的（滚动/裁剪/尺寸），发给页内容等于
                             // 把同一份约束套两层。
@@ -264,7 +273,9 @@ class MainActivity : ComponentActivity() {
                                     modifier = Modifier,
                                 )
                         }
+                            }
                     }
+                        }
                 }
             ManagementBackHandler(pagerState, consoleOpen, closeConsole)
             // 键里带页签和管理子页：进入控制台即现取，而不是显示上次离开时的快照。
@@ -943,6 +954,21 @@ private fun MainShell(
             }
         }
     }
+}
+
+/**
+ * pager 这一层的「露出来」口径：**永远不滚**。
+ *
+ * 病根（2026-10-07 云手机复现）：编辑器聚焦后 `BasicTextField` 会请求把光标
+ * bring-into-view，请求沿祖先链一路冒泡到 `HorizontalPager`。pager 缺省的
+ * `PagerBringIntoViewSpec` 会把它当成「把这一页滚进来」，`userScrollEnabled = false`
+ * 也拦不住（那只关手势）—— 于是 pager 被推向下一页（任务页），而项目页因
+ * `beyondViewportPageCount = 1` 仍在组合里，编辑器没退场，底栏一直被它收着。
+ * 本仓切页只走页签点按（`animateScrollToPage`），pager 不该响应任何入视请求。
+ */
+@OptIn(ExperimentalFoundationApi::class)
+private object NoPagerBringIntoView : BringIntoViewSpec {
+    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float = 0f
 }
 
 /** 冷启重问的间隔（见 [HomeRetryEffect]）。 */
