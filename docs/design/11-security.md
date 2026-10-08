@@ -16,8 +16,8 @@
   缺省（无来源元数据）取**保守档 A**：全量减跨脚本位与 `SCHEDULER_WRITE` —— 这是
   §11 矩阵之外新增的一档，不是把「第三方」改成窄掩码，理由见
   [`design-decisions.md`](../design-decisions.md) 第 43 项。
-- **仍未实现**：**来源分级本身**。`TrustTierResolver` 是注入缝，本批生产唯一可达档是
-  `UNKNOWN`；把「内置 / 自写 / 第三方 / 打包」四档接上真来源元数据是后续批次。
+- **来源分级：经裁定不做**（2026-10-08，[`design-decisions.md`](../design-decisions.md) 第 45 项）。
+  `TrustTier` 四档与 `TrustTierResolver` 注入缝保留，但**不接真来源元数据**，只作记账词汇；生产唯一可达档仍是 `UNKNOWN`（保守档 A）。**为什么不做**：同 UID 同权（§11.3 第 1 条）下，来源分级不产生防护 —— 掩码收窄只约束桥面，脚本绕开桥直接读写宿主私有目录即可达到同样效果，所以它挡住的是老实脚本而不是恶意脚本。它原本能买的「审计归因」已由 A10 的 `engineRunId → projectId` 覆盖。
   另：掩码**只约束桥面命名空间**，不限制 Node 内建 `fs`/`http`，**不是沙箱**（见下 §11.3 第 1 条）。
 
 ---
@@ -30,7 +30,7 @@
 |---|---|---|
 | 1 | **权限隔离这条防线不存在**。引擎只有 Node 一条轨，每脚本一个进程，但第三方脚本与用户自写脚本**同 UID、同权**（无障碍读屏/点击/截屏/网络/文件全开）。原先「第三方 → QuickJS 白名单子集」的隔离随 QuickJS 整轨撤出而作废 | §18 第 1 项（[18-19-ledger.md](18-19-ledger.md)）+ [design-decisions.md](../design-decisions.md) 已拍板第 1 项 |
 | 2 | **因此能力授予是唯一边界，不是进程边界**。给用户的提示必须直说「装来的脚本与自写脚本同权」，不能让文案读起来像沙箱 | 同上 |
-| 3 | **桥面身份与执行级能力掩码已接、来源分级未接**：一次性凭据绑定 engineRunId；`CapabilityMask` 按执行过滤桥面（缺省保守档 A）；但把「内置/自写/第三方/打包」四档接上真来源元数据仍是目标形态 | 本节上方三条 bullets + §7 + [`design-decisions.md`](../design-decisions.md) 第 43 项 |
+| 3 | **桥面身份与执行级能力掩码已接；来源分级经裁定不做**：一次性凭据绑定 engineRunId；`CapabilityMask` 按执行过滤桥面（缺省保守档 A）。**「内置/自写/第三方/打包」四档不再接入真来源元数据**（2026-10-08 裁定，见 [`design-decisions.md`](../design-decisions.md) 第 45 项）—— 理由是它**不产生防护**：同 UID 同权（上表第 1 条）意味着脚本可绕开桥直接读写宿主私有目录与文件，任何只写在掩码上的「来源限制」都挡不住恶意脚本，只挡得住老实脚本。四档枚举与 `TrustTierResolver` 注入缝**保留**，但只作**记账词汇**（日志/审计里说明「这次执行有没有来源证据」），不接元数据、不产生授权差异 | 本节上方三条 bullets + §7 + [`design-decisions.md`](../design-decisions.md) 第 43/45 项 |
 
 **要守的资产**（按被攻破后的代价排序）：① 设备上的账号与凭据（脚本可读 `filesDir` 与已授权能力所见的一切）；② 宿主 App 自身的完整性（脚本能改自己的项目文件，从而改下一次启动时跑什么）；③ 已授予的自动化能力（点击、输入、截屏可被脚本用于对外操作）；④ 用户注意力（脚本可弹窗/发通知/驱动界面）。
 
@@ -46,7 +46,7 @@
 | T2 | **lockfile 投毒**（把包名指到别处，integrity 仍成立） | `npm ci` 重建 | `LockSigner` 对 lock 做 HMAC-SHA256 带外签名（`files/.autojs/lock.sig`，键绑 `projectId` 防跨项目搬锁），`ci` 前验签；缺签名/错签名一律 `ERR_PERMISSION_DENIED`（TOFU 自签不算通过）。**接线现状（2026-10-01 核实）**：防线代码与单测都在，但**生产装配没接** —— `NpmShellKit.assembleHandler` 的 `lockKey` 缺省 `null` → 既不签也不验，全仓无 `KeyProvider` 实现。见 §11.3 第 8 条 |
 | T3 | **单一镜像/注册表投毒** | registry 响应 | `NpmRegistryVerifier` 双运营主体交叉校验（第二意见必须与首选**不同运营主体**，同站即自比、自比一律拒）；取不到/非 https/无 integrity 锚点一律 `Verdict.Unverifiable` 由调用方显式告知，不折成「通过」 |
 | T4 | **冒名客户端抢绑桥 socket** | abstract unix socket | 桥监听与客户端 `main.cpp` 对称验 peer uid（`SO_PEERCRED`），凭据读不到即 fail-closed 拒收（`BridgeSocketListener`）；abstract 名带 uid 后缀，多实例互不抢绑。UID 通过后还须一次性 256-bit token 的 hello/ACK，绑定 engineRunId；双方 PID 可得时额外匹配。无票、重放、过期、已退出或撤销拒收；**同 UID 窃取其他执行凭据仍不在保证内** |
-| T5 | **未授权能力被调用**（脚本绕过能力授予） | 桥面 | **执行级 `CapabilityMask` 已在桥路由做 deny-by-default 过滤**（2026-10-08，A5 第一阶段；缺省保守档 A）；设备能力门禁仍独立：`PermissionCenter` 是唯一权限入口，读取异常诚实降级 `DEGRADED`（可用性未知即受限），绝不伪造 `GRANTED`。**残余**：来源分级未接（四档都还是 `UNKNOWN`），且掩码不拦 Node 内建 `fs`/`http` |
+| T5 | **未授权能力被调用**（脚本绕过能力授予） | 桥面 | **执行级 `CapabilityMask` 已在桥路由做 deny-by-default 过滤**（2026-10-08，A5 第一阶段；缺省保守档 A）；设备能力门禁仍独立：`PermissionCenter` 是唯一权限入口，读取异常诚实降级 `DEGRADED`（可用性未知即受限），绝不伪造 `GRANTED`。**残余**：来源分级经裁定不做（第 45 项），且掩码不拦 Node 内建 `fs`/`http` |
 | T6 | **脚本失控/僵死/赖活**（死循环、OOM、宿主与引擎状态分裂） | 引擎进程 | `EngineWatchdog` 按心跳/RSS/CPU 采样 + drift 连段裁决（`KillCause.DRIFT`）+ 执行期限（`KillCause.TIMEOUT`）；心跳 payload.runId 必须匹配认证连接，不能替其他执行刷新；看门狗只问不记账 |
 | T7 | **安装期互踩/打爆磁盘/恶意 git 依赖/无限挂起** | 安装会话 | per-project 锁 + 全局互斥、free ≥500MB 预检、项目 512MB 配额（80% 黄 / 100% 拦）、`git:` 依赖入口即拒 `ERR_NOT_SUPPORTED`、安装 TTL（`InstallCoordinator`） |
 | T8 | **审批票重放**（拿旧版本 APPROVED 装新版本） | 审批账本 | 审批键绑 `pkg + versionHash`，宿主从盘上重算版本哈希，命中 `APPROVED` 才放行（`ApprovalLedger` + `requestApprove`/`requestGateApproval`）；未获批自请入队 `PENDING` |
@@ -59,11 +59,10 @@
    访问内存或操纵其他进程；清 token 环境变量不构成抗冒用保证。**执行级 `CapabilityMask` 与跨脚本控制
    授权已于 2026-10-08 落地**（桥路由 deny-by-default 过滤 + `CrossScriptAuthorizer`，见 §11.1），
    但它**不改变这一条**：掩码只约束**桥面命名空间**，不拦 Node 内建 `fs`/`http`，同 UID 代码仍可
-   绕开桥直连进程与文件。**仍未实现的是来源分级**（`TrustTierResolver` 是注入缝，本批生产唯一可达档
-   是 `UNKNOWN`，取保守档 A）。
+   绕开桥直连进程与文件。**来源分级经裁定不做**（第 45 项）：它不改变这一条，也不产生防护 —— 见 §11.1 事实 3。
 2. **安装脚本「一个都没真跑过」**：T0 全程 `--ignore-scripts`，回执 `scripts-skipped`。等 spawn 桥（P1）落地后，「用户选择跑」这条才有落点；**在那之前，安装脚本永不执行**（§18 第 7 项 + §10.5-3）。
 3. **`lock.sig` 是本地信任锚，不是第三方可验证**：签名用应用私钥，只能证明「这份 lock 是本机签过的」，不构成跨设备/跨用户的可验证来源证明。应用私钥丢失 = 显式「安全降级」失败（`LockSigner` KDoc 口径），不静默放行。**密钥从哪来：目前没有实现** —— 接缝是 `LockSigner.KeyProvider`（2026-10-01 起形状为 `secretKey(): SecretKey`：给句柄而非字节，Keystore 密钥材料不出库也接得上；实现落点已拍板住 `:app` 装配层），设计口径是 Android Keystore 包装的应用密钥，但全仓没有任何 `KeyProvider` 实现、生产装配传 `null`（见第 8 条），所以「生产走 Keystore」这句现在是**目标形态**，不是现状。
-4. **MediaProjection 高清会话未落**：授权 UI + FGS 那一档还没接，P0 由同一 a11y 帧源连续截图承接（§9.2）。这不是安全缺口，是能力边界，列此只为避免被当成「高清会话已有门禁」。
+4. ~~**MediaProjection 高清会话未落**：授权 UI + FGS 那一档还没接，P0 由同一 a11y 帧源连续截图承接（§9.2）。这不是安全缺口，是能力边界，列此只为避免被当成「高清会话已有门禁」。~~ **已落地（2026-10-08，批 75）**：授权 UI（`AndroidScreenConsentBroker` + `ScreenConsentRequests`）与 `foregroundServiceType="mediaProjection"` 的前台服务（`ProjectionForegroundService`）都已接，`MediaProjectionSource` 经 `PlatformWiring.screenHandler` 进 `screen` 命名空间。**仍缺的是录屏**（`MediaRecorder` 全仓零引用），那是另一条腿，不在本批。
 5. **16KB 页机不测（2026-10-06 拍板），SELinux enforcing 上下文与 targetSdk 提取策略仍待真机**：16KB 的装载风险由构建期机械门禁承接（§16：`LOAD align >= 0x4000` **且** `p_offset ≡ p_vaddr (mod align)`，三个产物 + `libc++_shared.so` 逐件在 CI 里断言，且该门禁被负向证伪过）—— **已知不测的残余面是「内核真按 16KB 基页映射时的装载行为」**，口径与理由见 `design-decisions.md` 第 34 项。后两项（SELinux enforcing、targetSdk 提取策略）同样只在特定设备上测得到，仍待真机（design-status「仍未验」块）。
 6. **审批卡呈现层未排期**：审批账本与桥面拉取口已通（`drainApprovals` → `NpmBridgeHandler` → JS `pumpApprovals`），但能力中心的审批卡不在当前排期内，期间审批只能靠脚本侧拉取。
 7. **无上报时限承诺**：私密上报渠道已于 2026-10-01 开通（GitHub Security → Report a vulnerability，见根 [`SECURITY.md`](../../SECURITY.md)）—— 缺的从此不是渠道，而是**响应 / 修复时限**：单人维护的开发期项目不作承诺。（原条目「上报流程缺失」同日改写。）
