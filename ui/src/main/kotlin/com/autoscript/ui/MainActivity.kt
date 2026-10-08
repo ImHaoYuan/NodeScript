@@ -9,6 +9,7 @@ import android.graphics.Color
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.PixelCopy
 import android.view.View
 import androidx.activity.ComponentActivity
@@ -54,6 +55,11 @@ import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
+import com.autoscript.domain.automation.ScreenConsentHolder
+import com.autoscript.domain.automation.ScreenConsentHost
+import com.autoscript.domain.automation.ScreenConsentInbox
+import com.autoscript.domain.automation.ScreenConsentOutcome
+import com.autoscript.domain.automation.ScreenConsentRequests
 import com.autoscript.domain.editor.SyntaxHighlighter
 import com.autoscript.domain.host.HostSummary
 import com.autoscript.domain.host.TaskRegistration
@@ -91,8 +97,10 @@ import com.autoscript.ui.theme.LightColors
 import com.autoscript.ui.theme.Theme
 import com.autoscript.ui.theme.ThemeMode
 import com.autoscript.ui.theme.isDark
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
@@ -153,6 +161,131 @@ class MainActivity : ComponentActivity() {
     /** 每次 `onResume` +1：驱动 [LaunchedEffect] 重问系统（回前台即重读）。 */
     private var resumeTick: Int by mutableStateOf(0)
 
+    /**
+     * 投屏同意对话框的承载（§9.2）：`createScreenCaptureIntent()` 的结果只能经
+     * `onActivityResult` 回来，而 `:app` 装配层没有 Activity —— 于是由本 Activity 实现
+     * `:domain` 的 `ScreenConsentHost` 并在 [onCreate] 注册进 `ScreenConsentHolder`。
+     *
+     * **为什么挂在这一层**（而不是 `:app`）：`:app` 不许 import `:ui`（§6），
+     * 而"问用户要一次投屏同意"这件事必须有界面 —— 缝在 `:domain`，实现只能落在这里。
+     *
+     * **结果一律经 [ScreenConsentRequests.deliver]**（不直接 complete 某个 deferred）：
+     * 轮次判断、等待者撤销、迟到结果丢弃都在那个状态机里（可 JVM 测），这里只做搬运。
+     */
+    private val consentLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val outcome = ScreenConsentOutcome(launched = true, resultCode = result.resultCode, payload = result.data)
+        // **先入待领口再交付等待者**：能力中心那次（没有等待者）的结果就是经这里留下的；
+        // 两份都拿到也没关系 —— 待领口被下一次 `startCapturer` 领走时，设备层的
+        // 「一次同意只换一条会话」会挡住第二份。
+        ScreenConsentInbox.shared.offer(outcome)
+        // 没有人等这一次（能力中心「去授权」）→ 上面那一行就是它的全部去处。
+        ScreenConsentRequests.shared.deliver(outcome)
+    }
+
+    /** 脚本那次征询的轮次状态机（同一时刻至多一轮 —— 投屏是进程级单会话，见 §9.2）。 */
+    private val consentRequests = ScreenConsentRequests.shared
+
+    /** 主线程投递（`startActivityForResult` 只能在主线程调；征询可能从桥的 IO 协程进来）。 */
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    /** 宿主实现：`ScreenConsentHolder` 只认这个形状（`:app` 那边读它）。 */
+    private val consentHost = object : ScreenConsentHost {
+        override suspend fun requestScreenConsent(): ScreenConsentOutcome =
+            when (val outcome = awaitConsent()) {
+                is ScreenConsentRequests.Outcome.Result -> outcome.outcome
+                is ScreenConsentRequests.Outcome.Unavailable -> {
+                    Log.w(TAG, "投屏同意征询没能走完：${outcome.reason}")
+                    ScreenConsentOutcome.notLaunched(outcome.reason)
+                }
+            }
+
+        override fun requestScreenConsentDetached(): Boolean {
+            // 已有一轮在跑（对话框开着 / 结果还没回来）→ 不再弹第二个对话框。
+            // 如实回 false（`GrantResult.Denied`：这次没能把用户送到授权页），
+            // **不**编一个"已经拉起来了"。
+            //
+            // 调用方是 `:app` 的 `AndroidSettingsPageOpener.open(page): Boolean`（**同步**接口），
+            // 而 `startActivityForResult` 只能在主线程调。两条路要分开走：
+            // - **已经在主线程**：直接跑，不 post 也不等 —— post 出去的回调要等本方法让出
+            //   主线程才可能执行，在这里阻塞就是**自己等自己**（必然超时，还白占主线程）；
+            // - **在别的线程**（桥的 IO 协程）：post 到主线程跑，然后**有界**等一下
+            //   "post 出去并跑完"（毫秒级），**不是**等对话框结果（那是用户的事）。
+            if (Looper.myLooper() === Looper.getMainLooper()) return beginAndLaunch(null)
+            val begun = CompletableDeferred<Boolean>()
+            mainHandler.post { begun.complete(beginAndLaunch(null)) }
+            return runBlocking { withTimeoutOrNull(DETACHED_LAUNCH_TIMEOUT_MILLIS) { begun.await() } ?: false }
+        }
+    }
+
+    /**
+     * 等一次系统同意（脚本那次征询）。轮次登记在本协程里做（**不是**在主线程的 launch 里）：
+     * 等待者与轮次必须是同一份 —— 分开登记的话，取消发生在"登记完、还没 post 出去"之间时
+     * 就撤不掉自己的等待者。
+     */
+    private suspend fun awaitConsent(): ScreenConsentRequests.Outcome =
+        suspendCancellableCoroutine { cont ->
+            val ticket = consentRequests.begin { cont.resume(it) }
+            if (ticket == null) {
+                // 已有一轮在跑：如实回"这次没能把用户送到授权页"，**不排队也不覆盖**
+                // （覆盖会把前一个等待者永远挂住）。
+                cont.resume(ScreenConsentRequests.Outcome.Unavailable("已有一次投屏授权征询在进行（对话框开着或结果未回）"))
+                return@suspendCancellableCoroutine
+            }
+            // 等待者被撤销（脚本崩了/连接断了）：**只撤等待者，不清在途** ——
+            // 对话框还在用户眼前，它的结果迟早要回来，在那之前不放新请求进来
+            // （这正是"旧结果不会被错配给下一次执行"的机制）。
+            cont.invokeOnCancellation { consentRequests.revoke(ticket) }
+            // 切主线程拉起：本方法可能从桥的 IO 协程调进来（脚本 `startCapturer`），
+            // 而 `startActivityForResult` 只能在主线程调。
+            mainHandler.post { launchConsentDialog(ticket) }
+        }
+
+    /** 能力中心「去授权」那条：登记一轮（没有等待者，结果落待领口）再拉起。 */
+    private fun beginAndLaunch(onResult: ((ScreenConsentRequests.Outcome) -> Unit)?): Boolean {
+        val ticket = consentRequests.begin(onResult) ?: return false
+        return launchConsentDialog(ticket)
+    }
+
+    /**
+     * 拉起系统投屏同意对话框（**只许在主线程调**）。
+     *
+     * @return false = 拉不起（没有 MediaProjectionManager / 系统抛）—— 如实上报，
+     *   不编一个假的成功。**每一条失败路径都结束本轮**：否则它会一直占着"在途"，
+     *   此后所有征询都被挡掉。
+     */
+    // `ActivityResultLauncher.launch` 的失败面由系统给：没有投屏界面的 ROM 抛
+    // `ActivityNotFoundException`，界面正在销毁时抛 `IllegalStateException`，
+    // 部分厂商 ROM 还有自定义的 `RuntimeException` 子类。**这里一条都不能漏** ——
+    // 漏掉的那条会让本轮征询永远停在"在途"，此后所有投屏请求都被 busy 挡掉。
+    // 同文件既有基线条目对同一类调用是同一个口径。
+    @Suppress("TooGenericExceptionCaught")
+    private fun launchConsentDialog(ticket: ScreenConsentRequests.Ticket): Boolean {
+        val manager = getSystemService(android.media.projection.MediaProjectionManager::class.java)
+        if (manager == null) {
+            consentRequests.fail(ticket, "本机没有 MediaProjectionManager（系统投屏服务缺失）")
+            return false
+        }
+        return try {
+            consentLauncher.launch(manager.createScreenCaptureIntent())
+            true
+        } catch (e: Exception) {
+            // 系统没有这个界面 / Activity 已销毁：如实结束这一轮，不留下悬挂的等待者。
+            consentRequests.fail(ticket, "系统投屏授权界面拉不起来（${e.javaClass.simpleName}）")
+            false
+        }
+    }
+
+    override fun onDestroy() {
+        // 注销：没有存活界面就没人能问用户 —— `:app` 那边据此如实拒绝开会话（不假装问过了）。
+        if (ScreenConsentHolder.host === consentHost) ScreenConsentHolder.host = null
+        // 界面没了：叫醒还挂着的等待者（如实回"没能问用户"），清在途轮次。
+        // **不把任何东西留进待领口** —— 销毁不是授权。
+        consentRequests.abandon()
+        super.onDestroy()
+    }
+
     @OptIn(ExperimentalFoundationApi::class) // LocalBringIntoViewSpec 在 foundation 1.7 仍是实验 API
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -164,6 +297,10 @@ class MainActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT),
         )
+        // 投屏同意对话框只能由 Activity 拉起 —— 在这里把宿主交给 `:domain` 的邮箱，
+        // `:app` 装配层（没有 Activity）经它征询用户（§9.2）。注册早于任何脚本请求：
+        // onCreate 在首帧之前跑完，而会话只可能在脚本执行后开。
+        ScreenConsentHolder.host = consentHost
         homeState = HomeState.read(hostSummary())
         setContent {
             val scope = rememberCoroutineScope()
@@ -652,6 +789,17 @@ class MainActivity : ComponentActivity() {
     private companion object {
         /** 控制台单批上限：够一屏翻阅，拉满时 `pageFull` 提示续拉。 */
         const val CONSOLE_PAGE = 256
+
+        /** 日志 tag（投屏同意征询那几条）。 */
+        const val TAG = "MainActivity"
+
+        /**
+         * 「去授权」那条同步接口等主线程 post 的上限（见 [ScreenConsentHost.requestScreenConsentDetached]）。
+         *
+         * 只覆盖"把 launch 投到主线程并跑完"这一步，正常是毫秒级；主线程被长任务占住时
+         * 宁可如实回 false（这次没能把用户送到授权页），也不把调用方无限期挂住。
+         */
+        const val DETACHED_LAUNCH_TIMEOUT_MILLIS = 2_000L
     }
 }
 

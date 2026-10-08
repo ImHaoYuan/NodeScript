@@ -10,6 +10,7 @@ import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
 import android.accessibilityservice.AccessibilityServiceInfo
 import com.autoscript.appservice.permissioncenter.SystemStateReader
+import com.autoscript.domain.automation.MediaProjectionSessionState
 import com.autoscript.domain.permission.Capability
 import com.autoscript.domain.permission.CapabilityState
 import kotlinx.coroutines.Dispatchers
@@ -213,5 +214,36 @@ class AndroidCapabilityProbes(context: Context) : CapabilityProbes {
 
     private companion object {
         const val ROOT_PROBE_TIMEOUT_MILLIS = 1_500L
+    }
+}
+
+/**
+ * 带投屏探针的三态读缝（§9.2）：与 [AndroidSystemStateReader] **同一个映射表**，
+ * 只是 `SCREEN_CAPTURE` 那一行的判据来自设备层的真实会话态。
+ *
+ * 为什么不把探针并进 [CapabilityProbes]：那张缝的其余八项都是**系统查询**
+ * （Settings/Manager/ProcessBuilder），而投屏会话态是**本进程自己的对象状态** ——
+ * 混在一起会让"探针"这个名字同时指两种东西，也会让 [AndroidCapabilityProbes]
+ * 不得不持有一个会话实例（它现在是无状态的）。
+ *
+ * 不接投屏（[projection] 回 `IDLE`）时结论与旧表**逐字一致**（DEGRADED）——
+ * 所以没有投屏通道的装配不需要另一条分支。
+ */
+class AndroidScreenStateReader(
+    private val probes: CapabilityProbes,
+    private val projection: () -> MediaProjectionSessionState,
+) : SystemStateReader {
+
+    override suspend fun readSystemState(ability: Capability): CapabilityState {
+        if (ability != Capability.SCREEN_CAPTURE) {
+            return AndroidSystemStateReader(probes).readSystemState(ability)
+        }
+        // GRANTED 的定义就是"会话已激活"（§9.5）：`IDLE`/`STOPPED` 都是 DEGRADED ——
+        // "还没问过用户"与"系统刚收回"都不等于被拒，两者都还能再申请一次。
+        return if (projection() == MediaProjectionSessionState.ACTIVE) {
+            CapabilityState.GRANTED
+        } else {
+            CapabilityState.DEGRADED
+        }
     }
 }

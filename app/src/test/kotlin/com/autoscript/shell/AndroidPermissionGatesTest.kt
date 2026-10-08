@@ -29,24 +29,32 @@ class AndroidPermissionGatesTest {
 
     @Test
     fun `跳转规格锁字面量：页到action与extra配列`() {
-        val access = AndroidGrantLauncher.specFor(GrantPage.ACCESSIBILITY, Build.VERSION_CODES.S)
+        val access = AndroidGrantLauncher.specFor(GrantPage.ACCESSIBILITY, Build.VERSION_CODES.S)!!
         assertEquals(Settings.ACTION_ACCESSIBILITY_SETTINGS, access.action)
 
-        val overlay = AndroidGrantLauncher.specFor(GrantPage.OVERLAY, Build.VERSION_CODES.S)
+        val overlay = AndroidGrantLauncher.specFor(GrantPage.OVERLAY, Build.VERSION_CODES.S)!!
         assertEquals(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, overlay.action)
         assertTrue(overlay.withPackageData, "overlay 页需 data=package: 定位本应用")
 
-        val notif = AndroidGrantLauncher.specFor(GrantPage.NOTIFICATIONS, Build.VERSION_CODES.S)
+        val notif = AndroidGrantLauncher.specFor(GrantPage.NOTIFICATIONS, Build.VERSION_CODES.S)!!
         assertEquals(Settings.ACTION_APP_NOTIFICATION_SETTINGS, notif.action)
         assertTrue(notif.withAppPackageExtra, "通知页需 EXTRA_APP_PACKAGE 定位本应用")
 
-        // 无专用授权页的三项经 pageFor 落到同一详情页（不伪造"一点就授权"的假页）
-        for (ability in listOf(Capability.SCREEN_CAPTURE, Capability.ROOT, Capability.ADB_INPUT)) {
+        // 无专用设置页的两项经 pageFor 落到同一详情页（不伪造"一点就授权"的假页）
+        for (ability in listOf(Capability.ROOT, Capability.ADB_INPUT)) {
             assertEquals(GrantPage.APP_DETAILS, AndroidGrantLauncher.pageFor(ability), "$ability 无专页")
         }
         val details = AndroidGrantLauncher.specFor(GrantPage.APP_DETAILS, Build.VERSION_CODES.S)
-        assertEquals(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, details.action)
+        assertEquals(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, details!!.action)
         assertTrue(details.withPackageData, "详情页需 data=package:")
+
+        // 批 79：屏幕采集去投屏同意对话框 —— **不是设置页**，specFor 如实回 null
+        // （编一个相近 action 的表现是"跳过去了但和投屏无关"，比拉不起来更难查）。
+        assertEquals(GrantPage.PROJECTION_CONSENT, AndroidGrantLauncher.pageFor(Capability.SCREEN_CAPTURE))
+        assertEquals(
+            null, AndroidGrantLauncher.specFor(GrantPage.PROJECTION_CONSENT, Build.VERSION_CODES.S),
+            "投屏同意没有对应的 Settings.ACTION_*",
+        )
 
         // 两类通知能力同页
         assertEquals(
@@ -57,7 +65,7 @@ class AndroidPermissionGatesTest {
 
         // 批 48：使用情况访问是常驻列表页，action 字面量锁死、且**不带**定位本应用的
         // extra —— 这页系统不认识 package:/EXTRA，配了也是白配（会被忽略）。
-        val usage = AndroidGrantLauncher.specFor(GrantPage.USAGE_ACCESS, Build.VERSION_CODES.S)
+        val usage = AndroidGrantLauncher.specFor(GrantPage.USAGE_ACCESS, Build.VERSION_CODES.S)!!
         assertEquals(Settings.ACTION_USAGE_ACCESS_SETTINGS, usage.action)
         assertTrue(
             !usage.withPackageData && !usage.withAppPackageExtra,
@@ -67,11 +75,11 @@ class AndroidPermissionGatesTest {
 
     @Test
     fun `精确闹钟页高低版本分岔`() {
-        val high = AndroidGrantLauncher.specFor(GrantPage.EXACT_ALARM, Build.VERSION_CODES.S)
+        val high = AndroidGrantLauncher.specFor(GrantPage.EXACT_ALARM, Build.VERSION_CODES.S)!!
         assertEquals(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, high.action)
         assertTrue(high.withPackageData, "精确闹钟页需 data=package: 定位本应用")
 
-        val low = AndroidGrantLauncher.specFor(GrantPage.EXACT_ALARM, Build.VERSION_CODES.R)
+        val low = AndroidGrantLauncher.specFor(GrantPage.EXACT_ALARM, Build.VERSION_CODES.R)!!
         assertEquals(
             Settings.ACTION_APPLICATION_DETAILS_SETTINGS, low.action,
             "S 以下没有精确闹钟权限项：回退应用详情，不跳一个不存在的 action",

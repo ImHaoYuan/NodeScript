@@ -15,6 +15,12 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- 投屏前台类型（§9.2）：API 34+ 起 `getMediaProjection` 要求本进程**已有**一条
+         `mediaProjection` 类型的前台服务在跑，缺这条权限时 `startForeground(..., TYPE_MEDIA_PROJECTION)`
+         抛 SecurityException —— 表现是"用户同意了投屏，脚本却一条帧都拿不到"。
+         与 specialUse 那条并列声明：两条服务、两种类型、两套生命周期（见
+         ProjectionForegroundService 的 KDoc 说明为什么不合并）。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
 
     <!-- 通知（§9.4 dialogs prompt/choose 的通知通道 + §9.5 三态门禁）：
          targetSdk 35 下**必须声明**才可能被授予 —— 不声明时 `areNotificationsEnabled()`
@@ -106,5 +112,20 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="automation" />
         </service>
+
+        <!--
+          投屏前台服务（§9.2 MediaProjection 会话）：**独立于保活服务**。
+          - foregroundServiceType 必须是 mediaProjection：API 34+ 要求开投影之前已有该类型的
+            前台服务在跑；
+          - **拆成两条服务的理由是生命周期独立，不是"类型互斥"**：FGS type 是**位掩码**，
+            一个服务同时声明/启动多种类型（`TYPE_MEDIA_PROJECTION or TYPE_SPECIAL_USE`）是合法的。
+            真正的理由：投屏随一次用户同意在跑、保活随脚本运行在跑 —— 并成一个服务后，
+            用户从通知栏停掉投屏会顺手把正在跑脚本的保活前台也撤掉；
+          - exported=false：只由本应用 startForegroundService 拉起。
+        -->
+        <service
+            android:name="com.autoscript.shell.ProjectionForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
     </application>
 </manifest>

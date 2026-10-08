@@ -2,6 +2,7 @@ package com.autoscript.bridge
 
 import com.autoscript.domain.automation.InputChannelSession
 import com.autoscript.domain.bridge.BridgeResponse
+import com.autoscript.domain.bridge.ConnectionResourceRegistry
 import com.autoscript.domain.core.AutojsException
 import com.autoscript.domain.core.ErrorCode
 import java.io.BufferedInputStream
@@ -9,6 +10,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.net.ServerSocket
 import java.net.Socket
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -45,6 +47,16 @@ class NewlineFrameServer(
     private val lock = Any()
     private val connections = HashSet<Connection>()
     private val listeners = HashSet<ServerSocket>()
+
+    /**
+     * 每条连接的**资源收口口**（§7.5 × §9.2）：连接撤销/结束时按 `connectionId` 取出来
+     * 跑一遍。**键是连接号而不是 `Connection` 对象**：撤销回调在连接对象之外也要能调
+     * （`abortConnection(id)` —— 宿主/看门狗那条路），对象键在那条路上取不到。
+     *
+     * 条目在 `dispose` 里摘掉：连接结束后再撤销一次是无害的 no-op，不留悬挂引用。
+     */
+    private val connectionResources = ConcurrentHashMap<Long, () -> Unit>()
+
     private var closed = false
     private val inFlight = Semaphore(maxInFlight)
     private val handshakes = Semaphore(32)
@@ -89,6 +101,20 @@ class NewlineFrameServer(
         return job
     }
 
+    /**
+     * **按连接号撤销**（§9.2 会话资源）：脚本崩了 / 被看门狗掐了 / 执行被停 —— 那条连接上
+     * 开出来的进程级资源（投屏会话）必须收掉，而不是等 socket 自己断。
+     *
+     * 与 `Connection.abort()` 的关系：那条路是"从连接内部"撤（IO 出错、宿主 close），
+     * 本方法是"从连接外部"撤（持有连接号的调用方）—— 两者落到同一个幂等收口口上，
+     * 谁先到都收一次，后到的不会重复跑。
+     *
+     * 幂等、不抛；连接已经结束（或从来没存在过）是无害的 no-op。
+     */
+    fun abortConnection(connectionId: Long) {
+        connectionResources[connectionId]?.invoke()
+    }
+
     private inner class Connection(private val closer: () -> Unit) {
         val id = connectionIds.getAndIncrement()
         private val stateLock = Any()
@@ -98,12 +124,26 @@ class NewlineFrameServer(
         private var drainTimer: Job? = null
         private var binding: RunIdentityRegistry.Binding? = null
 
+        /**
+         * 这条连接的资源收口（§7.5 × §9.2）：注册表**在 serve 一开始就建**（早于认证），
+         * 于是"认证成功后开的资源"与"连接撤销"之间没有窗口 —— 撤销先发生的话，
+         * 之后登记的收口回调会**立刻兑现**（见 `ConnectionResourceRegistry.register`）。
+         */
+        private val resources = ConnectionResourceRegistry { onProtocolError("连接资源收口失败") }
+
+        init {
+            // 接入端把这条连接的注册表挂到 connectionId 上（撤销时按它收口）。
+            connectionResources[id] = { resources.revokeAll() }
+        }
+
         fun abort() {
             val job = synchronized(stateLock) { ended = true; owner }
             // 先取消投递域，再立即关闭 IO（取消回调也会 close）；绝不等 job 完成才关 fd。
             // 若先 close 再 cancel，EOF 可抢先唤醒 reader，把硬撤销误走成自然排空。
             job?.cancel()
             runCatching { closer() }
+            // 连接级资源收口（§9.2）：脚本崩了/被掐了，它开的投屏会话不能继续挂着。
+            resources.revokeAll()
             router.closeConnection(id)
         }
 
@@ -136,6 +176,10 @@ class NewlineFrameServer(
                     return
                 }
                 binding = bound
+                // 把这条连接的资源收口口交给身份（§9.2）：此后这条连接上开的进程级资源
+                // 都能在 abort/dispose 时被统一收掉。装填点必须在这里 —— 早于任何业务请求，
+                // 晚于认证（撤销先发生时 `register` 会立刻兑现，不会漏）。
+                bound.caller.resources = resources
                 writeBlocking(output, BridgeHandshake.ack())
                 timeout.cancel()
                 handshakes.release()
@@ -208,8 +252,14 @@ class NewlineFrameServer(
         fun dispose() {
             synchronized(stateLock) { ended = true; drainTimer?.cancel() }
             binding?.close()
+            // 连接级资源收口（§9.2）：正常结束也要收（EOF 退出、对端关连接）。
+            // 与 abort 的调用幂等 —— 注册表按"恰好一次"兑现。
+            resources.revokeAll()
             router.closeConnection(id)
             runCatching { closer() }
+            // 连接结束了：摘掉按号索引的收口口（此后 `abortConnection(id)` 是无害的 no-op，
+            // 也不再留一个悬挂引用）。资源本身在上一行已经收过。
+            connectionResources.remove(id)
             synchronized(lock) { connections.remove(this) }
         }
     }
@@ -239,6 +289,8 @@ class NewlineFrameServer(
             connections.toList()
         }
         identities.close()
+        // `abort()` 里面已经带了连接级资源收口（§9.2），这里不重复一遍 ——
+        // 两条路都落到同一个幂等收口口上，多调一次只是白跑一趟空表。
         all.forEach { it.abort() }
         scope.cancel()
     }

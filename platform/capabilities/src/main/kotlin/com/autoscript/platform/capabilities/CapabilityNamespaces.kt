@@ -3,12 +3,14 @@ package com.autoscript.platform.capabilities
 import com.autoscript.domain.automation.FrameSource
 import com.autoscript.domain.automation.InputProvider
 import com.autoscript.domain.automation.InputChannel
+import com.autoscript.domain.automation.ScreenConsentBroker
 import com.autoscript.domain.automation.UiActionExecutor
 import com.autoscript.domain.automation.UiEventStream
 import com.autoscript.domain.automation.UiNodeTreeReader
 import com.autoscript.domain.bridge.NamespaceHandler
 import com.autoscript.platform.capabilities.a11y.A11yNamespaceHandler
 import com.autoscript.platform.capabilities.dialogs.DialogsNamespaceHandler
+import com.autoscript.platform.capabilities.screen.MediaProjectionCapturer
 import com.autoscript.platform.capabilities.screen.ScreenNamespaceHandler
 import com.autoscript.domain.system.DialogHost
 import com.autoscript.platform.capabilities.screen.AndroidFrameProducer
@@ -58,10 +60,18 @@ object CapabilityNamespaces {
      * `screen` 命名空间（§9.2 / §8.8）：截图帧源，分类错误而非黑图。
      * 参数即 `FrameSource` SPI 实现 —— 本函数从不构造内存帧源（构造是调用方的事），
      * 单测传内存 producer、生产传 `ScreenshotSource(AndroidFrameProducer())`
-     * （PlatformWiring 落点；MediaProjection 升级 = 换 producer）。
+     * （PlatformWiring 落点）。
+     *
+     * **两条帧源各自独立**：[projection] 是投屏会话面（§9.2 MediaProjection），
+     * 缺省 null = 未接线 → `startCapturer` 走 [FrameSource.openSession] 的兼容路径。
+     * 装配期分岔、运行期不互相顶替（见 [ScreenNamespaceHandler] KDoc）。
      */
-    fun screen(source: FrameSource): NamespaceHandler {
-        return ScreenNamespaceHandler(source)
+    fun screen(
+        source: FrameSource,
+        projection: MediaProjectionCapturer? = null,
+        consent: ScreenConsentBroker? = null,
+    ): NamespaceHandler {
+        return ScreenNamespaceHandler(source, projection, consent)
     }
 
     /** `dialogs` 命名空间：`prompt`/`choose`（§9.4 BAL 安全路径）。 */

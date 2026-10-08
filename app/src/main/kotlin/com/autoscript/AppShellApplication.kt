@@ -10,6 +10,7 @@ import com.autoscript.domain.host.ShellSummary
 import com.autoscript.domain.host.TaskCenterSnapshot
 import com.autoscript.domain.host.TaskLogSnapshot
 import com.autoscript.domain.host.TaskRegistration
+import com.autoscript.domain.automation.MediaProjectionSessionState
 import com.autoscript.domain.permission.Capability
 import com.autoscript.domain.host.ScriptFilesSnapshot
 import com.autoscript.domain.scripts.ScriptPaths
@@ -45,6 +46,7 @@ import com.autoscript.shell.ScriptFileOps
 import com.autoscript.shell.ScriptFilesRead
 import com.autoscript.shell.ScreenGateAndroid
 import com.autoscript.shell.ScreenInteractive
+import com.autoscript.shell.ScreenOffGuard
 import com.autoscript.shell.launchGuaranteed
 import java.io.File
 import java.nio.file.Path
@@ -135,6 +137,17 @@ class AppShellApplication : Application(), HostSummary {
     private var gates: com.autoscript.appservice.permissioncenter.PermissionCenter? = null
 
     /**
+     * 投屏会话的设备面（§9.2）：由装配期的 [PlatformWiring.of] 构造并在此留一份引用。
+     *
+     * 为什么根包要持有它：两处需要它 —— ① 能力中心 `SCREEN_CAPTURE` 的三态判据
+     * （[permissionCenter] 的投影态 lambda）；② 熄屏裁剪（[screenGateOf] 的 `onScreenOff`，
+     * §8.8：keyguard 下投屏给黑帧，必须收掉）。两处都不该自己去 new 一个设备实例
+     * （那会是第二个会话账，见 `MediaProjectionSessions` 的进程级单会话约定）。
+     */
+    @Volatile
+    private var projectionSessions: com.autoscript.domain.automation.MediaProjectionSessions? = null
+
+    /**
      * 保活编排（§8.7）：唤醒锁账本 + specialUse FGS 的起停/续期。
      *
      * **进程级单例式**（懒建 + 缓存）：它持有的唤醒锁是进程级单资源，
@@ -196,6 +209,9 @@ class AppShellApplication : Application(), HostSummary {
                 .also { alarmPort = it }
             val appContext = applicationContext
             val wiring = PlatformWiring.of(appContext)
+            // §9.2 投屏会话的设备面：留一份引用供能力中心三态与熄屏裁剪用
+            // （同一个实例，不另开第二个会话账 —— 见字段 KDoc）。
+            projectionSessions = wiring.projectionSessions
             // §7.5 生产桥监听：**bind 必须赶在 assemble 前** —— FixedEnginePool.init 是
             // eager 构造引擎（engineFactory 闭包在 init 时就捕获 hostSocketName）。
             // 绑定失败 = 离线降级：不注入名 → spawn 无 socket env → main.cpp stderr 提示，
@@ -365,7 +381,15 @@ class AppShellApplication : Application(), HostSummary {
      * 建一次复用即可。能力中心 UI / 脚本桥的门禁查询都走这里 —— 不再各自拼查询。
      */
     fun permissionCenter(): com.autoscript.appservice.permissioncenter.PermissionCenter =
-        gates ?: AndroidPermissionGates.permissionCenterOf(applicationContext).also { gates = it }
+        gates ?: AndroidPermissionGates
+            .permissionCenterOf(
+                applicationContext,
+                // §9.2/§9.5：`SCREEN_CAPTURE` 的三态判据 = 投屏会话是否**已激活**。
+                // 装配还没跑到（projectionSessions 仍 null）时回 IDLE → DEGRADED，
+                // 与"还没问过用户"同一个答案（不冒充已授权）。
+                projectionState = { projectionSessions?.state ?: MediaProjectionSessionState.IDLE },
+            )
+            .also { gates = it }
 
     /**
      * 保活编排（§8.7）：懒建一次并**立即尝试起保活**。
@@ -389,6 +413,18 @@ class AppShellApplication : Application(), HostSummary {
             }
             keeper.also { keepAlive = it }
         }
+    }
+
+    /**
+     * 熄屏裁剪（§8.8）：收掉当前投屏会话。**同步返回、不抛**（`ScreenOffGuard` 的形态）。
+     *
+     * 设备层的收口本身是同步的（release/close/stopForeground 都不挂起），
+     * 所以这里直接调、不用协程 —— 但 `ScreenGate.pass(SCREEN_OFF)` 在投递前会 await 它，
+     * 因此"收干净了才投递"这条顺序是有保证的（不是发出去不管）。
+     */
+    internal fun dropProjectionSession() {
+        runCatching { projectionSessions?.closeCurrent() }
+            .onFailure { HostLog.w(TAG, "熄屏收投屏会话失败（已吞：收口失败不该拦住 SCREEN_OFF 投递）", it) }
     }
 
     /**
@@ -656,6 +692,10 @@ class AppShellApplication : Application(), HostSummary {
      * 不留悬挂 ticker；② 让"谁负责停"在代码里有落点（而不是靠"系统会回收"这条隐含假设）。
      */
     override fun onTerminate() {
+        // §9.2 投屏会话随进程收口（真机上 onTerminate 不被调用 —— 与保活同一条诚实边界：
+        // 系统回收进程时 VirtualDisplay/投影由系统一并回收，这里的收口是给测试/模拟器
+        // 与"有着落"用的）。
+        dropProjectionSession()
         keepAlive?.stop()
         keepAlive = null
         ForegroundHost.keeper = null
@@ -682,6 +722,10 @@ class AppShellApplication : Application(), HostSummary {
             AndroidScreenGate.of(
                 app.applicationContext,
                 deferWakeLock = ScreenInteractive { app.foregroundKeeper().lockHeld() },
+                // §8.8 熄屏裁剪：keyguard 下投屏给的是**黑帧**（系统合成面拿不到画面），
+                // 留着会话只会让脚本拿到黑图还以为成功 —— 熄屏即收掉投屏会话。
+                // 幂等（没有会话时是 no-op），且**不抛**（`closeCurrent` 内部逐项 runCatching）。
+                onScreenOff = ScreenOffGuard { app.dropProjectionSession() },
             )
 
         /** 闹钟广播 action（与 manifest 里静态注册的是同一条，常量出处 [AlarmFires]）。 */
