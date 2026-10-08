@@ -50,6 +50,7 @@ import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import org.junit.jupiter.api.io.TempDir
 import com.autoscript.platform.system.SystemNamespaces
 import com.autoscript.platform.capabilities.CapabilityNamespaces
 import com.autoscript.platform.capabilities.a11y.AndroidUiTree
@@ -77,6 +78,19 @@ import com.autoscript.domain.editor.SyntaxHighlighter
  * 不给"测试走另一套装配"留门。
  */
 class PlatformWiringTest {
+
+    /**
+     * 装配期真会落盘的落点根（录屏腿的 `filesDir`）。
+     *
+     * **不能用 `/data/app/files` 这类真设备路径**：`MediaProjectionRecorder` 会
+     * `Files.createDirectories` 真的去建目录，本机跑（root）会**在宿主根上建出 `/data`**，
+     * CI 的 runner 上非 root 建不动 → `ERR_IO` → 用例红。两种结果都不是这条用例要测的东西
+     * （它测的是**接线**：装配层把 `projection as? ScreenRecordingSessions` 接成
+     * `MediaProjectionRecorder`、落点按 `ScriptPaths` 算），所以落点根必须是可写的临时目录。
+     * 断言用 `dir` 现算期望值，不写死任何绝对路径。
+     */
+    @TempDir
+    lateinit var dir: Path
 
     // ── 假 SPI（最小可辨识实现：记录调用 + 回固定值）────────────────────
 
@@ -527,11 +541,10 @@ class PlatformWiringTest {
             // `MediaProjectionRecorder`，落点按 `filesDir` 算 —— 这条验的是**接线**，
             // 不是编码器（真 MediaRecorder 未在本机验证，无设备）。
             val recSessions = FakeRecordingSessions()
-            val recFiles = Path.of("/data/app/files")
             val recWiring = PlatformWiring.inject(
                 bundle(),
                 projection = recSessions,
-                filesDir = recFiles,
+                filesDir = dir,
                 // 投屏同意口只在 projection 非 null 时才接（见 screenHandler）；
                 // 生产链上它是 AndroidScreenConsentBroker，JVM 上给一个恒同意的替身。
                 consent = com.autoscript.domain.automation.ScreenConsentBroker {
@@ -546,12 +559,16 @@ class PlatformWiringTest {
                     s.router.dispatch(BridgeRequest(1, "screen", "startRecording", null, 5_000))
                 }
                 val payload = okPayload(started)
+                // 期望值**现算**（与生产同一条 `ScriptPaths`），不写死绝对路径：
+                // 写死的那版在 CI 上因建不动 /data 而红，测的却不是接线。
+                val expectedDir = com.autoscript.domain.scripts.ScriptPaths
+                    .recordingsDir(dir, "demo")
                 assertTrue(
-                    payload.contains("/data/app/files/scripts/demo/.recordings/") && payload.contains(".mp4"),
+                    payload.contains("$expectedDir/") && payload.contains(".mp4"),
                     "落点必须按 ScriptPaths.recordingsDir(filesDir, projectId) 算，实际 $payload",
                 )
                 assertEquals(
-                    "/data/app/files/scripts/demo/.recordings",
+                    expectedDir.toAbsolutePath().toString(),
                     Path.of(recSessions.startCalls.single().second).parent.toString(),
                     "设备层拿到的必须是语义层算好的那条路径",
                 )
