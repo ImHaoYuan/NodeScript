@@ -2,6 +2,8 @@
  * 截图与图像命名空间（docs §9.2 / §8.8 / §12.2）：
  * screen.capture() → FrameSource 句柄（分类错误而非黑图：锁屏/FLAG_SECURE/
  * 无窗口/节流一律抛 ERR_*，见 Kotlin ScreenPolicy）；
+ * screen.startRecording() → ScreenRecorder（§9.2 **录屏腿**：同一条 MediaProjection
+ * 会话账，输出是 mp4 文件而不是帧；产物落宿主私有目录，`path` 开时就回）；
  * images.decode/matchTemplate/findImage/findColor/release 走 native 分析面（§12.2 第七条独立缝，
  * Kotlin 对偶 `ImagesNamespaceHandler` + `:domain` `ImageAnalyzer`）。
  *
@@ -93,6 +95,76 @@ export const screen = {
     }, { ttl: opts.timeout ?? 10_000 })) as { session: { refId: number; generation: number } }
     return wrapCapturer(raw.session)
   },
+
+  /**
+   * 会话式**录屏**（`ScreenRecorder`，§9.2 录屏腿）：与 [screen.startCapturer] 并列，
+   * 同一条 MediaProjection 会话账、同一个 mediaProjection 前台类型，**输出是视频文件**。
+   *
+   * **一次性同意**：与 `startCapturer` 走同一个系统同意口，API 34+ 每会话重新征询 ——
+   * 用户取消 → `ERR_CAPTURE_DENIED`（**不重试、不静默改用截屏**：那会让脚本以为在录屏，
+   * 实际拿到的是节流帧）。**用户撤销 / 系统停止时不自动续期**：`stop()` 回的
+   * `completed=false` 与后续调用如实报错，由脚本决定要不要重新征询。
+   *
+   * 落点由宿主按本次执行的项目号算（`files/scripts/<projectId>/.recordings/`），
+   * **开的时候就回** `path`：脚本崩了之后文件仍会被框架收口 finalize，路径若只在
+   * `stop()` 回，那条产物就成了"存在但没人知道在哪"。
+   */
+  async startRecording(opts: { width?: number; height?: number; timeout?: number } = {}): Promise<ScreenRecorder> {
+    const raw = (await runtimeBridge.invoke('screen', 'startRecording', {
+      width: opts.width,
+      height: opts.height,
+    }, { ttl: opts.timeout ?? 15_000 })) as {
+      session: { refId: number; generation: number }
+      path: string
+    }
+    return wrapRecorder(raw.session, raw.path)
+  },
+}
+
+/** 录屏收口结果（§9.2）：设备层真值，不猜。 */
+export interface RecordingResult {
+  /** 录制文件绝对路径（与 `ScreenRecorder.path` 同一条）。 */
+  readonly path: string
+  /** 落盘真值（字节）；`0` = 没有文件（或还没落盘）。 */
+  readonly sizeBytes: number
+  /**
+   * `MediaRecorder.stop()` 是否成功 —— 成功 = 文件是**完整可播**的 mp4。
+   * `false` 的典型来路：一帧都没录到就停（系统抛异常，mp4 的 moov box 写不出来）。
+   * **拿它决定要不要把这条产物交给下游**：0 字节的 mp4 看起来像文件，播起来才知道不是。
+   */
+  readonly completed: boolean
+  /** `completed=false` 时的原因原文；成功时为 `undefined`（不是 null）。 */
+  readonly detail?: string
+}
+
+/**
+ * 会话式录屏器（§9.2；open/stop 生命周期，产物是文件）。
+ *
+ * `stop()` **幂等**：第二次回同一次结果 —— 会话被框架收口（熄屏裁剪 / 连接撤销）之后
+ * 仍然答得出路径/大小/完整性，而不是 `ERR_NOT_FOUND`（与 [ScreenCapturer] 刻意不同：
+ * 帧死了就是死了，而文件是产物）。
+ */
+export interface ScreenRecorder {
+  readonly session: { refId: number; generation: number }
+  /** 录制文件绝对路径（**开的时候就定下了**，`stop()` 之前也答得出）。 */
+  readonly path: string
+  stop(opts?: { timeout?: number }): Promise<RecordingResult>
+}
+
+function wrapRecorder(
+  session: { refId: number; generation: number },
+  path: string,
+): ScreenRecorder {
+  return {
+    session,
+    path,
+    stop: async (opts = {}) => {
+      const raw = (await runtimeBridge.invoke('screen', 'stopRecording', { session }, {
+        ttl: opts.timeout ?? 10_000,
+      })) as RecordingResult
+      return raw
+    },
+  }
 }
 
 /** 会话式截图器（§9.2；open/close 生命周期，帧经 nextFrame 拉取）。 */

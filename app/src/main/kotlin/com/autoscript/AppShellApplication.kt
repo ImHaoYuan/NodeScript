@@ -429,15 +429,26 @@ class AppShellApplication : Application(), HostSummary {
     }
 
     /**
-     * 熄屏裁剪（§8.8）：收掉当前投屏会话。**同步返回、不抛**（`ScreenOffGuard` 的形态）。
+     * 熄屏裁剪（§8.8）：收掉当前投屏会话 —— **取帧腿与录屏腿都收**。**同步返回、不抛**
+     * （`ScreenOffGuard` 的形态）。
      *
      * 设备层的收口本身是同步的（release/close/stopForeground 都不挂起），
      * 所以这里直接调、不用协程 —— 但 `ScreenGate.pass(SCREEN_OFF)` 在投递前会 await 它，
      * 因此"收干净了才投递"这条顺序是有保证的（不是发出去不管）。
+     *
+     * **为什么两条腿都要收**：两条腿共用同一个 `current` 槽（一台设备同时只有一条
+     * `MediaProjection` 会话），但收口语义不同 —— 取帧腿 `closeCurrent()` 丢帧即可，
+     * 录屏腿**必须 finalize**（`MediaRecorder.stop()` 是唯一把 mp4 的 moov box 写完的动作，
+     * 少了它文件就是坏的）。漏掉后者正是本任务要防的那类故障（"录完了但 mp4 没 finalize"）。
+     * 两个调用都幂等，没有对应会话时都是无害的 no-op；顺序无关（同一时刻只可能有一条）。
      */
     internal fun dropProjectionSession() {
-        runCatching { projectionSessions?.closeCurrent() }
-            .onFailure { HostLog.w(TAG, "熄屏收投屏会话失败（已吞：收口失败不该拦住 SCREEN_OFF 投递）", it) }
+        runCatching {
+            // 录屏腿先收：它的产物要落盘，取帧腿只是丢帧。
+            (projectionSessions as? com.autoscript.domain.automation.ScreenRecordingSessions)
+                ?.closeCurrentRecording()
+            projectionSessions?.closeCurrent()
+        }.onFailure { HostLog.w(TAG, "熄屏收投屏会话失败（已吞：收口失败不该拦住 SCREEN_OFF 投递）", it) }
     }
 
     /**

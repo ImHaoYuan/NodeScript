@@ -271,6 +271,105 @@ class PlatformWiringTest {
         override suspend fun status(): EngineStatus = EngineStatus.STOPPED
     }
 
+    /**
+     * 录屏腿的设备面替身（§9.2）：只记"被要求做了什么"。
+     *
+     * 真 `MediaRecorder`/`VirtualDisplay` 是 Android 运行时（JVM 上复现不了），所以这里
+     * 验的是**装配**这一层：`screen.startRecording` 有没有被接到真语义层
+     * （`MediaProjectionRecorder`）上、落点有没有按 `filesDir` 算。编码器那条路
+     * **未在本机验证**（无设备），见 `AndroidMediaProjectionSessions` 的录屏分支。
+     */
+    private class FakeRecordingSessions :
+        com.autoscript.domain.automation.ScreenRecordingSessions,
+        com.autoscript.domain.automation.MediaProjectionSessions {
+
+        // ── 取帧腿（本替身不测那条；装配层按 `projection as? ScreenRecordingSessions` 分岔，
+        // 真设备层是**同一个对象**实现两张方法表，替身照这个形状来）──
+        override val state: com.autoscript.domain.automation.MediaProjectionSessionState
+            get() = com.autoscript.domain.automation.MediaProjectionSessionState.IDLE
+
+        override val owner: com.autoscript.domain.automation.MediaProjectionSessionOwner? get() = null
+
+        override suspend fun open(
+            consent: com.autoscript.domain.automation.ScreenConsentToken?,
+            owner: com.autoscript.domain.automation.MediaProjectionSessionOwner,
+        ): com.autoscript.domain.automation.LeasedMediaProjectionSession = error("本测试不走取帧腿")
+
+        override fun close(lease: com.autoscript.domain.automation.SessionResourceLease): Boolean = false
+        override fun closeCurrent(): Boolean = false
+        override fun revokeOwner(owner: com.autoscript.domain.automation.MediaProjectionSessionOwner): Boolean = false
+
+        val startCalls = mutableListOf<Pair<com.autoscript.domain.automation.MediaProjectionSessionOwner, String>>()
+        var current: FakeRec? = null
+            private set
+
+        override val recordingState: com.autoscript.domain.automation.MediaProjectionSessionState
+            get() = if (current == null) {
+                com.autoscript.domain.automation.MediaProjectionSessionState.IDLE
+            } else {
+                com.autoscript.domain.automation.MediaProjectionSessionState.ACTIVE
+            }
+
+        override val recordingOwner: com.autoscript.domain.automation.MediaProjectionSessionOwner?
+            get() = current?.owner
+
+        override suspend fun startRecording(
+            consent: com.autoscript.domain.automation.ScreenConsentToken?,
+            owner: com.autoscript.domain.automation.MediaProjectionSessionOwner,
+            spec: com.autoscript.domain.automation.ScreenRecordingSpec,
+        ): com.autoscript.domain.automation.LeasedScreenRecording {
+            startCalls += owner to spec.path
+            val s = FakeRec(owner, spec.path)
+            current = s
+            return s
+        }
+
+        override fun closeCurrentRecording(): Boolean {
+            val c = current ?: return false
+            c.finalizeIt()
+            current = null
+            return true
+        }
+
+        override fun revokeRecordingOwner(owner: com.autoscript.domain.automation.MediaProjectionSessionOwner): Boolean {
+            val c = current ?: return false
+            if (c.owner != owner) return false
+            c.finalizeIt()
+            current = null
+            return true
+        }
+    }
+
+    private class FakeRec(
+        override val owner: com.autoscript.domain.automation.MediaProjectionSessionOwner,
+        override val path: String,
+    ) : com.autoscript.domain.automation.LeasedScreenRecording {
+        override val lease: com.autoscript.domain.automation.SessionResourceLease =
+            object : com.autoscript.domain.automation.SessionResourceLease {
+                override val leaseId: Long = 1L
+                override val owner: com.autoscript.domain.automation.MediaProjectionSessionOwner = this@FakeRec.owner
+            }
+        private var outcome: com.autoscript.domain.automation.RecordingOutcome? = null
+
+        override val state: com.autoscript.domain.automation.MediaProjectionSessionState
+            get() = if (outcome == null) {
+                com.autoscript.domain.automation.MediaProjectionSessionState.ACTIVE
+            } else {
+                com.autoscript.domain.automation.MediaProjectionSessionState.STOPPED
+            }
+
+        override fun stop(): com.autoscript.domain.automation.RecordingOutcome {
+            finalizeIt()
+            return outcome!!
+        }
+
+        fun finalizeIt() {
+            if (outcome == null) {
+                outcome = com.autoscript.domain.automation.RecordingOutcome(path, 1_024L, completed = true)
+            }
+        }
+    }
+
     private fun shell(wiring: PlatformWiring.Injection): AppShell = AppShell.assemble(
         engineFactory = { id, _ -> FakeEngine(id) },
         schedulerProvider = object : SchedulerProvider {
@@ -423,6 +522,40 @@ class PlatformWiringTest {
                 errCode(dispatch(shell(PlatformWiring.inject(bundle())), "images", "decode", "{}")),
                 "生产 inject 不喂分析器 → 独立缝缺省同样不伪造（真实现等 :bridge:image，P1）",
             )
+
+            // screen 录屏腿（§9.2）：装配层把 `projection as? ScreenRecordingSessions` 接成
+            // `MediaProjectionRecorder`，落点按 `filesDir` 算 —— 这条验的是**接线**，
+            // 不是编码器（真 MediaRecorder 未在本机验证，无设备）。
+            val recSessions = FakeRecordingSessions()
+            val recFiles = Path.of("/data/app/files")
+            val recWiring = PlatformWiring.inject(
+                bundle(),
+                projection = recSessions,
+                filesDir = recFiles,
+                // 投屏同意口只在 projection 非 null 时才接（见 screenHandler）；
+                // 生产链上它是 AndroidScreenConsentBroker，JVM 上给一个恒同意的替身。
+                consent = com.autoscript.domain.automation.ScreenConsentBroker {
+                    object : com.autoscript.domain.automation.ScreenConsentToken {}
+                },
+            )
+            shell(recWiring).use { s ->
+                val ctx = com.autoscript.domain.bridge.AuthenticatedRunContext(
+                    EngineId(0), 7L, 1L, com.autoscript.domain.permission.CapabilityMask.ALL,
+                ).also { it.projectId = "demo" }
+                val started = kotlinx.coroutines.withContext(ctx) {
+                    s.router.dispatch(BridgeRequest(1, "screen", "startRecording", null, 5_000))
+                }
+                val payload = okPayload(started)
+                assertTrue(
+                    payload.contains("/data/app/files/scripts/demo/.recordings/") && payload.contains(".mp4"),
+                    "落点必须按 ScriptPaths.recordingsDir(filesDir, projectId) 算，实际 $payload",
+                )
+                assertEquals(
+                    "/data/app/files/scripts/demo/.recordings",
+                    Path.of(recSessions.startCalls.single().second).parent.toString(),
+                    "设备层拿到的必须是语义层算好的那条路径",
+                )
+            }
 
             // zip：compress 参数原样到假归档器
             assertInstanceOf(
