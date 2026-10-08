@@ -113,7 +113,7 @@ socket 名 = 桥监听 `BridgeSocketListener` **绑定成功才注入**（失败
 不另开第二份）→ `:ui` 的 `ConsoleScreen`（页签之三：行累积 + 丢包/拉满/在途两端对照，见 §7.3 末）；`AppShellKitTest` 覆盖自装配全路径（目录落位、门禁拒绝不投递、
 启动失败不写孤儿档案、真起引擎落终态记录、落盘遗留经 `bootRecover` 重投）。a11y 的 Android 真实现注入**已接**（`PlatformWiring` → `a11yHandler`：`AndroidUiTree`/
 `AndroidGestureInput` 经 `SystemA11yBridge`，服务未连如实 `ERR_SERVICE_DISABLED`），screen 的生产注入**同批已接**（`PlatformWiring.screenHandler`，§9.2 a11y 截图路径）；dialogs 的生产注入**也已接**（`PlatformWiring.of` 构造 `AndroidDialogHost`，
-AUTO 选路/强制降级拒绝/通知回调回投 + TTL 双清）；仍待的是 MediaProjection 高清会话（授权 UI + FGS，换 producer 即插）；脚本内容侧装配期补部署已接上（`ScriptDeployRecovery` 在 `AppShellKit.assemble` 时跑一次：
+AUTO 选路/强制降级拒绝/通知回调回投 + TTL 双清）；~~仍待的是 MediaProjection 高清会话（授权 UI + FGS，换 producer 即插）~~ **已接（2026-10-08，批 75）**（`ProjectionForegroundService` + `AndroidScreenConsentBroker`，换 producer 即插）；脚本内容侧装配期补部署已接上（`ScriptDeployRecovery` 在 `AppShellKit.assemble` 时跑一次：
 只补缺不覆盖、空清单如实为空、失败不投毒，`deployReport`/`deployFailures()` 随壳暴露给能力中心）；§8.4 已闭环（判据/采样/`EngineWatchdog` 调度/`HeartbeatLedger` 心跳打点；
 pid 归属表仍归在途账不另建），Kotlin spawn 半边已送 pid 与心跳、桥监听 `BridgeSocketListener` 已接、addon JS 消费面 `attachNative` 已接（见 §8.4 末），设备面只剩真机联调（facade dist 随包 + 打包入口 attach 接线与 jniLibs 三件套/
 addon 落位 2026-09-24 均已落 —— assets 构建拷贝 → `BridgeDistDeploy` 落位 `filesDir/node_modules/auto` → env 注入 → kBootstrap `attachNative`，全链有 `BridgeDistPackagingEntryTest`；
@@ -141,7 +141,7 @@ addon 落位 2026-09-24 均已落 —— assets 构建拷贝 → `BridgeDistDepl
 `of(context)` = `SystemSpis.of` → `inject` → `systemHandlers` + `datastore`/`zip`/`settings`/`notification`/`clipboard`/`sensors`/`images` 七独立缝，`AppShellApplication.installWithFiles` 调用；
 拓扑靠 §6 **包级例外二**放行——仅 shell 装配包可依赖 `:platform:capabilities`/`:platform:system`，`ArchitectureTest`「平台实现只许装配包碰」+ `ModuleGraphTest` 允许集量化执行）。
 **`a11y` 的生产调用已接**（无障碍服务本体 `AutoScriptAccessibilityService` + `PlatformWiring` 注入，服务未连桥如实 `ERR_SERVICE_DISABLED`）；**`screen` 也已接**（§9.2 a11y 截图路径，
-与 a11y 同底），MediaProjection 高清会话是后续升级（换 producer 即插），不再是接线缺口。**`images` 桥面与 native 真实现均已接，P1 桥消费方五算子也已于 2026-09-29 全开**（`toGrayscale`/
+与 a11y 同底），~~MediaProjection 高清会话是后续升级（换 producer 即插），不再是接线缺口~~ **该升级已于 2026-10-08（批 75）落地**（`MediaProjectionSource` 经同一条缝接入；**录屏仍缺**）。**`images` 桥面与 native 真实现均已接，P1 桥消费方五算子也已于 2026-09-29 全开**（`toGrayscale`/
 `crop`/`resize`/`rotate` 产新帧 + `findFeature` 回模板中心；宿主机语义门禁 **422 例**附上（2026-10-01 复核；该日 D7 拆 TU 前后逐例同值，见 §9.2 末），真机红测待补）—— §12.2 第七条独立缝：`:domain` `ImageAnalyzer` + `ImagesNamespaceHandler` + `images.ts` 双侧契约齐全；
 native 侧 `:bridge:image` 的 `libopencv.so`（OpenCV 4.14 静态链接）+ `:platform:system` 的 `NativeImageAnalyzer`/`JniOps` 也齐了，`PlatformWiring.of` 构造（so 缺位 → null → 桥回 `ERR_NOT_IMPLEMENTED`，
 看不见像素的内存分析器只能假装匹配成功，那比没有更坏 —— 这条防线保留）。**`auto.npm` 的 wire 形状漂移已修**（与 `a11y.waitFor` 同一类事故：JS facade 读一个宿主从不发的键，
@@ -388,8 +388,7 @@ jniLibs 三件套与 addon 落位、facade dist 随包与打包入口 attach 接
   已除）；配置 `canTakeScreenshot=true` 进 res/xml（AOSP 明示缺它两法都不可用）；失败码分类映射 SECURE→`ERR_BLACK_FRAME`、系统限频→`ERR_INVALID_PARAM`、通道失效/
   无效窗口→`ERR_SERVICE_DISABLED`、内部错→`ERR_IO`；API34+ `takeScreenshotOfWindow`、API30–33 `takeScreenshot`、API<30 如实 `ERR_NOT_IMPLEMENTED`）。生产装配 `PlatformWiring.screenHandler = CapabilityNamespaces.screen(ScreenshotSource(AndroidFrameProducer(), analyzer = images))`（**同一个** analyzer 也喂给 `images` 缝，
   §18-8(b) 一张表；analyzer 为 null 即退回本地帧表） → `AppShellApplication.installWithFiles`，与 a11y 同底（`SystemA11yBridge`，服务未连 = `ERR_SERVICE_DISABLED`）；锁屏/无窗口由 `ScreenPolicy` 预检分类，
-  安全窗由回调码兜底（无障碍读不到窗口 FLAG_SECURE，`secureForeground` 预检位恒 false —— 不伪造预检能力，分类结果殊途同归）。**仍缺**：MediaProjection 高清会话（授权 UI + FGS + ImageReader→libopencv.so）—
-  —换 producer 即插，语义面不动；P0 会话由同一 a11y 帧源连续截图承接。
+  安全窗由回调码兜底（无障碍读不到窗口 FLAG_SECURE，`secureForeground` 预检位恒 false —— 不伪造预检能力，分类结果殊途同归）。~~**仍缺**：MediaProjection 高清会话（授权 UI + FGS + ImageReader→libopencv.so）——换 producer 即插，语义面不动；P0 会话由同一 a11y 帧源连续截图承接。~~ **已落地（2026-10-08，批 75）**：授权 UI + `mediaProjection` 型 FGS + ImageReader→共享 `ImageAnalyzer.ingest` 都已接；**录屏仍缺**。
 
 - **图像分析面（`images`，§12.2 第七条独立缝）已通桥面、已通 native 实现（2026-09-25）**：`:domain` `ImageAnalyzer` SPI（**十方法**：`decode`/`matchTemplate`/`findImage`/
   `findColor`/`release`/`toGrayscale`/`crop`/`resize`/`rotate`/`findFeature` —— 后五个 2026-09-29 随 P1 桥消费方开通；`ImageFrame{HandleRef,width,height}` / `ImageMatch{x,y,width,height,confidence}` /

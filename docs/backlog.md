@@ -1,5 +1,34 @@
 # AutoScript 待办池（backlog）
 
+## 2026-10-08 追记（批 76：A5 来源分级裁定不做 + 批 75 遗留缺口入池）
+
+- **A5 的「来源分级」经裁定不做（2026-10-08，用户裁定）**：`TrustTier` 四档与
+  `TrustTierResolver` 注入缝保留作**记账词汇**，但不接真来源元数据、不产生授权差异 ——
+  理由是**它不产生防护**（同 UID 同权下脚本可绕开桥直接读写宿主私有目录，掩码收窄只挡老实脚本）。
+  口径与理由见 [`design-decisions.md`](design-decisions.md) 第 45 项，契约侧同步见
+  [`design/11-security.md`](design/11-security.md)。**故下方 A5 行的「来源分级仍未实现」不再作待办。**
+- **A5 的掩码与跨脚本授权已落地（2026-10-08，批 75）**：执行级 `CapabilityMask` 在桥路由做
+  deny-by-default 过滤、`CrossScriptAuthorizer` 管跨脚本、命名通道按执行私有。**下方 A5 原始行
+  （写于只有身份、没有掩码时）逐字保留作历史，当前状态以本条为准。**
+- **A10 两半均已落地**：① 脚本 console 归属（批 74）、② 宿主事件进收集器（批 72）。
+  **下方 A10 原始行逐字保留作历史，当前状态以本条为准。**
+- **D1 已拍板维持独立模块**（2026-10-01，口径见 [`design-decisions.md`](design-decisions.md) 第 17 项），
+  按本文件纪律「裁定不做了从这里移走」——**下方 D1 行不再是待办**，逐字保留作历史。
+- **新增 A11（S，未排期）：`abortConnection` 对「子进程继承桥 socket fd」形态未覆盖**。
+  批 75 的会话资源收口（`ConnectionResourceRegistry`）挂在**桥连接**上：abort / dispose / EOF
+  三条路都会 `revokeAll()`。但脚本若把桥 socket fd 继承给子进程，脚本主进程死了
+  **不产生 EOF**，连接不会 abort，挂在这条连接上的进程级资源（投屏会话等）就没有撤销点。
+  要补需要 `runId → connectionId` 映射（宿主现在只知道 runId，连接号在接入端）。
+  证据：`bridge/java/.../NewlineFrameServer.kt`（abort/dispose/EOF 三条撤销路）、
+  `domain/.../bridge/AuthenticatedRunContext.kt`（`resources` 挂在连接上下文上）。
+  批 75 如实登记未做，**未夹带半成品**（见 [`log/2026-10-08.md`](log/2026-10-08.md) 与
+  [`design-decisions.md`](design-decisions.md) 第 44 项末条）。**属新范围，未排期。**
+- **新增 A12（M，未排期）：MediaProjection 录屏未落**。批 75 只做了**会话式截屏**那条腿
+  （`MediaProjectionSource` → ImageReader → 共享 `ImageAnalyzer.ingest`）；
+  **录屏（`MediaRecorder`）全仓零引用**。契约 §9.2 的 FrameSource 结构里「会话式实时截屏/录屏」
+  是两件事，本条登记后者。证据：全仓 grep `MediaRecorder` 零命中；
+  [`design/09-capabilities.md`](design/09-capabilities.md) §9.2、[`design/13-roadmap-budget.md`](design/13-roadmap-budget.md) P1 段。
+
 ## 2026-10-07 追记（批 74：A10① / A5）
 
 - **A10① 已落地**：脚本 console 从认证连接取得 engineRunId，不再恒写 0；系统日志只含宿主行，
@@ -47,10 +76,10 @@
 | # | 事项 | 证据位置 | 核实 | 影响 | 成本 |
 |---|---|---|---|---|---|
 | ~~**A2b**~~ | 已完成（2026-10-02）—— 叙事见 [`docs/log/2026-10-02.md`](log/2026-10-02.md) （本条不留历史；口径变更另见 [`design-decisions.md`](design-decisions.md)） | — | ✅ | — | — |
-| **A5** | 桥没有 per-engine 身份：同一 uid 的任何进程可达全部命名空间（`SECURITY.md` 已承认是有意为之），无法按脚本/按 run 归因与审计 | 同 uid 门禁 `BridgeSocketListener.kt:117-122` 是 fail-closed；abstract 名可预测 | ✅ 2026-10-01 | 以后想加 per-run 权限会很贵 | M（协议变更，须与 `main.cpp` + JS bootstrap 同批） |
+| ~~**A5**~~ | **已完成（2026-10-08，批 74 身份 + 批 75 掩码；来源分级经裁定不做，批 76）** —— 原文逐字保留：桥没有 per-engine 身份：同一 uid 的任何进程可达全部命名空间（`SECURITY.md` 已承认是有意为之），无法按脚本/按 run 归因与审计 | 同 uid 门禁 `BridgeSocketListener.kt:117-122` 是 fail-closed；abstract 名可预测 | ✅ 2026-10-01 | 以后想加 per-run 权限会很贵 | —（已结项） |
 | ~~**A6**~~ | 已完成（2026-10-02）—— 叙事见 [`docs/log/2026-10-02.md`](log/2026-10-02.md) （本条不留历史；口径变更另见 [`design-decisions.md`](design-decisions.md)） | — | ✅ | — | — |
 | ~~**A8**~~ | 已完成（2026-10-07，批 64）—— 裁定**选项①**（文案改成与三态无关，显示逻辑不动），八条逐条重写；**同批顺带修正 `ADB_INPUT` 三态**（恒 `DEGRADED` → 真探测 `GRANTED`/`DENIED`，理由见流水）。叙事见 [`docs/log/2026-10-07.md`](log/2026-10-07.md)，口径见 [`design-decisions.md`](design-decisions.md) 第 38 项（本条不留历史） | — | ✅ | — | — |
-| **A10** | **脚本的 console 输出没有执行归属；宿主事件不进控制台收集器** —— 日志管理页的「系统日志」因此不是「纯宿主事件」：脚本输出也落在里面（`runId` 恒 0），宿主装配/调度/闹钟/恢复/保活事件却**看不到**（走 `android.util.Log`）。页面顶部已如实说明，本条是补齐它。两半各自独立：① 给桥请求帧补 `runId`（`BridgeRequest` 现无 `side` 字段，`ConsoleCollector` 类注释写的「`side.runId` 透传」是愿望不是现状）→ 脚本输出归到各次执行，系统日志自然只剩 `runId=0` 的宿主行；② 把宿主事件镜像进收集器（`runId=0`）→ 系统日志才真有宿主事件可看 | `bridge/java/.../ConsoleCollector.kt`（`handle` 恒 `append(runId = 0L, …)`；生产代码无任何 `append(runId, …)` 调用方）；`domain/.../bridge/BridgeContract.kt`（`BridgeRequest` 五个字段无归属）；`app/.../AppShellApplication.kt` 等处的 `Log.i/w/e`；`ui/.../LogManagementScreen.kt`（顶部说明） | ✅ 2026-10-07 | 日志管理页的「系统日志」名不副实，只靠一段说明撑着；①与 A5 同一次协议变更 | ① M（须与 `main.cpp` + JS bootstrap 同批）；② S |
+| ~~**A10**~~ | **已完成（①2026-10-07 批 74、②2026-10-07 批 72）** —— 原文逐字保留：**脚本的 console 输出没有执行归属；宿主事件不进控制台收集器** —— 日志管理页的「系统日志」因此不是「纯宿主事件」：脚本输出也落在里面（`runId` 恒 0），宿主装配/调度/闹钟/恢复/保活事件却**看不到**（走 `android.util.Log`）。页面顶部已如实说明，本条是补齐它。两半各自独立：① 给桥请求帧补 `runId`（`BridgeRequest` 现无 `side` 字段，`ConsoleCollector` 类注释写的「`side.runId` 透传」是愿望不是现状）→ 脚本输出归到各次执行，系统日志自然只剩 `runId=0` 的宿主行；② 把宿主事件镜像进收集器（`runId=0`）→ 系统日志才真有宿主事件可看 | `bridge/java/.../ConsoleCollector.kt`（`handle` 恒 `append(runId = 0L, …)`；生产代码无任何 `append(runId, …)` 调用方）；`domain/.../bridge/BridgeContract.kt`（`BridgeRequest` 五个字段无归属）；`app/.../AppShellApplication.kt` 等处的 `Log.i/w/e`；`ui/.../LogManagementScreen.kt`（顶部说明） | ✅ 2026-10-07 | 日志管理页的「系统日志」名不副实，只靠一段说明撑着；①与 A5 同一次协议变更 | —（已结项） |
 
 
 ## B. CI / 工程基建
@@ -86,7 +115,7 @@
 
 | # | 事项 | 核实 | 成本 |
 |---|---|---|---|
-| **D1** | `:app-service:permission-center` main 只有 **91 行**（独立模块偏重）：并回现有模块，或明确"等它长"。**核实结论（2026-10-01 批 7，建议维持现状）**：① 它是 §9.5「**所有模块不得直接查 Settings，一律经此门禁**」那条例外的物理载体 —— 合并进别的 `:app-service:*` 会让"门禁住 `:platform:*`（archUnit 黑名单含 `com.autoscript.appservice..`，见 `SystemNamespaces` KDoc）"这条边界变成模块内的口头约定，独立模块正是把这条边界变成 Gradle 依赖图上的**硬边**（`ModuleGraphTest` 允许集里 `permission-center → :domain` 单点）；② 它只依赖 `:domain`，并回任何 `:app-service:*` 都要给那个模块新增一个上游依赖或开子包 —— 代价大于收益；③ 待它长：门禁面已经在长（`Capability` 九项），**建议拍板维持独立**，记入 `design-decisions` | ✅ 2026-10-01（依赖图与 archUnit 边界已逐条核对） | S（仅决策记录） |
+| ~~**D1**~~ | **已拍板维持独立模块（2026-10-01，`design-decisions.md` 第 17 项）** —— 原文逐字保留：`:app-service:permission-center` main 只有 **91 行**（独立模块偏重）：并回现有模块，或明确"等它长"。**核实结论（2026-10-01 批 7，建议维持现状）**：① 它是 §9.5「**所有模块不得直接查 Settings，一律经此门禁**」那条例外的物理载体 —— 合并进别的 `:app-service:*` 会让"门禁住 `:platform:*`（archUnit 黑名单含 `com.autoscript.appservice..`，见 `SystemNamespaces` KDoc）"这条边界变成模块内的口头约定，独立模块正是把这条边界变成 Gradle 依赖图上的**硬边**（`ModuleGraphTest` 允许集里 `permission-center → :domain` 单点）；② 它只依赖 `:domain`，并回任何 `:app-service:*` 都要给那个模块新增一个上游依赖或开子包 —— 代价大于收益；③ 待它长：门禁面已经在长（`Capability` 九项），**建议拍板维持独立**，记入 `design-decisions` | ✅ 2026-10-01（依赖图与 archUnit 边界已逐条核对） | —（已裁定） |
 | **D6** | 命名不一致。**已做（2026-10-01 批 7）**：`@autojs/*` 这个 npm scope 在**描述面**的 9 处（`06-modules`/`07-bridge` ×3/`09-capabilities`/`12-js-api`/`CLAUDE.md`/`bridge/js/package.json`/`ImageAnalyzer.kt`）全部改成事实侧口径 —— 脚本侧导入名 `auto`（`filesDir/node_modules/auto`）与真实交付物名 `bridge_native.node`；**`AutoJsPro` 九处保留**（那是**对标产品名**，不是自己的名字）。**还剩两件**：① `.autojs` 存储目录与 `autojs-lock-v1` 签名前缀在契约正文（§10.2/§10.5）与全仓 30+ 处实现/测试里一致使用 —— 改它是**存储格式变更**（会读不出用户既有 lock 签名），须拍板并给迁移/兼容策略，不是命名顺手能改的；② **发布用的 npm scope 是否自己拥有**需你确认（`bridge/js` 标 `"private": true`、不发布，发布 scope 归属未核） | ✅ 2026-10-01（描述面 9 处已改；① 需拍板 / ② 需你确认） | S（①）/ 待你确认（②） |
 | ~~**D7**~~ | 已完成（2026-10-07，批 64）—— 复核结论：`Scheduler` 类体**无值得付的接缝**（单一内聚状态机，拆大方法要把八九个构造参数摊成 `internal`），只外迁三个顶层声明；`AppShellApplication` 读侧零重复不变式（不搬）、写侧抽一个刀口（四类 APK 资产读法 → `shell/AssetsRead.kt`，**该文件不可单测**，已如实登记）。叙事见 [`docs/log/2026-10-07.md`](log/2026-10-07.md)，口径见 [`design-decisions.md`](design-decisions.md) 第 39 项（本条不留历史） | ✅ 2026-10-07 | — |
 | ~~**D9**~~ | 已完成（2026-10-02）—— 叙事见 [`docs/log/2026-10-02.md`](log/2026-10-02.md) （本条不留历史；口径变更另见 [`design-decisions.md`](design-decisions.md)） | — | ✅ | — | — |

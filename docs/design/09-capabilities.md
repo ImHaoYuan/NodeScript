@@ -36,7 +36,7 @@ FrameSource (SPI)
 - `FLAG_SECURE` → 分类错误（§7.6），不返回黑图（让脚本可判断）。
 - **实现注记已外迁**：Kotlin/native 落地链、八个算子的逐条记账与真机实测数字，逐字见 [`design-status.md` §9.2 实现注记](../design-status.md#实现注记自各分卷外迁逐字保留)。
   留此的口径要点：`images` 十方法 SPI 走 §12.2 第七条独立缝（native 侧 OpenCV 4.14.0 静态链接）；**两缝帧表已合一**（§18 第 8 项 (b)：`screen.capture` 与 `images.decode` 的帧同号段互认，
-  「帧不通用」纪律取消，落点是 §7.4 发号侧归一）；**仍缺** MediaProjection 高清会话（换 producer 即插，语义面不动）。
+  「帧不通用」纪律取消，落点是 §7.4 发号侧归一）；~~**仍缺** MediaProjection 高清会话（换 producer 即插，语义面不动）~~ **作废（2026-10-08，批 75）：会话式截屏已落地** —— `MediaProjectionSource` 经 `PlatformWiring.screenHandler` 接入，一次性同意 + API 34+ 顺序 + 幂等释放 + 会话资源随连接终结收口；**仍缺的是录屏**（`MediaRecorder` 全仓零引用）。
 - MediaProjection **会话语义**：`capture()` 一次性授权会话（API34 每会话确认）；`reconnect` 不自动重试授权，由 PermissionCenter 引导用户重授权。
 - **两缝帧表已合一（§18 第 8 项 (b)，2026-09-26 落地）**：`screen.capture()` 出的帧与
   `images.decode` 出的帧现在**同号段、互认** —— 拿截屏帧当 `images.findImage()` 的

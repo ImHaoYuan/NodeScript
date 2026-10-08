@@ -1,5 +1,15 @@
 # AutoScript 落地状态台账
 
+> **2026-10-08 · 批 76（§11，来源分级裁定不做 + 契约面措辞清账）**：
+> **「内置 / 自写 / 第三方 / 打包」的来源分级经裁定不做** —— `TrustTier` 四档与
+> `TrustTierResolver` 注入缝保留作**记账词汇**，不接真来源元数据、不产生授权差异
+> （生产唯一可达档仍是 `UNKNOWN` 保守档 A）。理由是**它不产生防护**：同 UID 同权下
+> 脚本可绕开桥直接读写宿主私有目录，掩码收窄只挡老实脚本。**本批零生产代码改动。**
+> 同批把契约面五处仍写「MediaProjection 未落」的措辞逐处清账（§9.2 已落地，
+> **录屏仍缺**）。口径见 [`design-decisions.md`](design-decisions.md) 第 45 项，
+> 待办入池见 [`backlog.md`](backlog.md)（新增 A11 / A12）。
+> 验证与限制见 [`本日流水 · 批 76`](log/2026-10-08.md)。
+
 > **2026-10-08 · 批 75（§9.2 / §11 / §13 / §16，A5 第一阶段 + MediaProjection 会话）**：
 > **执行级 `CapabilityMask` 已接** —— 桥路由在进 handler 之前做 deny-by-default 判据，未覆盖即
 > `ERR_PERMISSION_DENIED` 且不进请求账；跨脚本控制/查询经 `CrossScriptAuthorizer`（触达他人执行要跨脚本位
@@ -53,7 +63,7 @@
 | 声明处 | 东西 | 现状 |
 |---|---|---|
 | §18 | 开放决策点 | **已全部拍板**（第 8/9 项 2026-09-25，第 1–7 项 2026-09-26，见 [`design-decisions.md`](design-decisions.md)；§18 保留作决策台账） |
-| §14 P1 | MediaProjection 高清会话 | **已落地（2026-10-08，批 75）**：一次性同意（API 34+ 每会话重新征询）+ `mediaProjection` 型 FGS + VirtualDisplay/ImageReader 会话账；帧经共享 `ImageAnalyzer.ingest` 与 a11y 截图同表同号段；会话资源随连接终结结构性收口。**不做自动续期** —— 306s 上限由该型 FGS 消除（[`design-decisions.md`](design-decisions.md) 第 44 项）。**边界**：真机行为未在本机验证（无设备）；`abortConnection` 对「子进程继承桥 socket fd」形态未覆盖 |
+| §14 P1 | MediaProjection 高清会话 | **已落地（2026-10-08，批 75）**：一次性同意（API 34+ 每会话重新征询）+ `mediaProjection` 型 FGS + VirtualDisplay/ImageReader 会话账；帧经共享 `ImageAnalyzer.ingest` 与 a11y 截图同表同号段；会话资源随连接终结结构性收口。**不做自动续期** —— 306s 上限由该型 FGS 消除（[`design-decisions.md`](design-decisions.md) 第 44 项）。**边界**：真机行为未在本机验证（无设备）；`abortConnection` 对「子进程继承桥 socket fd」形态未覆盖（入池 backlog **A11**）。**录屏（`MediaRecorder`）仍未落**（入池 backlog **A12**） |
 | §14 P1 | QuickJS `:sandbox` 进程 | 未落；模块壳 **2026-09-30 已从 settings 注释摘除**（不计入模块数），**空壳目录与 settings 注释行 2026-10-01 已一并删除**（复活 = 重建模块目录 + include 行加回 + ModuleGraphTest 登记） |
 | §14 P1 | `ui` 原生 XML UI 宿主 / `ui_web` | 未落 |
 | §9.7 | OCR（P1）/ 插件（P2） | 未落 |
@@ -82,7 +92,7 @@
 
 | 日期 | 条目 | 主题 | 文件 |
 |---|---|---|---|
-| 2026-10-08 | 1 | 批 75：执行级 `CapabilityMask` 与跨脚本授权（A5 第一阶段 —— deny-by-default 桥面判据、单一决策链杀 TOCTOU、跨脚本不得提权、命名通道按执行私有、`workManager.create` 缺接缝即全拒；缺省保守档 A）+ MediaProjection 高清会话（§14 P1 由未落转已落地：一次性同意、API 34+ 顺序、幂等释放、会话资源随连接终结收口）；同批订正 §13 风险表与 §16 兼容矩阵的 306s 措辞（不做自动续期）。两条轨并行开发、协调者会话合流（两个 merge 提交）。验收：14 任务 JVM 线 1562/0/0/0、detekt、lintDebug、assembleDebug、npm test 208/207/0/1、gen:wire 零漂移、文档链接门 477、冻结面门通过 | [`log/2026-10-08.md`](log/2026-10-08.md) |
+| 2026-10-08 | 2 | 批 76：来源分级裁定不做（四档枚举保留作记账词汇、不接元数据，零代码改动）+ 契约面「MediaProjection 未落」五处措辞清账（§9.2 截屏已落地、**录屏仍缺**）+ backlog 新增 A11/A12 与 A5/A10/D1 三行结项。批 75：执行级 `CapabilityMask` 与跨脚本授权（A5 第一阶段 —— deny-by-default 桥面判据、单一决策链杀 TOCTOU、跨脚本不得提权、命名通道按执行私有、`workManager.create` 缺接缝即全拒；缺省保守档 A）+ MediaProjection 高清会话（§14 P1 由未落转已落地：一次性同意、API 34+ 顺序、幂等释放、会话资源随连接终结收口）；同批订正 §13 风险表与 §16 兼容矩阵的 306s 措辞（不做自动续期）。两条轨并行开发、协调者会话合流（两个 merge 提交）。验收：14 任务 JVM 线 1562/0/0/0、detekt、lintDebug、assembleDebug、npm test 208/207/0/1、gen:wire 零漂移、文档链接门 477、冻结面门通过 | [`log/2026-10-08.md`](log/2026-10-08.md) |
 | 2026-10-07 | 8 | 批 73：B15 真 Node PID 测试改为 loopback 退出握手，定向连续 10 次通过；批 72：宿主日志双写与启动缓冲（A10②）+ 收集器并发游标修复；批 71：APK 体积预算 `≤ 40MB` → `≤ 150MB release`（用户裁定）+ 批 70：日志管理页 —— 系统日志（控制台 `runId==0` 行；**脚本输出今天也在其中、宿主事件不在**，见 backlog A10）+ 任务日志（`HostSummary.taskLog()` 全部项目终态历史，`RunArchive.records()`）、项目页历史入口拿掉；同 PR：B11 stderr 排水竞态、编辑器严格 UTF-8、测试替身线程安全；补记 #46 的 tree-sitter 高亮从没进过 APK（`engine-native.yml` 未喂 `TREESITTER_OUT`，选填件缺位只 warn）、NDK 版本码漂移、pager bring-into-view 抽动；批 66：冻结面门（下游 PR 不许改契约面/台账面 —— `.github/scripts/check-frozen-paths.sh` + `ci.yml` 的 `frozen-paths` job，只对 `author_association` 非 OWNER/MEMBER 的 PR 生效）+ `docs/` 收进 CODEOWNERS + `CONTRIBUTING.md`/`CLAUDE.md`/PR 模板同步；批 65：PR #44 外审 —— release 形态 R8 把 Shizuku 反射面删光（`proguard-rules.pro` 补四条 `-keep` + 订正「按字符串找类只有一处」的过期判据）+ `newProcess` 改从公开接口取（原取法落在包内可见的 `$Stub$Proxy` 上，`invoke` 恒 `IllegalAccessException`）与 `String[]` 形参不再传 `null` + `docs/` 台账被该 PR 覆盖的复原（批 58–62 插回、PR 六条重编号 64–69）；批 63：`NOTICE` 措辞核实不做（backlog A9 结项）+ 上游 12.10.6 核对抽查留档；批 64：能力引导文案改成「与三态无关」（backlog A8 结项）+ `ADB_INPUT` 三态随批 61 修正为真探测（恒 `DEGRADED` → 就绪 `GRANTED` / 不就绪 `DENIED`）+ 大文件余量收口（backlog D7 结项） | [`log/2026-10-07.md`](log/2026-10-07.md) |
 | 2026-10-06 | 20 | 批 49–69（**无 63** —— 该号被同日另一条轨用在 2026-10-07 切片里，本文件顶部那六条已改号 64–69）：设置页重写与「权限列表」子页、A7 取消语义、B9 npm 素材对账、B6/B8 质量门、B5 真形态 APK 门 + B10 ABI 收口 + SDK 基线对齐、B11 引擎 stderr 与崩溃摘要、批 55 真机引擎冒烟（直调 `libnoden.so`）、批 56 第三轮外审整改（24 条复核约半证伪；D3 链接门零链接即红 / L7 盘符检疫 / L1 许可收窄为 `GPL-2.0-only` + `NOTICE`）、批 57 冗余注释与文档去重、批 58 B12 离线 bundle 体积上限（两道闸 + 可注入测试缝）、批 59 裁定不做 16KB 页真机测试（B3/E3 的 16KB 那一半结项）、批 60 B13 `auto.zip.extract` 体积上限、批 61 输入通道三选一（`auto`/`adb`/`root` 平级 + 必须显式 + 绝不降级）与 Shizuku 引入、批 62 `ui/` 定性更正（「不是衍生」）+ 许可正文随包（`LICENSE`/`NOTICE` 进 APK）、批 64 项目页前端（FAB 按压档按形状裁 / 子钮回 48dp 图标 / 点文件进文本编辑 + 行尾「更多」/ 锁竖屏去旋转钮）、批 65 修好点文件进编辑（relPath 口径）+ 子钮改圆 + 主题切换圆形揭示、批 66 Telegram 源码入库（gitignore）+ 夜间模式配色/切换动画按 TG 对齐 + 三处 ⋮ 字重 + 编辑态收底栏与键盘 + 三处流畅度、批 67 编辑器行号槽与右下跳转钮（气泡数屏幕外行数）+ 点空白落文末 + 字距 + 夜间屏底改 #161E27 + 项目页行间分割线、批 68 文件日期改 `yy-MM-dd HH:mm`（`nowMillis` 整链拆掉）+ 夜间顶栏/菜单/底栏统一 #161E27 + 编辑器关自动换行（不折行 + 左右滚）与双指缩放（TG 那颗钮本 clone 没有，留证不改）、批 69 编辑器捏合不再每帧重排（预览走绘制期 `graphicsLayer`、松手一次提交 + `anchoredScroll` 补滚动）+ 跳转钮改直角箭头与骑边线滚轮数字 + release 形态「性能包」（R8 + 资源收缩 + debug 签名，11.5MB→1.56MB、dex 20→1、非 debuggable、带基线 profile） | [`log/2026-10-06.md`](log/2026-10-06.md) |
 | 2026-10-05 | 10 | 批 39–48：任务栏/任务中心按 TG 重做（联系人页版式 → 搜索框几何三次纠偏 → 改名 → 回执改浮层）；管理面板与设置页重写；设置页「权限」进子页 + 补第九项 `USAGE_ACCESS` | [`log/2026-10-05.md`](log/2026-10-05.md) |
