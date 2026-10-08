@@ -7,6 +7,7 @@ import com.autoscript.domain.bridge.NamespaceHandler
 import com.autoscript.domain.core.Clock
 import com.autoscript.domain.core.ErrorCode
 import com.autoscript.domain.core.SystemClock
+import com.autoscript.domain.permission.BridgeCapabilityCatalog
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.CompletableDeferred
@@ -35,8 +36,16 @@ typealias RequestHandler = com.autoscript.domain.bridge.NamespaceHandler
 /**
  * 桥路由器（docs §7.5）：
  * - 按 namespace 路由，走 TTL 注册表（去重 + 到期收割）；
+ * - **先授权后路由（A5，§11）**：按 [BridgeCapabilityCatalog] 要求本次执行的
+ *   [CapabilityMask] 覆盖该面，未覆盖/未申报命名空间一律 `ERR_PERMISSION_DENIED`，
+ *   且**不进请求账、不触达 handler**（deny-by-default）；
  * - 同步 dispatch：handler 在 TTL 内返回即回，超时 → ERR_TIMEOUT；
  * - 后台扫描线程按 [SWEEP_INTERVAL_MILLIS] 收割过期请求。
+ *
+ * **本地可信调用（无 [AuthenticatedRunContext]）不走掩码**：`:app` 装配/UI 自己的
+ * 直投（`router.dispatch`）与单测走这条路，它们的授权由「能拿到宿主对象」本身承担。
+ * 网络入口必然带身份（[NewlineFrameServer] 的 hello 认证），缺身份的面
+ * （console/engines.heartbeat）另在各自 handler 里独立拒 —— 与本层的掩码过滤是两道闸。
  */
 class BridgeRouter(
     private val registry: RequestRegistry,
@@ -59,10 +68,24 @@ class BridgeRouter(
         handlers.putIfAbsent(namespace, handler) == null
 
     suspend fun dispatch(request: BridgeRequest): BridgeResponse = coroutineScope {
+        val caller = coroutineContext[AuthenticatedRunContext]
+        // 授权先于一切：未覆盖 → 拒绝，且不注册请求、不触达 handler。
+        // 未知 namespace 在授权之后才判「未实现」——否则未授权调用方能用
+        // ERR_NOT_IMPLEMENTED / ERR_PERMISSION_DENIED 的差别探出宿主挂了哪些面。
+        if (caller != null) {
+            val required = BridgeCapabilityCatalog.required(request.namespace, request.method)
+            if (!caller.capabilityMask.covers(required)) {
+                return@coroutineScope BridgeResponse.Err(
+                    request.id,
+                    ErrorCode.ERR_PERMISSION_DENIED.code,
+                    "本次执行未授权 ${request.namespace}.${request.method}（需要 $required，持有 ${caller.capabilityMask}）",
+                )
+            }
+        }
         val handler = handlers[request.namespace]
             ?: return@coroutineScope BridgeResponse.Err(request.id, ErrorCode.ERR_NOT_IMPLEMENTED.code, "未知 namespace: ${request.namespace}")
         // 0 仅为可信本地调用作用域；网络入口必须先认证，console/heartbeat 缺身份也会独立拒绝。
-        val connectionId = coroutineContext[AuthenticatedRunContext]?.connectionId ?: 0L
+        val connectionId = caller?.connectionId ?: 0L
         val result = CompletableDeferred<BridgeResponse>()
         val ticket = registry.register(connectionId, request) { result.complete(it) }
             ?: return@coroutineScope BridgeResponse.Err(

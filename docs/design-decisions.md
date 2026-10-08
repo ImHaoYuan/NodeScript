@@ -14,6 +14,48 @@
 
 ## 已拍板（原 §18 全部九项：第 1–7 项 2026-09-26、第 8/9 项 2026-09-25；外加后续新增编号项）
 
+2026-10-08 拍板（A5 第一阶段落地 + §13/§16 的 306s 口径订正；用户裁定）：
+
+43. **无来源证据档（`TrustTier.UNKNOWN`）的缺省桥面掩码 = 保守档 A**：全量减
+   `CROSS_SCRIPT_CONTROL`、`CROSS_SCRIPT_OBSERVE`、`SCHEDULER_WRITE`。
+   设备/自动化面（a11y / screen / dialogs / npm / floatingWindow / shell / …）保持全量不动。
+   - **这是 §11 冻结矩阵之外新增的一档，不是把「第三方」改成窄掩码**：原矩阵四档
+     （内置/自写/第三方/打包）都写全量，没有「无证据」这一档。本裁定补的是这一档。
+   - `engines.stop` / `engines.status` 对**自己**任何掩码都放行、对**他人**要对应跨脚本位；
+     `workManager.create` / `cancel` 要 `SCHEDULER_WRITE` —— 故脚本默认不能再自建定时任务，
+     这是**已知功能回退**，待来源元数据（`TrustTierResolver`）接入后由分级恢复。
+   - `PACKAGED` 档同样落保守档（无验证配置时不自动升全量），失败方向仍是「拒」。
+   - **不做全局绕过**：`ScriptAuthorizationPolicy` 是注入缝（按 `projectId` 分级），
+     不是三个全局布尔开关；`capabilityMask` 便捷覆盖只给测试/受信直投路径用。
+   - **掩码只约束桥面命名空间**：不限制 Node 内建 `fs`/`http`，不是沙箱，也不改变
+     设备侧三态门禁（系统层给不给仍由 `PermissionFacade` 现问系统；两张目录是两个枚举）。
+   - **单一决策链（杀 TOCTOU）**：授权快照在 `RuntimeController.start` 的同一把锁下**算一次**，
+     随后 池请求 → `EngineRunRequest` → `RunIdentityIssuer.issue` → lease →
+     `AuthenticatedRunContext.capabilityMask` 搬的都是**同一份对象**，下游不重算；
+     目标侧授权（`CrossScriptAuthorizer`）读的就是签发出去的那一份。
+   - **跨脚本不得提权**：`engines.exec` 派生要求子掩码不超出父掩码；触达他人执行还要求
+     调用方掩码**覆盖**目标掩码（低信任不得停高信任）；目标授权查不到 → fail closed。
+   - **命名通道改为按发起执行私有**（名字索引按 owner 分桶）：不同执行同名通道各拿各的 id，
+     否则通道就是一条绕过掩码的跨执行数据面。
+   - 冻结面同步范围：§11 的「尚未实现」两条据此划掉并改口径、§13 的风险表与兼容矩阵
+     两条 306s 措辞订正（见第 44 项）。模块表、Gradle 依赖、ArchUnit、CI 门禁均不放宽。
+   - 流水与验证见 [`2026-10-08`](log/2026-10-08.md)。
+
+44. **MediaProjection 会话不做自动续期，306s 上限由 FGS(`mediaProjection`) 消除**：
+   `docs/design/13-roadmap-budget.md` 原写「会话状态机 + 可重授权引导；306s 超时前自动续期/提示」，
+   兼容矩阵写「会话 306s 感知」——**两处都改**。理由是自动续期在 API 34+ 上做不到：
+   每会话重新征询用户，没有可续的持久授权。正路是 `foregroundServiceType="mediaProjection"`
+   的前台服务，它本身就免除了旧的 306 秒上限；到点情形（用户撤销、系统停止）如实
+   报错并引导重新授权，**不假装续上了**。
+   - 同一批落地：一次性同意（每次会话重新征询）、API 34+ 的顺序
+     （FGS 起并确认 → `getMediaProjection` → 注册 `MediaProjection.Callback` → `createVirtualDisplay`）、
+     幂等释放、迟到旧回调不影响新会话、帧经共享 `ImageAnalyzer.ingest` 入表。
+   - 会话资源在连接终结时结构性收口（`ConnectionResourceRegistry`）：脚本崩了但投屏还挂着
+     这条漏在结构上不成立，不靠每个调用方记得收。
+   - **如实登记的残余**：真机行为未在本机验证（无设备）；`abortConnection` 对
+     「子进程继承了桥 socket fd」这一形态没有覆盖（那种情况下脚本死了也不产生 EOF），
+     需要 `runId → connectionId` 映射，属新范围，未在本批夹带半成品。
+
 2026-10-07 拍板（批 74，A10① / A5；维护者审批的执行身份与日志归属方案）：
 
 42. **归属来自宿主签发身份，不信任脚本自报 runId**：spawn 前 issue 一次性 256-bit 随机 token，

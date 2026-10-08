@@ -129,7 +129,7 @@
 | **屏幕锁定时守时任务失败** | 闹钟响但任务是黑帧/无窗口 | 诚实契约：亮屏+解锁保底；预热闹钟 -60s；`screen` 三态声明；分类错误可 catch |
 | **厂商 ROM（MIUI/HyperOS/Vivo）杀后台** | 自启/保活失效 | 能力中心三态 +「一键引导」直达 ROM 白名单页；无保证的功能如实降级标注 |
 | **SCHEDULE_EXACT_ALARM 默认拒绝** | 定时不准 | 一级权限项 + 可降级 setWindow；坏 case 用户可见偏差标注 |
-| **MediaProjection 会话授权中断** | 截屏功能随会话失效 | 会话状态机 + 可重授权引导；306s 超时前自动续期/提示 |
+| **MediaProjection 会话授权中断** | 截屏功能随会话失效 | 会话状态机 + 可重授权引导；**不做自动续期** —— 306s 上限由 FGS(`mediaProjection`) 消除（2026-10-08 裁定，`design-decisions.md` 第 44 项）；用户撤销/系统停止时如实报错并引导重新授权 |
 | ~~**QuickJS 沙箱缺口**~~ **作废（2026-09-26，§18 第 1 项）** | 恶意脚本逃逸 | **换成：无进程隔离后的逃逸面** —— 第三方脚本与自写脚本同权，防线只剩安装时用户选择 + 来源提示 + TTL/看门狗；永不默认静默提级 |
 | ~~**双引擎 API 漂移**（Node vs QuickJS）~~ **作废（2026-09-26，§18 第 1 项）** | 同脚本两处行为不同 | **只剩 Node 一条轨**，不存在两处行为；`ImageAnalyzer`/引擎缝仍留 SPI 以便将来换实现 |
 | **桥死锁回归** | 事件循环冻结 | archUnit + 专项契约测试（双向同步禁令的静态检查 + 死锁压力测试）；线程规则写进 code review checklist |
@@ -147,7 +147,7 @@
 | 页对齐 | 16KB ELF 对齐为 CI 硬门禁（§16）；**真机 16KB 页测试不做**（2026-10-06 拍板，见 §16 与 `design-decisions.md` 第 34 项） |
 | 无障碍 | API 31+ 需启用手势 → 能力中心引导；hidden API 在黑名单 → 不 curl，用 Safe-mode 替代路径 |
 | 前台服务 | API 34 起必须带 type → specialUse；API 35 6h 超时对 specialUse 不适用（但要声明 subtype） |
-| MediaProjection | API 34+ 每会话确认 + FGS(mediaProjection) 前置；会话 306s 感知 |
+| MediaProjection | API 34+ 每会话确认 + FGS(mediaProjection) 前置；**该型 FGS 即免除旧的 306s 上限，不自动续期**（2026-10-08 裁定，`design-decisions.md` 第 44 项） |
 | Doze/App Standby | 精确闹钟豁免必须在白名单内；未豁免必须降级并如实标注 |
 | FLAG_SECURE | 一律不采样 → `ERR_BLACK_FRAME`/`ERR_SCREEN_LOCKED` 分类错误 |
 | 厂商 ROM | 华为/小米/OPPO/vivo 自启与保活白名单差异化 → PermissionCenter ROM 适配表 + 跳转写死到页 |

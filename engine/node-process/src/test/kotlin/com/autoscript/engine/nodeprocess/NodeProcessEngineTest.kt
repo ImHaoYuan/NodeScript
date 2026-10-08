@@ -165,7 +165,7 @@ class NodeProcessEngineTest {
                 stopGraceMillis = grace,
             ),
             launcher,
-            identityIssuer = { _, _ -> object : com.autoscript.domain.engine.RunIdentityLease {
+            identityIssuer = { _, _, _, _ -> object : com.autoscript.domain.engine.RunIdentityLease {
                 override val token = "a".repeat(64)
                 override fun confirmSpawn(pid: Int?, isAlive: () -> Boolean) = Unit
                 override fun naturalExit() = Unit
@@ -174,8 +174,21 @@ class NodeProcessEngineTest {
         )
     }
 
-    private fun request(nonce: String? = null, args: List<String> = emptyList()) =
-        EngineRunRequest(projectId = "p1", scriptPath = "a.js", args = args, runNonce = nonce)
+    /**
+     * 默认带授权快照：在线引擎（`socket` 非 null）在 A5 起**必须**有它才能 spawn
+     * （fail-closed，见 [NodeProcessEngine]）；离线路径不看这个字段。
+     */
+    private fun request(
+        nonce: String? = null,
+        args: List<String> = emptyList(),
+        authorization: com.autoscript.domain.permission.ScriptAuthorizationSnapshot? =
+            com.autoscript.domain.permission.ScriptAuthorizationSnapshot(
+                mask = com.autoscript.domain.permission.CapabilityMask.ALL,
+            ),
+    ) = EngineRunRequest(
+        projectId = "p1", scriptPath = "a.js", args = args, runNonce = nonce,
+        authorization = authorization,
+    )
 
     @Test
     fun `预检点名绝对路径——脚本缺位不起进程`() {

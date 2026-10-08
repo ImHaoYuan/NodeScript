@@ -177,9 +177,17 @@ class NodeProcessEngine(
                 val command = listOf(config.hostBinary.toString(), scriptAbs.toString()) + run.args
                 val cwd = ScriptPaths.projectRoot(config.filesDir, run.projectId)
                 // 在线必须与宿主同一本身份账；离线不签发、不凭空制造匿名桥身份。
+                // 授权快照由宿主一侧**上游**算好（RuntimeController.start → 池请求 → 本请求），
+                // 引擎只搬运、不重算（见 RunIdentityIssuer KDoc）。离线没有快照就不签发，
+                // 也不编一个 —— 那种路径本来就没有桥身份。
                 lease = config.hostSocketName?.let {
                     val issuer = identityIssuer ?: throw AutojsException(ErrorCode.ERR_ENGINE_STOPPED, "在线引擎缺身份签发入口")
-                    issuer.issue(id, runId)
+                    val authorization = run.authorization
+                        ?: throw AutojsException(
+                            ErrorCode.ERR_ENGINE_STOPPED,
+                            "在线引擎缺授权快照（run.authorization == null）：宿主装配未把授权决策传下来",
+                        )
+                    issuer.issue(id, runId, run.projectId, authorization)
                 }
                 lease?.let { env[ENV_BRIDGE_TOKEN] = it.token }
                 val spawned = try {

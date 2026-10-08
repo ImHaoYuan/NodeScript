@@ -3,14 +3,21 @@ package com.autoscript.appservice.runtime
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.engine.EngineId
+import com.autoscript.domain.core.AutojsException
+import com.autoscript.domain.core.ErrorCode
 import com.autoscript.domain.json.DomainJson
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import com.autoscript.domain.bridge.AuthenticatedRunContext
+import com.autoscript.domain.permission.BridgeCapability
+import com.autoscript.domain.permission.CapabilityMask
+import com.autoscript.domain.permission.ScriptAuthorizationPolicy
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertInstanceOf
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -294,7 +301,7 @@ class EnginesNamespaceHandlerTest {
         val h = EnginesNamespaceHandler(controller)
         val resp = assertInstanceOf(
             BridgeResponse.Ok::class.java,
-            withContext(AuthenticatedRunContext(EngineId(0), 999, 1)) { h.handle(enginesReq(1, "heartbeat", """{"runId":999,"seq":1}""")) },
+            withContext(AuthenticatedRunContext(EngineId(0), 999, 1, CapabilityMask.ALL)) { h.handle(enginesReq(1, "heartbeat", """{"runId":999,"seq":1}""")) },
         )
         assertEquals("false", resp.payload, "未知 runId → Ok false（不是调用方错误，不 4xx）")
         assertTrue(controller.heartbeats().trackedRuns().isEmpty(), "无主心跳不得建账")
@@ -308,14 +315,14 @@ class EnginesNamespaceHandlerTest {
         try {
             val request = enginesReq(2, "heartbeat", """{"runId":$runId,"seq":1}""")
             val anonymous = h.handle(request) as BridgeResponse.Err
-            val forged = withContext(AuthenticatedRunContext(EngineId(0), runId + 1, 1)) {
+            val forged = withContext(AuthenticatedRunContext(EngineId(0), runId + 1, 1, CapabilityMask.ALL)) {
                 h.handle(request)
             } as BridgeResponse.Err
             assertEquals("ERR_PERMISSION_DENIED", anonymous.errorCode)
             assertEquals("ERR_PERMISSION_DENIED", forged.errorCode)
             assertTrue(controller.heartbeats().trackedRuns().isEmpty())
             // 拒绝帧不能占用合法 seq：真身份随后发同 seq 仍是第一次心跳。
-            val accepted = withContext(AuthenticatedRunContext(EngineId(0), runId, 2)) {
+            val accepted = withContext(AuthenticatedRunContext(EngineId(0), runId, 2, CapabilityMask.ALL)) {
                 h.handle(request)
             } as BridgeResponse.Ok
             assertEquals("true", accepted.payload)
@@ -335,12 +342,16 @@ class EnginesNamespaceHandlerTest {
 
         val first = assertInstanceOf(
             BridgeResponse.Ok::class.java,
-            withContext(AuthenticatedRunContext(EngineId(0), runId, 1)) { h.handle(enginesReq(2, "heartbeat", """{"runId":$runId,"seq":5}""")) },
+            withContext(AuthenticatedRunContext(EngineId(0), runId, 1, CapabilityMask.ALL)) {
+                h.handle(enginesReq(2, "heartbeat", """{"runId":$runId,"seq":5}"""))
+            },
         )
         assertEquals("true", first.payload)
         val dup = assertInstanceOf(
             BridgeResponse.Ok::class.java,
-            withContext(AuthenticatedRunContext(EngineId(0), runId, 1)) { h.handle(enginesReq(3, "heartbeat", """{"runId":$runId,"seq":5}""")) },
+            withContext(AuthenticatedRunContext(EngineId(0), runId, 1, CapabilityMask.ALL)) {
+                h.handle(enginesReq(3, "heartbeat", """{"runId":$runId,"seq":5}"""))
+            },
         )
         assertEquals("false", dup.payload, "同 seq 不刷时间戳：积压帧不得让死掉的 run 装作活着")
 
@@ -517,5 +528,166 @@ class EnginesNamespaceHandlerTest {
         )
         val events = (DomainJson.decodeObject(drained.payload!!)["events"] as DomainJson.Value.Arr).items
         assertEquals(50, events.size)
+    }
+
+    // ── A5：跨脚本目标授权（§11；判据在 CrossScriptAuthorizer，经 controller 过闸） ──
+
+    /** 起一个在途 run（宿主发起：无认证上下文），返回其 runId。 */
+    private suspend fun EnginesNamespaceHandler.liveRunId(reqId: Long = 1): Long {
+        val exec = assertInstanceOf(BridgeResponse.Ok::class.java, handle(enginesReq(reqId, "exec", execPayload())))
+        return (DomainJson.decodeObject(exec.payload!!)["runId"] as DomainJson.Value.N).raw.toLong()
+    }
+
+    @Test
+    fun `stop 自己任何掩码都放行——窄掩码脚本必须能停自己`() = runBlocking {
+        val (h, _) = handler()
+        val runId = h.liveRunId()
+        // 掩码只有 LOCAL_STORAGE：没有任何跨脚本位，但目标是"自己这次执行"。
+        val ctx = AuthenticatedRunContext(EngineId(0), runId, 1, CapabilityMask.of(BridgeCapability.LOCAL_STORAGE))
+        val resp = withContext(ctx) { h.handle(enginesReq(2, "stop", """{"runId":$runId}""")) }
+        assertInstanceOf(BridgeResponse.Ok::class.java, resp)
+    }
+
+    @Test
+    fun `stop 别的执行缺 CROSS_SCRIPT_CONTROL 拒绝，且不真的停掉目标`() = runBlocking {
+        val (h, controller, _) = fullRig()
+        val victim = h.liveRunId(1)
+        // 调用方自己的 runId 是别的号（= 它想停的是 victim），掩码没有控制位。
+        val ctx = AuthenticatedRunContext(EngineId(0), victim + 100, 2, CapabilityMask.of(BridgeCapability.LOCAL_STORAGE))
+        val resp = withContext(ctx) { h.handle(enginesReq(2, "stop", """{"runId":$victim}""")) }
+        assertEquals("ERR_PERMISSION_DENIED", assertInstanceOf(BridgeResponse.Err::class.java, resp).errorCode)
+        assertTrue(controller.activeRunIds().contains(victim), "被拒的 stop 不得产生副作用")
+    }
+
+    @Test
+    fun `stop 别的执行有 CROSS_SCRIPT_CONTROL 且覆盖目标掩码才放行`() = runBlocking {
+        val (h, controller, _) = fullRig()
+        val victim = h.liveRunId(1)
+        // 目标（宿主发起、无来源元数据）拿的是 UNKNOWN_DEFAULT；调用方要停它，
+        // 除了控制位还得**覆盖目标掩码**（跨脚本不得触达授权不低于自己的执行）。
+        val ctx = AuthenticatedRunContext(EngineId(0), victim + 100, 2, CapabilityMask.ALL)
+        val resp = withContext(ctx) { h.handle(enginesReq(2, "stop", """{"runId":$victim}""")) }
+        assertInstanceOf(BridgeResponse.Ok::class.java, resp)
+        assertFalse(controller.activeRunIds().contains(victim), "放行后目标应已结算")
+    }
+
+    @Test
+    fun `stop 别的执行：有控制位但覆盖不了目标掩码仍拒——低信任不得停高信任`() = runBlocking {
+        // 这条是「目标分档」与「只看调用方有没有控制位」的分水岭：调用方**确实**有
+        // CROSS_SCRIPT_CONTROL，但它自己的掩码比目标窄（目标 = UNKNOWN_DEFAULT，含
+        // ACCESSIBILITY 等它没有的面）。若只查控制位，一个低信任脚本就能停掉一个
+        // 高信任执行 —— 那正是 §11「低信任不得控制高信任引擎」要挡的。
+        val (h, controller, _) = fullRig()
+        val victim = h.liveRunId(1)
+        val ctx = AuthenticatedRunContext(
+            EngineId(0), victim + 100, 2,
+            CapabilityMask.of(BridgeCapability.CROSS_SCRIPT_CONTROL, BridgeCapability.LOCAL_STORAGE),
+        )
+        val resp = withContext(ctx) { h.handle(enginesReq(2, "stop", """{"runId":$victim}""")) }
+        assertEquals(
+            "ERR_PERMISSION_DENIED",
+            assertInstanceOf(BridgeResponse.Err::class.java, resp).errorCode,
+            "有控制位但覆盖不了目标掩码 → 仍拒",
+        )
+        assertTrue(controller.activeRunIds().contains(victim), "被拒的 stop 不得产生副作用")
+    }
+
+    @Test
+    fun `目标授权快照缺失 fail closed——不因"查不到目标档"而放行`() {
+        // 直接钉纯函数判据（不经 handler）：target == null 必须拒，而不是当作"目标无掩码"。
+        // 「在不在途」不归本函数管（那是 RuntimeController.authorizeTarget 的活，见其 KDoc）。
+        val authorizer = CrossScriptAuthorizer()
+        val caller = AuthenticatedRunContext(EngineId(0), 100, 1, CapabilityMask.ALL)
+        val denied = assertThrows(AutojsException::class.java) {
+            authorizer.authorizeTarget(
+                caller = caller,
+                targetRunId = 7,
+                required = BridgeCapability.CROSS_SCRIPT_CONTROL,
+                target = null,
+            )
+        }
+        assertEquals(ErrorCode.ERR_PERMISSION_DENIED, denied.error)
+        // 自我操作不受此限：目标是自己时任何掩码都放行（连快照都不需要）。
+        val narrow = AuthenticatedRunContext(EngineId(0), 7, 1, CapabilityMask.of(BridgeCapability.LOCAL_STORAGE))
+        authorizer.authorizeTarget(
+            caller = narrow,
+            targetRunId = 7,
+            required = BridgeCapability.CROSS_SCRIPT_CONTROL,
+            target = null,
+        )
+    }
+
+    @Test
+    fun `目标不在途由 controller 判 NOT_FOUND——纯函数不再拿整张在途表`() = runBlocking {
+        val (h, controller, _) = fullRig()
+        val victim = h.liveRunId(1)
+        // 全量掩码（授权上无懈可击）也一样：不在途就是 NOT_FOUND，
+        // 不给"这个号存在过"的探测面（与 status/stop 既有诚实口径一致）。
+        val ctx = AuthenticatedRunContext(EngineId(0), victim + 100, 2, CapabilityMask.ALL)
+        val resp = withContext(ctx) { h.handle(enginesReq(2, "status", """{"runId":99999}""")) }
+        assertEquals("ERR_NOT_FOUND", assertInstanceOf(BridgeResponse.Err::class.java, resp).errorCode)
+        // 直接调 controller 也同码（判据住在这里，不是 handler 里另抄一份）。
+        val ex = assertThrows(AutojsException::class.java) {
+            runBlocking { controller.authorizeTarget(ctx, 99999, BridgeCapability.CROSS_SCRIPT_OBSERVE) }
+        }
+        assertEquals(ErrorCode.ERR_NOT_FOUND, ex.error)
+    }
+
+    @Test
+    fun `status 别的执行缺 CROSS_SCRIPT_OBSERVE 拒绝，看自己要观察位`() = runBlocking {
+        val (h, _) = handler()
+        val victim = h.liveRunId(1)
+        val observer = AuthenticatedRunContext(
+            EngineId(0), victim + 100, 2,
+            CapabilityMask.of(BridgeCapability.LOCAL_STORAGE),
+        )
+        val denied = withContext(observer) { h.handle(enginesReq(2, "status", """{"runId":$victim}""")) }
+        assertEquals("ERR_PERMISSION_DENIED", assertInstanceOf(BridgeResponse.Err::class.java, denied).errorCode)
+
+        val selfCtx = AuthenticatedRunContext(
+            EngineId(0), victim, 3,
+            CapabilityMask.of(BridgeCapability.LOCAL_STORAGE),
+        )
+        val self = withContext(selfCtx) { h.handle(enginesReq(3, "status", """{"runId":$victim}""")) }
+        assertInstanceOf(BridgeResponse.Ok::class.java, self)
+    }
+
+    @Test
+    fun `目标不在途一律 NOT_FOUND——授权判据不泄露"这个号存在过"`() = runBlocking {
+        val (h, _) = handler()
+        val ctx = AuthenticatedRunContext(
+            EngineId(0), 1, 1,
+            CapabilityMask.ALL, // 就算掩码全量，不在途也查不到
+        )
+        val resp = withContext(ctx) { h.handle(enginesReq(1, "status", """{"runId":99999}""")) }
+        assertEquals("ERR_NOT_FOUND", assertInstanceOf(BridgeResponse.Err::class.java, resp).errorCode)
+    }
+
+    @Test
+    fun `exec 派生不得提权：子掩码超出父掩码拒绝`() = runBlocking {
+        // 子掩码由 controller 的 authorization 策略算（这里显式注入"要全量"的策略）。
+        val engines = MutableList(1) { FakeEngine(EngineId(it)) }
+        val controller = RuntimeController(
+            FixedEnginePool({ id -> engines[id.poolIndex] }, 1),
+            authorization = ScriptAuthorizationPolicy(override = CapabilityMask.ALL),
+        )
+        val h = EnginesNamespaceHandler(controller)
+        // 父有控制位但没有全量 → 覆盖不了子掩码 → 拒。
+        val parent = AuthenticatedRunContext(
+            EngineId(0), 1, 1,
+            CapabilityMask.of(BridgeCapability.CROSS_SCRIPT_CONTROL, BridgeCapability.SCHEDULER_WRITE),
+        )
+        val resp = withContext(parent) { h.handle(enginesReq(1, "exec", execPayload())) }
+        assertEquals(
+            "ERR_PERMISSION_DENIED",
+            assertInstanceOf(BridgeResponse.Err::class.java, resp).errorCode,
+            "窄掩码不得靠 exec 一个高信任项目去拿自己本来没有的面",
+        )
+    }
+
+    @Test
+    fun `exec 宿主发起（无身份）不受跨脚本判据限制`() = runBlocking {
+        val (h, _) = handler()
+        assertInstanceOf(BridgeResponse.Ok::class.java, h.handle(enginesReq(1, "exec", execPayload())))
     }
 }

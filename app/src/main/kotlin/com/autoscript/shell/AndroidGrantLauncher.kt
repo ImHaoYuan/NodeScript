@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import com.autoscript.appservice.permissioncenter.GrantLauncher
+import com.autoscript.domain.automation.ScreenConsentHolder
 import com.autoscript.domain.permission.Capability
 import com.autoscript.domain.permission.GrantResult
 
@@ -23,10 +24,22 @@ enum class GrantPage {
     NOTIFICATIONS,
     /** 应用 → 闹钟和提醒（API 31+ 才有此页，低版本落到 [APP_DETAILS]）。 */
     EXACT_ALARM,
-    /** 应用详情页：没有专门授权页的能力（截屏/root/Shizuku）统一送到这里，不假装有快捷入口。 */
+    /** 应用详情页：没有专门授权页的能力（root/Shizuku）统一送到这里，不假装有快捷入口。 */
     APP_DETAILS,
     /** 特殊访问权限 → 使用情况访问权限（批 48；`ACTION_USAGE_ACCESS_SETTINGS` 列表页，无包名 extra）。 */
     USAGE_ACCESS,
+    /**
+     * 投屏授权（§9.2，批 79）：**不是系统设置页**，而是 `createScreenCaptureIntent()` 的
+     * 运行时对话框 —— 需要 Activity 承载，所以 [AndroidSettingsPageOpener] 对它走
+     * `ScreenConsentHolder`（界面注册的宿主），而不是 `startActivity`。
+     *
+     * 为什么能力中心把它指到这里：`SCREEN_CAPTURE` 的 GRANTED 定义是"会话已激活"，
+     * 用户在能力中心看到"未生效"时，唯一能让他**真的**推进这件事的动作就是去同意一次
+     * 投屏 —— 送应用详情页等于把他送到一个与屏幕采集无关的地方（旧口径）。
+     * 无界面可承载时如实失败（[AndroidSettingsPageOpener.open] 回 false → `Denied`），
+     * 不悄悄换成"打开应用详情页"那种看似成功的替代。
+     */
+    PROJECTION_CONSENT,
 }
 
 /**
@@ -89,16 +102,19 @@ class AndroidGrantLauncher(
          * 能力 → 系统页（§9.5 引导文案逐条对应；`PermissionCenter.guideText` 里写的
          * 「设置 → 应用 → AutoScript → X」就是这里的落点）。
          *
-         * `SCREEN_CAPTURE`/`ROOT`/`ADB_INPUT` 没有专门的授权页：截屏授权由首次截图时的
-         * MediaProjection 弹窗给出（§9.2），root/Shizuku 由用户在本应用之外准备。
-         * 三者一律送应用详情页 —— 不编造一个不存在的快捷入口。
+         * `SCREEN_CAPTURE` 走**投屏同意**（[GrantPage.PROJECTION_CONSENT]，批 79）：
+         * 屏幕采集的 GRANTED 定义是"会话已激活"，而唯一能推进它的动作就是同意一次投屏
+         * —— 旧口径把它送应用详情页，等于把用户送到一个与屏幕采集无关的地方。
+         * `ROOT`/`ADB_INPUT` 仍送应用详情页：它们由用户在本应用之外准备（`su`/Shizuku），
+         * 系统里没有对应的授权页，不编造一个。
          */
         fun pageFor(ability: Capability): GrantPage = when (ability) {
             Capability.ACCESSIBILITY -> GrantPage.ACCESSIBILITY
             Capability.OVERLAY -> GrantPage.OVERLAY
             Capability.NOTIFICATION, Capability.POST_NOTIFICATIONS -> GrantPage.NOTIFICATIONS
             Capability.SCHEDULE_EXACT_ALARM -> GrantPage.EXACT_ALARM
-            Capability.SCREEN_CAPTURE, Capability.ROOT, Capability.ADB_INPUT -> GrantPage.APP_DETAILS
+            Capability.SCREEN_CAPTURE -> GrantPage.PROJECTION_CONSENT
+            Capability.ROOT, Capability.ADB_INPUT -> GrantPage.APP_DETAILS
             Capability.USAGE_ACCESS -> GrantPage.USAGE_ACCESS
         }
 
@@ -109,8 +125,12 @@ class AndroidGrantLauncher(
          * 引入的，低版本系统里没有这个页面 —— 回退到应用详情页，而不是抛异常（老设备上精确闹钟
          * 本来就一直可用，见 `AndroidCapabilityProbes.exactAlarmAllowed` 的同一口径）。
          * 缺省读真 SDK；单测传参钉住高低两分支（无参调在 JVM 上走 S-以下分支）。
+         *
+         * **回 null = 这一页不是系统设置页**（[GrantPage.PROJECTION_CONSENT]）：
+         * 投屏授权是运行时对话框，没有对应的 `Settings.ACTION_*`。用 null 而不是编一个
+         * 相近的 action —— 编了的表现是"跳过去了但和投屏无关"，比拉不起来更难查。
          */
-        fun specFor(page: GrantPage, sdkInt: Int = Build.VERSION.SDK_INT): SettingsTarget = when (page) {
+        fun specFor(page: GrantPage, sdkInt: Int = Build.VERSION.SDK_INT): SettingsTarget? = when (page) {
             GrantPage.ACCESSIBILITY -> SettingsTarget(Settings.ACTION_ACCESSIBILITY_SETTINGS)
             GrantPage.OVERLAY ->
                 SettingsTarget(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, withPackageData = true)
@@ -126,6 +146,8 @@ class AndroidGrantLauncher(
             // 使用情况访问是常驻列表页（API 21+ 一直在），没有定位本应用的 extra ——
             // 列表里自己点 AutoScript，配不存在的 extra 反而会被系统忽略。
             GrantPage.USAGE_ACCESS -> SettingsTarget(Settings.ACTION_USAGE_ACCESS_SETTINGS)
+            // 投屏授权不是设置页（见 KDoc）。
+            GrantPage.PROJECTION_CONSENT -> null
         }
 
         private fun appDetailsSpec(): SettingsTarget =
@@ -134,10 +156,17 @@ class AndroidGrantLauncher(
 }
 
 /**
- * [GrantPageOpener] 的真机实现：唯一碰 `Intent`/`Settings` 的地方。
+ * [GrantPageOpener] 的真机实现：唯一碰 `Intent`/`Settings`/投屏同意宿主的地方。
  *
  * 全部带 `FLAG_ACTIVITY_NEW_TASK`：调用方是 `applicationContext`（广播/后台路径也会拉起
  * 引导页），没有 Activity 栈可依附；不加这个 flag 会直接 `AndroidRuntimeException`。
+ *
+ * **投屏同意那一页走另一条路**（[GrantPage.PROJECTION_CONSENT]）：它不是设置页，
+ * 而是 `createScreenCaptureIntent()` 的运行时对话框，需要一个 Activity ——
+ * 所以这里交给界面注册的 `ScreenConsentHolder.host`（`:ui` 的 MainActivity 实现）。
+ * 没有宿主（应用没有存活界面）如实回 false → `Denied`，**不**悄悄换成"打开应用详情页"
+ * 那种看着成功的替代。本方法**不阻塞**：它只负责把对话框拉起来，结果由脚本那次
+ * `startCapturer` 的征询路径等（那里是挂起的）。
  *
  * 本类无判断：去哪一页是 [AndroidGrantLauncher.pageFor] 的事，用什么 action/extra 是
  * [AndroidGrantLauncher.specFor] 的事 —— 这里只做"规格 + 包名 → Intent"搬运。
@@ -147,10 +176,15 @@ class AndroidSettingsPageOpener(context: Context) : GrantPageOpener {
     private val appContext = context.applicationContext
 
     override fun open(page: GrantPage): Boolean {
+        if (page == GrantPage.PROJECTION_CONSENT) {
+            val host = ScreenConsentHolder.host ?: return false
+            // fire-and-forget：宿主自己拉起对话框（结果回给真正在等的那次征询）。
+            // 没有宿主 = 没人能问用户，如实 false（不编一条假的成功）。
+            return host.requestScreenConsentDetached()
+        }
+        val spec = AndroidGrantLauncher.specFor(page) ?: return false
         return try {
-            appContext.startActivity(
-                intentFor(AndroidGrantLauncher.specFor(page), appContext.packageName),
-            )
+            appContext.startActivity(intentFor(spec, appContext.packageName))
             true
         } catch (e: Exception) {
             // 系统里没有能处理该 action 的页面（ROM 裁剪/低版本）。这是真实失败，

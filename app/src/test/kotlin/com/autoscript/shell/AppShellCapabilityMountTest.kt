@@ -15,6 +15,7 @@ import com.autoscript.domain.engine.KillCause
 import com.autoscript.domain.engine.ScriptEngine
 import com.autoscript.domain.engine.StopResult
 import com.autoscript.domain.bridge.AuthenticatedRunContext
+import com.autoscript.domain.permission.CapabilityMask
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -170,7 +171,7 @@ class AppShellCapabilityMountTest {
     }
 
     @Test
-    fun `注入能力缝后 a11y screen 可达`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1)) {
+    fun `注入能力缝后 a11y screen 可达`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1, CapabilityMask.ALL)) {
         val s = shell(
             "a11y" to fakeA11y, "screen" to fakeScreen, "npm" to fakeNpm,
             "datastore" to fakeDatastore, "zip" to fakeZip, "settings" to fakeSettings,
@@ -246,7 +247,7 @@ class AppShellCapabilityMountTest {
     }
 
     @Test
-    fun `未注入能力缝时如实回 ERR_NOT_IMPLEMENTED`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1)) {
+    fun `未注入能力缝时如实回 ERR_NOT_IMPLEMENTED`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1, CapabilityMask.ALL)) {
         val s = shell()
         s.use {
             val a11yResp = s.router.dispatch(
@@ -296,7 +297,7 @@ class AppShellCapabilityMountTest {
     }
 
     @Test
-    fun `只注入一个缝，另一个仍如实未实现`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1)) {
+    fun `只注入一个缝，另一个仍如实未实现`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1, CapabilityMask.ALL)) {
         val s = shell("a11y" to fakeA11y)
         s.use {
             assertInstanceOf(
@@ -331,7 +332,7 @@ class AppShellCapabilityMountTest {
     }
 
     @Test
-    fun `喂 keeper 后 power_manager 全链路可达`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1)) {
+    fun `喂 keeper 后 power_manager 全链路可达`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1, CapabilityMask.ALL)) {
         val fg = object : ForegroundOps {
             override var foregroundRunning: Boolean = true
             override fun startService(token: String, timeoutMillis: Long?): Boolean = true

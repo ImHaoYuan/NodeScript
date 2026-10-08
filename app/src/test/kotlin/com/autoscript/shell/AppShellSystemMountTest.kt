@@ -14,6 +14,7 @@ import com.autoscript.domain.engine.KillCause
 import com.autoscript.domain.engine.ScriptEngine
 import com.autoscript.domain.engine.StopResult
 import com.autoscript.domain.bridge.AuthenticatedRunContext
+import com.autoscript.domain.permission.CapabilityMask
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -67,7 +68,7 @@ class AppShellSystemMountTest {
     }
 
     @Test
-    fun `注入后五个命名空间均可达且不挤掉既有命名空间`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1)) {
+    fun `注入后五个命名空间均可达且不挤掉既有命名空间`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1, CapabilityMask.ALL)) {
         val seen = mutableListOf<String>()
         val s = shell(bundle(seen))
         s.use {
@@ -100,7 +101,7 @@ class AppShellSystemMountTest {
     }
 
     @Test
-    fun `未注入时五个命名空间如实 ERR_NOT_IMPLEMENTED`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1)) {
+    fun `未注入时五个命名空间如实 ERR_NOT_IMPLEMENTED`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1, CapabilityMask.ALL)) {
         val s = shell()
         s.use {
             var id = 1L
@@ -115,7 +116,7 @@ class AppShellSystemMountTest {
     }
 
     @Test
-    fun `注入束缺单个字段只影响那一个`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1)) {
+    fun `注入束缺单个字段只影响那一个`() = runBlocking(AuthenticatedRunContext(EngineId(0), 42, 1, CapabilityMask.ALL)) {
         val seen = mutableListOf<String>()
         val s = shell(
             SystemHandlers(

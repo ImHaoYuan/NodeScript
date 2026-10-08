@@ -3,6 +3,7 @@ package com.autoscript.shell
 import android.content.Context
 import com.autoscript.appservice.permissioncenter.PermissionCenter
 import com.autoscript.appservice.permissioncenter.SystemStateReader
+import com.autoscript.domain.automation.MediaProjectionSessionState
 import com.autoscript.domain.permission.Capability
 import com.autoscript.domain.permission.CapabilityState
 
@@ -38,14 +39,29 @@ object AndroidPermissionGates {
      * 生产读缝：`Context` → 真探针 → 三态映射。
      * 事实由 [AndroidCapabilityProbes] 装箱（碰 Settings/Manager/ProcessBuilder 的唯一地方），
      * 判断由 [AndroidSystemStateReader] 落（那张表是判据的唯一出处，本文件不重复判断）。
+     *
+     * [projectionState] 给了就换用 [AndroidScreenStateReader]：**只有 `SCREEN_CAPTURE`
+     * 那一行的判据不同**（会话态来自设备层，见 §9.2/§9.5），其余八项走同一张表。
      */
-    fun defaultReader(context: Context): SystemStateReader =
-        AndroidSystemStateReader(AndroidCapabilityProbes(context.applicationContext))
+    fun defaultReader(
+        context: Context,
+        projectionState: (() -> MediaProjectionSessionState)? = null,
+    ): SystemStateReader {
+        val probes = AndroidCapabilityProbes(context.applicationContext)
+        return if (projectionState == null) {
+            AndroidSystemStateReader(probes)
+        } else {
+            AndroidScreenStateReader(probes, projectionState)
+        }
+    }
 
     /** 生产门禁实例（`AppShellApplication.permissionCenter()` 的落点）。 */
-    fun permissionCenterOf(context: Context): PermissionCenter =
+    fun permissionCenterOf(
+        context: Context,
+        projectionState: (() -> MediaProjectionSessionState)? = null,
+    ): PermissionCenter =
         PermissionCenter(
-            defaultReader(context),
+            defaultReader(context, projectionState),
             AndroidGrantLauncher(AndroidSettingsPageOpener(context.applicationContext)),
         )
 }

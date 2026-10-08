@@ -4,6 +4,8 @@ import com.autoscript.domain.bridge.AuthenticatedRunContext
 import com.autoscript.domain.bridge.BridgeRequest
 import com.autoscript.domain.bridge.BridgeResponse
 import com.autoscript.domain.engine.EngineId
+import com.autoscript.domain.permission.CapabilityMask
+import com.autoscript.domain.permission.ScriptAuthorizationSnapshot
 import com.autoscript.domain.engine.RunIdentityLease
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -25,7 +27,11 @@ import org.junit.jupiter.api.Test
 class ConnectionLifecycleTest {
     private val transport = JsonTransport()
     private fun req(id: Long = 1) = transport.encodeRequest(BridgeRequest(id, "probe", "m", null, 5_000)) + byteArrayOf(10)
-    private fun issue(registry: RunIdentityRegistry, run: Long = 1) = registry.issue(EngineId(0), run).also {
+    /** 连接生命周期用例与授权档无关：快照给全量，授权语义在别处钉。 */
+    private fun issue(registry: RunIdentityRegistry, run: Long = 1) = registry.issue(
+        EngineId(0), run, "lifecycle-probe",
+        ScriptAuthorizationSnapshot(mask = CapabilityMask.ALL),
+    ).also {
         it.confirmSpawn(null) { true }
     }
     private fun lines(out: ByteArrayOutputStream): String = synchronized(out) { out.toString(Charsets.UTF_8) }
