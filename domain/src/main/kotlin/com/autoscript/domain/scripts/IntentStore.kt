@@ -1,24 +1,22 @@
-package com.autoscript.appservice.scheduler.persist
-
-import com.autoscript.appservice.scheduler.core.IntentRun
-import com.autoscript.appservice.scheduler.core.RunOutcome
-import com.autoscript.appservice.scheduler.core.ScreenGuarantee
-import com.autoscript.appservice.scheduler.core.TriggerSource
-import java.nio.file.Path
+package com.autoscript.domain.scripts
 
 /**
  * 意图日志原子存储操作（docs §8.5「append-only + 崩溃持久」的最小接缝）。
  *
  * 本接口是「意图日志语义」与「存储引擎」之间的唯一边界。
  *
- * **今天只有一个实现：[JournalFileStore]**（jsonl 追加 + fsync + 启动 replay），
- * 且它是**全平台的生产实现**（含 Android）—— `AppShellKit` 装的就是它。
- * §8.5 写的「SQLite + WAL」是**目标形态，尚未落地**，这里不再假称已有：
- * [IntentStore] 住在 `:app-service:scheduler`（纯 JVM、零 `import android.`），
- * 而依赖铁律是 `:platform:*` → `:domain`（不反向），SQLite 实现要么把本接口搬到
- * `:domain`（跨模块契约变更，需协调者裁），要么让本模块引入 Android 依赖
- * （代价是这层丢掉纯 JVM 可测）。两条都不是顺手能做的，故先如实标注。
- * 该分歧记在 `docs/design-status.md` 的未落地清单里。
+ * **两个实现，按平台选**：
+ * - [com.autoscript.appservice.scheduler.persist.JournalFileStore] —— jsonl 追加 + fsync +
+ *   启动 replay，**纯 JVM**（无 `android.`），单测与无 Android 环境走它；
+ * - `SqliteIntentStore` —— §8.5 契约写的 SQLite 形态，住 `:platform:system`
+ *   （`SQLiteOpenHelper` 依赖 `android.`），**Android 生产走它**；
+ *   装配层（`:app` `AppShellKit`）按可用性选。
+ *
+ * **为什么接口住 `:domain` 而不是实现模块**：本接口就是 SPI（与 [RunArchive] 同形），
+ * 而依赖铁律是 `:platform:*` → `:domain`（不反向）—— 接口若留在
+ * `:app-service:scheduler`，`:platform:system` 够不到它，SQLite 实现只能靠给
+ * scheduler 加 Android 依赖来换（那会丢掉这一层的纯 JVM 可测）。搬到这里之后两个实现
+ * 各自住自己那层，零反向依赖、零新模块。
  *
  * 两条实现都必须满足：
  * - **崩溃持久**：insert/seal 返回前数据已落盘（fsync 或 SQLite synchronous=FULL）；
@@ -58,7 +56,7 @@ interface IntentStore : AutoCloseable {
 
     override fun close() {}
 
-    // —— 存储行模型（与 IntentRun 一一对应，独立类型避免 persist 依赖 core 运行态）——
+    // —— 存储行模型（与 scheduler 的 IntentRun 一一对应，独立类型避免本层依赖运行态）——
 
     data class StartRow(
         val projectId: String,
@@ -90,38 +88,4 @@ interface IntentStore : AutoCloseable {
             fun crashed(message: String?) = StoredOutcome("CRASHED", message)
         }
     }
-}
-
-/** core 侧映射：StoredRow → IntentRun（单向；persist 不反向依赖 core 类型之外的东西）。 */
-internal fun IntentStore.StoredRow.toIntentRun(): IntentRun = IntentRun(
-    runId = runId,
-    projectId = start.projectId,
-    scriptPath = start.scriptPath,
-    runNonce = start.runNonce,
-    trigger = TriggerSource.valueOf(start.trigger),
-    scheduledAtMillis = start.scheduledAtMillis,
-    screen = ScreenGuarantee.valueOf(start.screen),
-    outcome = outcome?.let {
-        when (it.name) {
-            "SUCCEEDED" -> RunOutcome.Succeeded
-            "FAILED" -> RunOutcome.Failed()
-            "CANCELLED" -> RunOutcome.Cancelled
-            "CRASHED" -> RunOutcome.Crashed(it.detail)
-            "INTERRUPTED" -> RunOutcome.Interrupted
-            else -> throw IllegalStateException("未知 outcome: ${it.name}")
-        }
-    },
-    startedAtMillis = start.startedAtMillis,
-    deadlineMillis = start.deadlineMillis,
-    args = start.args,
-    timeoutMillis = start.timeoutMillis,
-    committedAtMillis = committedAtMillis,
-)
-
-internal fun RunOutcome.toStored(): IntentStore.StoredOutcome = when (this) {
-    RunOutcome.Succeeded -> IntentStore.StoredOutcome.SUCCEEDED
-    is RunOutcome.Failed -> IntentStore.StoredOutcome.FAILED
-    RunOutcome.Cancelled -> IntentStore.StoredOutcome.CANCELLED
-    is RunOutcome.Crashed -> IntentStore.StoredOutcome.crashed(message)
-    RunOutcome.Interrupted -> IntentStore.StoredOutcome.INTERRUPTED
 }

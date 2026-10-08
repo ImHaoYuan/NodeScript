@@ -62,7 +62,8 @@ object WireMethods {
             "acquire", "release", "status",
         ),
         "screen" to setOf(
-            "capture", "closeSession", "nextFrame", "recycle", "startCapturer",
+            "capture", "closeSession", "nextFrame", "recycle", "startCapturer", "startRecording",
+            "stopRecording",
         ),
         "sensors" to setOf(
             "drain", "isSupported", "register", "unregister", "unregisterAll",

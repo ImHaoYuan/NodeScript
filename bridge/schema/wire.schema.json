@@ -149,7 +149,9 @@
         "closeSession",
         "nextFrame",
         "recycle",
-        "startCapturer"
+        "startCapturer",
+        "startRecording",
+        "stopRecording"
       ]
     },
     "sensors": {

@@ -27,6 +27,7 @@ import com.autoscript.domain.host.TaskCenterSnapshot
 import com.autoscript.domain.host.ConsoleSnapshot
 import com.autoscript.domain.host.TaskRegistration
 import com.autoscript.domain.permission.CapabilityMask
+import com.autoscript.domain.scripts.IntentStore
 import com.autoscript.domain.permission.ScriptAuthorizationPolicy
 import com.autoscript.appservice.scheduler.core.TriggerSource
 import com.autoscript.domain.scripts.RunArchive
@@ -66,6 +67,20 @@ import com.autoscript.platform.capabilities.CapabilityNamespaces
  * 再开一个 `FileRunArchive`（第二个实例会各自持 channel 与内存视图，写侧两份即失真）。
  */
 object AppShellKit {
+
+    /**
+     * 意图日志存储的选型结果（§8.5）：装配层（`PlatformWiring`，唯一碰 Android 的一步）
+     * 把"开哪个引擎、有没有回落"一并交给本配方，而不是只递一个 [IntentStore] ——
+     * 回落**必须可诊断**：`fallbackReason` 非空就是"SQLite 没开成，在用 jsonl"的原文，
+     * 装配日志/能力中心据此如实显示，不把降级读成一切正常（同 `npmCliFailure` 的纪律）。
+     */
+    data class IntentStoreChoice(
+        val store: IntentStore,
+        /** `"sqlite"` / `"journal"`（诊断读口用；语义由 [store] 本身决定，本字段只描述来源）。 */
+        val backend: String,
+        /** 非空 = SQLite 没开成（或迁移失败）的**原因原文**；null = 按 [backend] 正常打开。 */
+        val fallbackReason: String? = null,
+    )
 
     /**
      * 装配生产壳（§4.1）。
@@ -186,6 +201,16 @@ object AppShellKit {
         watchdog: EngineWatchdog? = null,
         watchdogScope: CoroutineScope? = null,
         /**
+         * 意图日志存储（§8.5）。缺省 null = 本配方自建 jsonl（[JournalFileStore]）——
+         * 那是**纯 JVM 与测试**的口径；Android 生产由 `PlatformWiring.intentStore`
+         * 喂 SQLite（并在那里做一次性迁移）。
+         *
+         * 为什么做成注入缝而不是在本文件里选：选型要碰 Android（`Context` →
+         * `SQLiteOpenHelper`），而本文件是纯 JVM 可测的配方（不 import `android.`）。
+         * 于是「谁碰 Android 谁选」落在 `PlatformWiring`，这里只收一个 [IntentStore]。
+         */
+        intentStore: IntentStore? = null,
+        /**
          * **来源授权策略**（A5，§11）：本壳所有执行拿到什么桥面能力的判据来源。
          *
          * 缺省 = 无来源元数据（`TrustTier.UNKNOWN` 的保守档 A，见
@@ -244,7 +269,10 @@ object AppShellKit {
 
         // 意图日志与运行档案分文件（§8.5）：键不同（intentRunId vs engineRunId），
         // 只写一侧的孤儿因此可被审计。两个都持久：重启后任务中心与 bootRecover 才有据可依。
-        val log = PersistentIntentLog(JournalFileStore(autojsDir))
+        // 存储引擎由调用方选（§8.5）：Android 生产喂 SQLite（PlatformWiring.intentStore，
+        // 含一次性迁移），纯 JVM/测试缺省走 jsonl。两者的语义由 `IntentStoreContract`
+        // 同一组用例守着 —— 换引擎不改语义。
+        val log = PersistentIntentLog(intentStore ?: JournalFileStore(autojsDir))
         val archive = FileRunArchive(autojsDir)
         // 注册表第三持久（§8.6）：意图日志管"已投递的意向"，这里管"还没到点的排期"。
         // 同一 `.autojs` 目录（`tasks.jsonl`），同一追加+tombstone 纪律；Scheduler 经

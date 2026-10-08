@@ -1,5 +1,28 @@
 # AutoScript 待办池（backlog）
 
+## 2026-10-08 追记（批 77：录屏腿与 §8.5 SQLite 落地，A12 结项）
+
+- **A12 已结项（2026-10-08，批 77）**：**MediaProjection 录屏腿已落地** ——
+  `MediaProjectionRecorder`（`MediaRecorder` + VirtualDisplay）与截屏腿并列、共用同一条投屏
+  会话账，输出是视频文件；`auto.screen.startRecording/stopRecording` 两侧契约与两份生成物齐全；
+  产物落 `files/scripts/<projectId>/.recordings/`（项目号来自认证租约，**不是脚本自报**）。
+  **下方 2026-10-08 追记块里那条「新增 A12」原始记录逐字保留作历史，当前状态以本条为准。**
+  **边界**：真机行为未在本机验证（无设备）；`ScriptPaths` KDoc 如实记了「打包器会把录屏产物
+  一起打进 APK」这条副作用。
+- **§8.5 意图日志的 SQLite 实现已落地（2026-10-08，批 77）**：`IntentStore` 接口迁 `:domain`，
+  `SqliteIntentStore` 落 `:platform:system`，两份实现（jsonl/SQLite）跑同一套契约测试；
+  老 jsonl 带原 runId 一次性迁移、打开失败如实回落 jsonl。口径见
+  [`design-decisions.md`](design-decisions.md) 第 46 项。**`design-status.md` 接口期表里
+  「§8.5 SQLite 实现未落」那行同批改写**（原文以删除线保留）。
+- **新增 A13（S，未排期）：意图日志的保留期 / 清理策略未定**。日志**只追加、从不清理**，
+  体积随 run 数线性增长（每次 run 恒定两条行，已无冗余可压）。老终态行、老 nonce 能否丢
+  会直接动到 §8.5 的幂等锚点 —— **丢了老 nonce，重投就会重放副作用**（幂等键失效）。
+  批 77 **显式排除**，未拍板。证据：`platform/system/.../persist/SqliteIntentStore.kt`（无删除路径）、
+  `app-service/scheduler/.../persist/JournalFileStore.kt`（同上）、
+  [`design/08-execution.md`](design/08-execution.md) §8.5。
+- **A11 仍开放**（`abortConnection` 对「子进程继承桥 socket fd」形态未覆盖）：批 77 **未触碰**，
+  见下方 2026-10-08 追记块。
+
 ## 2026-10-08 追记（批 76：A5 来源分级裁定不做 + 批 75 遗留缺口入池）
 
 - **A5 的「来源分级」经裁定不做（2026-10-08，用户裁定）**：`TrustTier` 四档与

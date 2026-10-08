@@ -37,6 +37,35 @@ object ScriptPaths {
         projectRoot(filesDir, projectId).resolve(scriptPath)
 
     /**
+     * 录屏产物的落点目录：`files/scripts/<projectId>/.recordings`（§9.2 录屏腿）。
+     *
+     * **为什么是项目根下的点开头子目录**（三条都是既有约定，不是新发明的形状）：
+     * 1. **项目私有**：[projectRoot] 就是「项目私有目录」这条约定的唯一出口
+     *    （`files/scripts/<projectId>/` 被 script-repo 部署、npm 布局、调度补部署四处共用），
+     *    产物落在它下面 = 与脚本、`package.json`、`node_modules` 同一个归属；
+     * 2. **点开头**：项目根下已有的 `.npmrc` / `.autojs.build.ignore` 都是"项目内务文件"，
+     *    点开头在脚本文件清单（`:app` 的 `ScriptFilesRead`）里**天然不入列表**
+     *    （`isNoise`）—— 录屏是产物不是用户资产，不该混进编辑器的文件页；
+     * 3. **不落 `files/.autojs`**：那是**宿主内务**（意图日志/档案/审批账本），
+     *    按项目分账的东西混进去会让"清一个项目"变成"清宿主账"。
+     *
+     * 为什么这条约定必须住本对象：它是被**两处**读的路径 —— 语义层（`MediaProjectionRecorder`
+     * 算落点）与设备层（`MediaRecorder.setOutputFile`）。任一处写错（`recordings` 少个点、
+     * `scripts` 写成 `script`）都不会编译失败，只会表现为"录完了但文件找不到"这种**没有报错**
+     * 的故障，同本对象 KDoc 开头那条教训。
+     *
+     * **已知后果（如实记账，不在本对象解决）**：`PackagerCollector` 收项目目录下全部常规文件
+     * （只排 `node_modules` 与 ignore 规则），所以录屏产物**会被打进 APK**。要排除得改
+     * `PackSpec.ignoreRules` 的缺省或打包器的排除面 —— 那是 `:app-service:packager` 的口径，
+     * 不在本约定的管辖内。
+     */
+    fun recordingsDir(filesDir: Path, projectId: String): Path =
+        projectRoot(filesDir, projectId).resolve(RECORDINGS_DIR)
+
+    /** 录屏产物目录名（点开头 = 项目内务，见 [recordingsDir]）。 */
+    const val RECORDINGS_DIR: String = ".recordings"
+
+    /**
      * facade 包 `auto` 的落位根：`filesDir/node_modules/auto`（docs §12.4 资产交付轨）。
      *
      * 为什么住这里（与 [projectRoot] 同一条理由）：这个路径被两处拼 ——

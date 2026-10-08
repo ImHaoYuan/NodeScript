@@ -7,4 +7,6 @@ plugins {
 dependencies {
     implementation(project(":domain"))
     implementation(libs.kotlinx.coroutines.core)
+    // §8.5 契约套件（IntentStoreContract）：JournalFileStore 与 SqliteIntentStore 跑同一组用例。
+    testImplementation(testFixtures(project(":domain")))
 }

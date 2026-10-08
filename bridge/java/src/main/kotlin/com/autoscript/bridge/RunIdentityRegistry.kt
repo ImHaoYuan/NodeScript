@@ -99,9 +99,17 @@ class RunIdentityRegistry(
                 if (closed || lease.state != State.CLAIMED || lease.deadline <= clock.nowMillis()) denied()
                 lease.state = State.ACTIVE
                 bound = true
-                Binding(
-                    AuthenticatedRunContext(lease.engineId, lease.runId, connectionId, lease.authorization.mask),
-                ) { lease.disconnect() }
+                val caller = AuthenticatedRunContext(
+                    lease.engineId,
+                    lease.runId,
+                    connectionId,
+                    lease.authorization.mask,
+                )
+                // 项目号从 lease 装填（§9.6 × §9.2 录屏落点）：与掩码同一条「不可自报」纪律 ——
+                // 认证之后调用方才有项目号可言，而它决定 `ScriptPaths.recordingsDir` 的落点，
+                // 绝不能从 wire payload 取（那是脚本可影响的字段）。
+                caller.projectId = lease.projectId
+                Binding(caller) { lease.disconnect() }
             }
         } finally {
             if (!bound) lease.revoke()

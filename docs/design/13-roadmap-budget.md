@@ -58,7 +58,7 @@
   模板匹配 + `decode`/`release` 亦已随 §9.2 落地，**灰度、裁剪、缩放、旋转与特征已落计算核**（2026-09-25：`imgnative_gray` 产出新帧 + 28 例；`imgnative_crop` 尺寸会变的产出 + 复用区域判据 + 真拷贝 + 46 例；
   `imgnative_resize` 目标尺寸入参 + 固定 LINEAR + 配额 + 45 例；`imgnative_rotate` 逆时针角度 + expand 包络画布 + 帧中心 + 45 例；`imgnative_feature` ORB+ratio+几何一致性+铺开度门只回坐标 + 51 例 host 断言；
   **五者桥面已于 2026-09-29 全部开通** —— P1 图像桥消费方兑现了当初"没有消费方就不开桥面"的判据，`:domain ImageAnalyzer` 扩到十方法）；MediaProjection 会话式截屏
-  **已落地（2026-10-08，批 75）**（`MediaProjectionSource` 经 `PlatformWiring.screenHandler` 接入，换 producer 即插、语义面未动）；**录屏仍待**（`MediaRecorder` 全仓零引用）。
+  **已落地（2026-10-08，批 75）**（`MediaProjectionSource` 经 `PlatformWiring.screenHandler` 接入，换 producer 即插、语义面未动）；~~**录屏仍待**（`MediaRecorder` 全仓零引用）~~ **录屏亦已落地（2026-10-08，批 77）**：`MediaProjectionRecorder` 与截屏腿并列、共用同一条会话账，输出是视频文件。
 - `ui` 原生 XML UI 宿主 + `ui_web` WebView JS 桥 + 悬浮窗。
 - datastore SQLite、settings、sensors、notification、app Intent、zip、power_manager（**已落地**，见 §8.7；clipboard 亦已落地 §12.2 第五条独立缝，sensors 亦已落地 §12.2 第六条独立缝，
   images 桥面与 native 实现均已落地 §12.2 第七条独立缝 —— `libopencv.so`（OpenCV 4.14 静态链接，`node-runtime-build/scripts/build-opencv.sh` + `.github/workflows/image-native.yml`）+ `NativeImageAnalyzer`/

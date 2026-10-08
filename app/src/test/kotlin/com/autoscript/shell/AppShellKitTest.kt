@@ -66,6 +66,7 @@ class AppShellKitTest {
         scriptSources: Map<String, Map<String, ByteArray>> = emptyMap(),
         scriptProjects: List<String> = emptyList(),
         assetReader: ((String) -> Map<String, ByteArray>)? = null,
+        intentStore: com.autoscript.domain.scripts.IntentStore? = null,
     ): AssembledShell = AppShellKit.assemble(
         filesDir = files,
         cacheDir = cache,
@@ -79,6 +80,7 @@ class AppShellKitTest {
         scriptSources = scriptSources,
         scriptProjects = scriptProjects,
         assetReader = assetReader,
+        intentStore = intentStore,
     )
 
     @Test
@@ -166,6 +168,37 @@ class AppShellKitTest {
             archive.close()
         }
 
+        Unit
+    }
+
+    /**
+     * §8.5 存储引擎注入缝**真的是活的**：给了 [IntentStore] 就走它，没给才自建 jsonl。
+     *
+     * 为什么要单测这一条：SQLite 那一半（`SqliteIntentStore`）在本机跑不了 Android，
+     * 于是"装配层到底把哪个引擎接上了"就成了唯一在本机可验的环节 —— 缝要是接错了
+     * （比如 `assemble` 收了参数却仍 `JournalFileStore(autojsDir)`），真机上会静默地
+     * 一直写 jsonl，而所有单测照样全绿。这里用另一个目录的 [JournalFileStore] 当替身，
+     * 断言"日志落在替身那儿、缺省目录里没有"，把这条缝钉住。
+     */
+    @Test
+    fun `注入的意图日志存储真的被用上（缺省目录里不再另写一份）`() = runBlocking {
+        val alt = dir.resolve("alt-store")
+        kit(intentStore = JournalFileStore(alt)).use { assembled ->
+            val shell = assembled.shell
+            shell.scheduler.schedule(
+                ScheduledTask("t7", "任务", "p7", "a.js", TimedSchedule.Once(0)),
+            )
+            shell.scheduler.onTrigger("t7", TriggerSource.TIMED, System.currentTimeMillis())
+        }
+
+        assertTrue(
+            Files.exists(alt.resolve("intent-log.jsonl")),
+            "注入的存储必须真的收到 START/COMMIT 行（缝接错 = 真机上静默写回 jsonl）",
+        )
+        assertFalse(
+            Files.exists(files.resolve(".autojs").resolve("intent-log.jsonl")),
+            "已注入存储时不得再在缺省位置另建一份日志（两份日志各写各的）",
+        )
         Unit
     }
 

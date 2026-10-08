@@ -14,6 +14,38 @@
 
 ## 已拍板（原 §18 全部九项：第 1–7 项 2026-09-26、第 8/9 项 2026-09-25；外加后续新增编号项）
 
+2026-10-08 拍板（批 77：§8.5 意图日志落 SQLite 的架构选型；协调者裁定）：
+
+46. **意图日志落 SQLite：搬接口，不给模块加 Android 依赖**。契约 §8.5 从第一天写的就是
+   「append-only（**SQLite**，启动即回放）」，而生产一直跑 `JournalFileStore`（jsonl）。
+   两条出路里**选前者**：
+   - **选**：`IntentStore` 接口自 `:app-service:scheduler`（纯 JVM）**迁到 `:domain`**，
+     SQLite 实现落 `:platform:system`（本就带 Android 依赖与 `SQLiteOpenHelper` 先例）。
+     代价 = 一次跨模块契约迁移；收益 = **纯 JVM 可测性保住**（SQLite 语义层的单测跑在宿主
+     `sqlite3` CLI 上，不需要设备），且依赖铁律 `:platform:*` → `:domain` 不反向仍成立。
+   - **不选**：给 `:app-service:scheduler` 加 Android 依赖 —— 那会把这个模块从
+     `autoscript.jvm` 变成 android-library，丢掉它的全部纯 JVM 测试位。
+   - **不新增 Gradle 模块**：模块数 17 是从 `settings.gradle.kts` 的 include 派生的数字
+     （`:domain` 的 `ModuleGraphTest` 守着，文档里写了就必须相等），新增模块 = 动冻结面。
+     故 SQLite 实现直接住既有的 `:platform:system/persist/`。
+   - **两份实现跑同一套契约**：`:domain` 新增 `testFixtures` 源集放 `IntentStoreContract`
+     （抽象类，子类只提供 `open()`），jsonl 与 SQLite 两侧继承同一套。**这不是洁癖** ——
+     本批的幂等锚点缺陷（见下）就是这套共享测试抓出来的。
+   - **幂等锚点 = 一个部分唯一索引**：`ux_nonce ON intent_log(run_nonce) WHERE outcome IS NULL
+     OR outcome <> 'INTERRUPTED'`。写成两个索引（`IS NULL` / `IS NOT NULL AND <> 'INTERRUPTED'`）
+     **覆盖不重叠**，「同 nonce 已 COMMIT 之后再直投 START」两条都不拦 —— 共享契约套件里
+     `同 nonce 已 COMMIT 拒绝直投` 先红才逼出单索引写法。
+   - **迁移带原 runId，可重入，验完才归档**：`runId` 与 `run-archive.jsonl` 的
+     `EngineRunLink.intentRunId` 是**同一批号**，新库从 1 发号会让新意向与历史 link 同号异义
+     （`recordsOfIntent(3)` 把上辈子的执行当成这次意向的历史）。导入包在一个事务里，成功且
+     验完才把 jsonl 改名 `intent-log.jsonl.migrated`（不删）；失败**响亮失败**并回落 jsonl，
+     老日志原样在原处。
+   - **打开失败如实回落 jsonl**：原因经 `AppShellKit.IntentStoreChoice.fallbackReason` 随装配
+     日志输出。与 `images`/`dialogs` 同一条「缺件不伪造」纪律 —— 回落是明说的降级，不是静默换引擎。
+   - **本批显式排除：保留期 / 清理策略**。日志仍**只追加、从不清理**，体积随 run 数线性增长
+     （每次 run 恒定两条行，已无冗余可压）。老终态行、老 nonce 能否丢会直接动到 §8.5 的幂等
+     锚点（丢了老 nonce = 重投会重放副作用），**属另一件事，本批不碰、未拍板**，入池 backlog。
+
 2026-10-08 拍板（批 76：来源分级裁定不做；用户裁定）：
 
 45. **不做「内置 / 自写 / 第三方 / 打包」的来源分级**：四档枚举（`TrustTier`）与注入缝
