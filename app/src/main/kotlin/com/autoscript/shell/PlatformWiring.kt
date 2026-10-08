@@ -3,11 +3,14 @@ package com.autoscript.shell
 import android.content.Context
 import com.autoscript.domain.automation.ImageAnalyzer
 import com.autoscript.domain.automation.InputChannel
+import com.autoscript.domain.automation.MediaProjectionSessions
 import com.autoscript.domain.bridge.NamespaceHandler
 import com.autoscript.domain.system.DialogHost
+import com.autoscript.platform.capabilities.device.AndroidMediaProjectionSessions
 import com.autoscript.platform.capabilities.dialogs.AndroidDialogHost
 import com.autoscript.platform.capabilities.screen.AndroidFrameProducer
 import com.autoscript.platform.capabilities.screen.AndroidGestureInput
+import com.autoscript.platform.capabilities.screen.MediaProjectionSource
 import com.autoscript.platform.capabilities.a11y.AndroidUiTree
 import com.autoscript.platform.capabilities.CapabilityNamespaces
 import com.autoscript.platform.capabilities.screen.ScreenshotSource
@@ -87,6 +90,12 @@ object PlatformWiring {
          * 脚本拿不到一个看不见像素的假分析器。字段在束里与其余六条同形（图像面是第七条）。
          */
         val imagesHandler: NamespaceHandler? = null,
+        /**
+         * 投屏会话的设备面（§9.2）：能力中心「屏幕采集」三态与 `screen.startCapturer`
+         * 的判据源。**缺省 null** = 本进程没有投屏通道（单测/JVM 装配）——
+         * 探针如实报"没有活动会话"，`startCapturer` 走兼容路径或如实不可用。
+         */
+        val projectionSessions: MediaProjectionSessions? = null,
     )
 
     /**
@@ -97,11 +106,12 @@ object PlatformWiring {
         spis: SystemSpis.Bundle,
         dialogs: DialogHost? = null,
         images: ImageAnalyzer? = null,
+        projection: MediaProjectionSessions? = null,
     ): Injection = Injection(
         // 树+动作同一个实例（句柄注册表共享，同 InMemoryUiTree 双身份形态）；
         // 事件流缺省 A11yEventRing.shared（服务 push / 树读同一环）。
         a11yHandler = a11yHandler(spis.shell),
-        screenHandler = screenHandler(images),
+        screenHandler = screenHandler(images, projection),
         systemHandlers = SystemHandlers(
             // 缺省 null（未提供）→ 如实 ERR_NOT_IMPLEMENTED；生产由 of() 传真宿主。
             dialogs = dialogs?.let { CapabilityNamespaces.dialogs(it) },
@@ -120,6 +130,7 @@ object PlatformWiring {
         // libopencv.so 到位后）；单测/无 native 时不喂 —— 桥对 images.* 如实
         // ERR_NOT_IMPLEMENTED，绝不塞一个看不见像素的假分析器。
         imagesHandler = images?.let { SystemNamespaces.images(it) },
+        projectionSessions = projection,
     )
 
     /**
@@ -157,10 +168,18 @@ object PlatformWiring {
      * screen 装配（§9.2 a11y 截图路径：语义节流/策略在 ScreenshotSource，设备面在 producer）。
      * [analyzer] 与 `images` 缝**同一个实例**（§18-8(b)）：截屏帧与 decode 帧同表同号段，
      * `images.findImage(screenFrame, decodeFrame)` 才成立；null 即退回本地帧表。
+     *
+     * **投屏会话**（[projection]）走 [MediaProjectionSource]，帧也经**同一个** analyzer
+     * 入表（`MediaProjectionSource` 的 ingest）；analyzer 缺位时它如实
+     * `ERR_NOT_IMPLEMENTED`（绝不本地发号 —— 两个帧源各从 1 发号会互相错放帧）。
+     * 同意征询（[AndroidScreenConsentBroker]）只在投屏接线时传入：未接线时 handler
+     * 走兼容路径，不会去碰同意口。
      */
-    private fun screenHandler(analyzer: ImageAnalyzer?): NamespaceHandler =
+    private fun screenHandler(analyzer: ImageAnalyzer?, projection: MediaProjectionSessions?): NamespaceHandler =
         CapabilityNamespaces.screen(
             ScreenshotSource(AndroidFrameProducer(), analyzer = analyzer),
+            projection = projection?.let { MediaProjectionSource(it, analyzer) },
+            consent = projection?.let { AndroidScreenConsentBroker() },
         )
 
     /**
@@ -203,6 +222,10 @@ object PlatformWiring {
         context: Context,
         overlayAvailable: () -> Boolean = { false },
         imageAnalyzer: ImageAnalyzer? = NativeImageAnalyzer.of(JniOps.loadOrNull()),
+        projection: MediaProjectionSessions? = AndroidMediaProjectionSessions(
+            context.applicationContext,
+            AndroidProjectionForeground.forApplication(context.applicationContext),
+        ),
     ): Injection {
         val app = context.applicationContext
         return inject(
@@ -211,6 +234,9 @@ object PlatformWiring {
             // §9.2 图像面真实现（native 管线到位后接上）：so 缺位 → 构造回 null →
             // 不喂分析器，桥对 images.* 如实 ERR_NOT_IMPLEMENTED（凑数防线）。
             images = imageAnalyzer,
+            // §9.2 投屏会话面：真设备实现（独立 mediaProjection FGS + VirtualDisplay
+            // + ImageReader）。单测传 null 走兼容路径 —— 同一函数真假可注入。
+            projection = projection,
         )
     }
 }
