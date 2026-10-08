@@ -18,7 +18,7 @@ export const WIRE = {
   "notification": { facade: 'notification.ts', methods: ['canPost', 'cancel', 'post'] },
   "npm": { facade: 'npm.ts', methods: ['approvals', 'audit', 'ci', 'dedupe', 'events', 'importOfflineBundle', 'importTarball', 'install', 'list', 'offlineGap', 'prune', 'remove', 'requestApprove', 'setRegistry'] },
   "power_manager": { facade: 'power.ts', methods: ['acquire', 'release', 'status'] },
-  "screen": { facade: 'images.ts', methods: ['capture', 'closeSession', 'nextFrame', 'recycle', 'startCapturer'] },
+  "screen": { facade: 'images.ts', methods: ['capture', 'closeSession', 'nextFrame', 'recycle', 'startCapturer', 'startRecording', 'stopRecording'] },
   "sensors": { facade: 'sensors.ts', methods: ['drain', 'isSupported', 'register', 'unregister', 'unregisterAll'] },
   "settings": { facade: 'settings.ts', methods: ['canWrite', 'getInt', 'getString', 'putInt', 'putString'] },
   "shell": { facade: 'extras.ts', methods: ['exec', 'shell'] },

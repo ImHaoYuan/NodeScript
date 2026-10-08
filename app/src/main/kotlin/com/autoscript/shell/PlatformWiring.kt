@@ -4,12 +4,15 @@ import android.content.Context
 import com.autoscript.domain.automation.ImageAnalyzer
 import com.autoscript.domain.automation.InputChannel
 import com.autoscript.domain.automation.MediaProjectionSessions
+import com.autoscript.domain.automation.ScreenConsentBroker
+import com.autoscript.domain.automation.ScreenRecordingSessions
 import com.autoscript.domain.bridge.NamespaceHandler
 import com.autoscript.domain.system.DialogHost
 import com.autoscript.platform.capabilities.device.AndroidMediaProjectionSessions
 import com.autoscript.platform.capabilities.dialogs.AndroidDialogHost
 import com.autoscript.platform.capabilities.screen.AndroidFrameProducer
 import com.autoscript.platform.capabilities.screen.AndroidGestureInput
+import com.autoscript.platform.capabilities.screen.MediaProjectionRecorder
 import com.autoscript.platform.capabilities.screen.MediaProjectionSource
 import com.autoscript.platform.capabilities.a11y.AndroidUiTree
 import com.autoscript.platform.capabilities.CapabilityNamespaces
@@ -30,6 +33,7 @@ import com.autoscript.platform.capabilities.a11y.A11yEventRing
 import com.autoscript.platform.capabilities.a11y.InMemoryUiTree
 import com.autoscript.platform.capabilities.a11y.SystemA11yBridge
 import com.autoscript.platform.editor.EditorHighlighters
+import java.nio.file.Path
 
 /**
  * 生产能力装配：`SystemSpis` + `CapabilityNamespaces` → `AppShellKit.assemble` 的注入束
@@ -107,11 +111,25 @@ object PlatformWiring {
         dialogs: DialogHost? = null,
         images: ImageAnalyzer? = null,
         projection: MediaProjectionSessions? = null,
+        /**
+         * App 私有文件目录（录屏产物的落点根，§9.2 录屏腿）。**缺省 null = 不接录屏腿**
+         * （单测/JVM 装配）—— 那种装配下 `startRecording` 如实 `ERR_NOT_IMPLEMENTED`。
+         * 为什么不给一个像 `/tmp` 的缺省：那会让"忘了喂目录"变成"产物悄悄落到别处"，
+         * 而落点是契约的一部分（`ScriptPaths.recordingsDir`）。
+         */
+        filesDir: Path? = null,
+        /**
+         * 投屏同意口（§9.2）**替换用**：缺省 null = 生产实现 [AndroidScreenConsentBroker]
+         * （只在投屏接线时接）。JVM 上它必然拉不起系统对话框（`ScreenConsentHolder.host`
+         * 为 null），所以单测要验"录屏腿接通"就得能换一个恒同意的替身 ——
+         * 与 `images`/`projection` 同一条"同一函数真假可注入"纪律，不给测试另开装配路径。
+         */
+        consent: ScreenConsentBroker? = null,
     ): Injection = Injection(
         // 树+动作同一个实例（句柄注册表共享，同 InMemoryUiTree 双身份形态）；
         // 事件流缺省 A11yEventRing.shared（服务 push / 树读同一环）。
         a11yHandler = a11yHandler(spis.shell),
-        screenHandler = screenHandler(images, projection),
+        screenHandler = screenHandler(images, projection, filesDir, consent),
         systemHandlers = SystemHandlers(
             // 缺省 null（未提供）→ 如实 ERR_NOT_IMPLEMENTED；生产由 of() 传真宿主。
             dialogs = dialogs?.let { CapabilityNamespaces.dialogs(it) },
@@ -175,11 +193,22 @@ object PlatformWiring {
      * 同意征询（[AndroidScreenConsentBroker]）只在投屏接线时传入：未接线时 handler
      * 走兼容路径，不会去碰同意口。
      */
-    private fun screenHandler(analyzer: ImageAnalyzer?, projection: MediaProjectionSessions?): NamespaceHandler =
+    private fun screenHandler(
+        analyzer: ImageAnalyzer?,
+        projection: MediaProjectionSessions?,
+        filesDir: Path?,
+        consent: ScreenConsentBroker? = null,
+    ): NamespaceHandler =
         CapabilityNamespaces.screen(
             ScreenshotSource(AndroidFrameProducer(), analyzer = analyzer),
             projection = projection?.let { MediaProjectionSource(it, analyzer) },
-            consent = projection?.let { AndroidScreenConsentBroker() },
+            consent = projection?.let { consent ?: AndroidScreenConsentBroker() },
+            // §9.2 录屏腿：与取帧腿**同一个设备对象**（两条腿共用一条 MediaProjection
+            // 会话账 —— 一台设备同时只有一条）。`projection` 为 null（单测/JVM）时不接线，
+            // `startRecording` 如实 ERR_NOT_IMPLEMENTED。
+            recorder = (projection as? ScreenRecordingSessions)?.let { sessions ->
+                filesDir?.let { MediaProjectionRecorder(sessions, it) }
+            },
         )
 
     /**
@@ -218,6 +247,11 @@ object PlatformWiring {
     fun powerManagerHandler(keeper: ForegroundKeeper): NamespaceHandler =
         PowerManagerNamespaceHandler(keeper.wakeLocks(), keeper)
 
+    /**
+     * `filesDir` 缺省 = App 私有文件目录（§9.2 录屏产物落点根，实际落点是
+     * `ScriptPaths.recordingsDir(filesDir, projectId)`）；传 null = 不接录屏腿
+     * （那种装配下 `screen.startRecording` 如实 `ERR_NOT_IMPLEMENTED`）。
+     */
     fun of(
         context: Context,
         overlayAvailable: () -> Boolean = { false },
@@ -226,6 +260,8 @@ object PlatformWiring {
             context.applicationContext,
             AndroidProjectionForeground.forApplication(context.applicationContext),
         ),
+        /** 录屏产物落点根（§9.2 录屏腿）= App 私有文件目录。 */
+        filesDir: Path? = context.applicationContext.filesDir.toPath(),
     ): Injection {
         val app = context.applicationContext
         return inject(
@@ -237,6 +273,7 @@ object PlatformWiring {
             // §9.2 投屏会话面：真设备实现（独立 mediaProjection FGS + VirtualDisplay
             // + ImageReader）。单测传 null 走兼容路径 —— 同一函数真假可注入。
             projection = projection,
+            filesDir = filesDir,
         )
     }
 }

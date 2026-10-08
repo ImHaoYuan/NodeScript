@@ -47,6 +47,27 @@ class AuthenticatedRunContext(
     @Volatile
     var resources: ConnectionResourceRegistry = ConnectionResourceRegistry()
 
+    /**
+     * 本次执行的项目号（§9.6 × §9.2）：**由认证点从 lease 装填**（`RunIdentityRegistry.authenticate`），
+     * 与 [capabilityMask] 同一条「不可自报」纪律 —— 它**不是** wire 字段，脚本改不了。
+     *
+     * 为什么需要一个字段而不是让调用方从 payload 取：录屏产物的落点是
+     * `ScriptPaths.recordingsDir(filesDir, projectId)`（§9.2 录屏腿），而 payload 里的
+     * `projectId` 是**脚本可影响的字段** —— 拿它拼路径等于让脚本决定往哪个项目目录写文件
+     * （写进别人的项目、或配合 `..` 越界）。落点必须由宿主一侧的事实决定，这个字段就是那份事实。
+     *
+     * **缺省空串 = 不知道**：调用方（录屏 handler）据此如实 `ERR_PERMISSION_DENIED`，
+     * **绝不套一个默认项目名** —— 那会把产物静默写进某个项目（"写对了没人知道，写错了也
+     * 没人知道"）。所以空串的失败方向是**拒**，与 [resources] 缺省空注册表同一条思路。
+     *
+     * 为什么是可变字段而不是构造参数：构造点（[RunIdentityRegistry.authenticate]）已经有
+     * 项目号（lease 上就有），但把它做成必填参数会让 57 处测试/JVM 直调构造点全部改签名，
+     * 而那些调用点**不开录屏会话**、也确实没有项目号可言。默认空串让它们照旧编译，
+     * 代价只是"它们开不了录屏"—— 那正是诚实的结果。
+     */
+    @Volatile
+    var projectId: String = ""
+
     init {
         require(engineRunId > 0) { "engineRunId 必须 > 0（0 仅供宿主直写日志）" }
         require(connectionId > 0) { "connectionId 必须 > 0" }

@@ -4,6 +4,7 @@ import com.autoscript.domain.automation.FrameSource
 import com.autoscript.domain.automation.InputProvider
 import com.autoscript.domain.automation.InputChannel
 import com.autoscript.domain.automation.ScreenConsentBroker
+import com.autoscript.domain.automation.ScreenRecordingController
 import com.autoscript.domain.automation.UiActionExecutor
 import com.autoscript.domain.automation.UiEventStream
 import com.autoscript.domain.automation.UiNodeTreeReader
@@ -70,8 +71,14 @@ object CapabilityNamespaces {
         source: FrameSource,
         projection: MediaProjectionCapturer? = null,
         consent: ScreenConsentBroker? = null,
+        /**
+         * 录屏腿（§9.2）：与 [projection] 并列的可选缝。缺省 null = 未接线 →
+         * `startRecording` 如实 `ERR_NOT_IMPLEMENTED`（**绝不**退化成"录一段帧当视频"）。
+         * 生产装配给的是同一个设备对象（两条腿共用一条 MediaProjection 会话账）。
+         */
+        recorder: ScreenRecordingController? = null,
     ): NamespaceHandler {
-        return ScreenNamespaceHandler(source, projection, consent)
+        return ScreenNamespaceHandler(source, projection, consent, recorder)
     }
 
     /** `dialogs` 命名空间：`prompt`/`choose`（§9.4 BAL 安全路径）。 */
