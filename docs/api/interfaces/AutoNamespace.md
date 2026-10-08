@@ -1751,6 +1751,7 @@ status(opts?): Promise<{
 readonly screen: {
   capture: Promise<FrameSource>;
   startCapturer: Promise<ScreenCapturer>;
+  startRecording: Promise<ScreenRecorder>;
 };
 ```
 
@@ -1799,6 +1800,37 @@ open 时即做策略判定（锁屏等直接 Err，不发空会话）；`nextFra
 ##### Returns
 
 `Promise`\<`ScreenCapturer`\>
+
+#### startRecording()
+
+```ts
+startRecording(opts?): Promise<ScreenRecorder>;
+```
+
+会话式**录屏**（`ScreenRecorder`，§9.2 录屏腿）：与 [screen.startCapturer] 并列，
+同一条 MediaProjection 会话账、同一个 mediaProjection 前台类型，**输出是视频文件**。
+
+**一次性同意**：与 `startCapturer` 走同一个系统同意口，API 34+ 每会话重新征询 ——
+用户取消 → `ERR_CAPTURE_DENIED`（**不重试、不静默改用截屏**：那会让脚本以为在录屏，
+实际拿到的是节流帧）。**用户撤销 / 系统停止时不自动续期**：`stop()` 回的
+`completed=false` 与后续调用如实报错，由脚本决定要不要重新征询。
+
+落点由宿主按本次执行的项目号算（`files/scripts/<projectId>/.recordings/`），
+**开的时候就回** `path`：脚本崩了之后文件仍会被框架收口 finalize，路径若只在
+`stop()` 回，那条产物就成了"存在但没人知道在哪"。
+
+##### Parameters
+
+| Parameter | Type |
+| ------ | ------ |
+| `opts` | \{ `height?`: `number`; `timeout?`: `number`; `width?`: `number`; \} |
+| `opts.height?` | `number` |
+| `opts.timeout?` | `number` |
+| `opts.width?` | `number` |
+
+##### Returns
+
+`Promise`\<`ScreenRecorder`\>
 
 ***
 
