@@ -27,16 +27,18 @@
 ```
 FrameSource (SPI)
   ├─ AccessibilityScreenshotSource  API34 takeScreenshotOfWindow · 333ms 节流 · 默认
-  └─ MediaProjectionSource          会话式 · createScreenCaptureIntent→同意→FGS(type mediaProjection)→createVirtualDisplay
-       └─ Surface → ImageReader(maxImages=2~3 对象池) → Frame 进入 libopencv.so
-            └─ 灰度/裁剪/缩放/旋转/找色/模板匹配/特征(ORB)/颜色查找 — 全 native, 0~1 拷贝
-               （计算核八算子全落：找色/模板匹配/灰度/裁剪/缩放/旋转/特征，P1 native 面收官；桥面八算法已全开（2026-09-29））
+  ├─ MediaProjectionSource          会话式 · createScreenCaptureIntent→同意→FGS(type mediaProjection)→createVirtualDisplay
+  │    └─ Surface → ImageReader(maxImages=2~3 对象池) → Frame 进入 libopencv.so
+  │         └─ 灰度/裁剪/缩放/旋转/找色/模板匹配/特征(ORB)/颜色查找 — 全 native, 0~1 拷贝
+  │            （计算核八算子全落：找色/模板匹配/灰度/裁剪/缩放/旋转/特征，P1 native 面收官；桥面八算法已全开（2026-09-29））
+  └─ MediaProjectionRecorder        会话式 · **同一条会话账**（同意 + FGS 同上），输出汇不同：Surface → MediaRecorder → 视频文件
+       （2026-10-08 批 77 落地；落点 files/scripts/<projectId>/.recordings/，路径**开的时候就回**）
 ```
 - 截图对象生命周期：JS `Image` 句柄 → native 帧句柄；`recycle()` 显式 + finalize 兜底；`dispose` tombstone 协议同 §7.4。
 - `FLAG_SECURE` → 分类错误（§7.6），不返回黑图（让脚本可判断）。
 - **实现注记已外迁**：Kotlin/native 落地链、八个算子的逐条记账与真机实测数字，逐字见 [`design-status.md` §9.2 实现注记](../design-status.md#实现注记自各分卷外迁逐字保留)。
   留此的口径要点：`images` 十方法 SPI 走 §12.2 第七条独立缝（native 侧 OpenCV 4.14.0 静态链接）；**两缝帧表已合一**（§18 第 8 项 (b)：`screen.capture` 与 `images.decode` 的帧同号段互认，
-  「帧不通用」纪律取消，落点是 §7.4 发号侧归一）；~~**仍缺** MediaProjection 高清会话（换 producer 即插，语义面不动）~~ **作废（2026-10-08，批 75）：会话式截屏已落地** —— `MediaProjectionSource` 经 `PlatformWiring.screenHandler` 接入，一次性同意 + API 34+ 顺序 + 幂等释放 + 会话资源随连接终结收口；**仍缺的是录屏**（`MediaRecorder` 全仓零引用）。
+  「帧不通用」纪律取消，落点是 §7.4 发号侧归一）；~~**仍缺** MediaProjection 高清会话（换 producer 即插，语义面不动）~~ **作废（2026-10-08，批 75）：会话式截屏已落地** —— `MediaProjectionSource` 经 `PlatformWiring.screenHandler` 接入，一次性同意 + API 34+ 顺序 + 幂等释放 + 会话资源随连接终结收口；**录屏（`MediaRecorder`）2026-10-08 批 77 亦已落地** —— `MediaProjectionRecorder` 与截屏腿并列、共用同一条投屏会话账（同意 + FGS），输出汇换成 `MediaRecorder` → 视频文件；桥面 `screen.startRecording/stopRecording` 两侧契约与生成物齐全。
 - MediaProjection **会话语义**：`capture()` 一次性授权会话（API34 每会话确认）；`reconnect` 不自动重试授权，由 PermissionCenter 引导用户重授权。
 - **两缝帧表已合一（§18 第 8 项 (b)，2026-09-26 落地）**：`screen.capture()` 出的帧与
   `images.decode` 出的帧现在**同号段、互认** —— 拿截屏帧当 `images.findImage()` 的
