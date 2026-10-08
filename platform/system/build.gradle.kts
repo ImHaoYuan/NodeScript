@@ -11,4 +11,6 @@ android {
 dependencies {
     implementation(project(":domain"))
     implementation(libs.kotlinx.coroutines.core)
+    // §8.5 契约套件（IntentStoreContract）：SqliteIntentStore 与 JournalFileStore 跑同一组用例。
+    testImplementation(testFixtures(project(":domain")))
 }

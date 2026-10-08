@@ -1,5 +1,6 @@
 package com.autoscript.appservice.scheduler.persist
 
+import com.autoscript.domain.scripts.IntentStore
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.nio.ByteBuffer
@@ -11,8 +12,10 @@ import java.nio.file.StandardOpenOption
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * jsonl 追加式意图存储（**当前全平台的生产实现**，含 Android —— `AppShellKit` 装的就是它；
- * §8.5 写的 SQLite 目标形态为何不在这里，见 [IntentStore] 的说明）。
+ * jsonl 追加式意图存储（**纯 JVM 侧的实现**：无 Android 环境、单测、以及 SQLite 打不开时
+ * 的装配回落都走它 —— 回落是明说的降级，见 `PlatformWiring.intentStore`）。
+ * §8.5 写的 SQLite 形态是 Android 生产的缺省实现（`SqliteIntentStore`，住 `:platform:system`）；
+ * 两者语义**逐条等价**，由 `:domain` 的 `IntentStoreContract` 同一组用例守着。
  *
  * 持久化形态：`<dir>/intent-log.jsonl`，每行一条 record：
  * - `{"op":"start","runId":N,...}` —— START 行
@@ -219,10 +222,13 @@ class JournalFileStore(private val dir: Path) : IntentStore {
         }
 
         fun seal(runId: Long, o: IntentStore.StoredOutcome, at: Long): String = buildString {
+            // detail 先落到局部 val：`StoredOutcome` 现在住 `:domain`（跨模块），
+            // Kotlin 不对跨模块的 public 属性做 smart cast。
+            val detail = o.detail
             append("""{"op":"seal","runId":""").append(runId)
             append(""","outcome":""").append(q(o.name))
             append(""","detail":""")
-            if (o.detail == null) append("null") else append(q(o.detail))
+            if (detail == null) append("null") else append(q(detail))
             append(""","at":""").append(at)
             append("}\n")
         }
